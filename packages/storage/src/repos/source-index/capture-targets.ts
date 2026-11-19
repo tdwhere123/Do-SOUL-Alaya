@@ -44,10 +44,17 @@ export function captureSourceIndexTargets(database: StorageDatabase, records: Sq
   if (sourceIndexBuildGuard(database, generation) !== null || generation.enumeration_complete || generation.status === "failed") {
     return { generation, added: 0, resources };
   }
-  const page = enumerateSourceIndexTargets(database, records, { ...input, ...generation }, resources, source =>
-    database.connection.prepare(`INSERT INTO source_index_targets
+  const page = enumerateSourceIndexTargets(database, records, { ...input, ...generation }, resources, source => {
+    const added = database.connection.prepare(`INSERT INTO source_index_targets
       (workspace_id,generation_id,root_key) VALUES(?,?,?) ON CONFLICT DO NOTHING`)
-      .run(input.workspaceId, input.generationId, source.root_key).changes);
+      .run(input.workspaceId, input.generationId, source.root_key).changes;
+    if (added > 0 && source.auxiliary !== undefined) {
+      database.connection.prepare(`INSERT INTO source_statement_relation_pending
+        (workspace_id,generation_id,root_key) VALUES(?,?,?) ON CONFLICT DO NOTHING`)
+        .run(input.workspaceId, input.generationId, source.root_key);
+    }
+    return added;
+  });
   database.connection.prepare(`UPDATE source_index_generations SET after_source_id=?, after_capsule_cursor=?, records_complete=?,
     enumeration_complete=?,status=?,reason=? WHERE workspace_id=? AND generation_id=?`)
     .run(page.after_source_id, page.after_capsule_cursor, page.records_complete ? 1 : 0,

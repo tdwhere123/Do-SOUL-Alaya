@@ -371,7 +371,8 @@ function exchangeAgreedHead(
 ): { sources: string[]; variants: ReturnType<typeof selectEvidenceWitnesses>["variants"] } {
   const variants = decided?.variants ?? [];
   const shouldPareto = association?.relations !== undefined && association.decision.refused === null
-    && association.decision.pareto !== "refused" && decided !== undefined && meter !== undefined;
+    && association.decision.pareto !== "refused" && decided !== undefined && meter !== undefined
+    && originalSources.length > 0 && association.statements > 0;
   if (agreedIds.length === 0 && !shouldPareto) return { sources: [...sources], variants: [...variants] };
   const protectedHeadIds = association !== undefined && association.decision.refused === null && decided !== undefined
     ? necessaryWitnessIds(association) : undefined;
@@ -381,10 +382,10 @@ function exchangeAgreedHead(
   const head = exchanged.slice(0, headLen), tail = exchanged.slice(headLen);
   if (shouldPareto && association !== undefined && meter !== undefined) {
     try {
-      const changed = exchangeStatementParetoSecondary({
+      const result = exchangeStatementParetoSecondary({
         association, pool: originalSources, head, tail, agreed: agreedIds, meter });
-      association.decision.pareto = "applied";
-      if (changed) association.decision.applied = true;
+      if (result.executed) association.decision.pareto = "applied";
+      if (result.swapped) association.decision.applied = true;
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted) || association.decision.pareto === "applied") throw error;
       association.decision.pareto = "refused";

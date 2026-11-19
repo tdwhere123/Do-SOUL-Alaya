@@ -15,7 +15,7 @@ export function reclaimVectorPage(database: StorageDatabase, workspaceId: string
   const result = { vectors: 0, relation_vectors: 0, windows: 0, targets: 0, generations: 0, resources, complete: false };
   database.reopenIfClosed();
   if (database.connection.inTransaction) throw new StorageError("CONFLICT", "vector reclamation requires a transaction-free caller");
-  if (budget.work < 7 || budget.native_bytes < 79) return result;
+  if (budget.work < 8 || budget.native_bytes < 87) return result;
   try { return database.connection.transaction(() => {
     const raw = database.connection.prepare(`SELECT g.generation_id,g.status FROM source_index_generations g
       LEFT JOIN source_index_epochs e ON e.workspace_id=g.workspace_id
@@ -36,12 +36,13 @@ export function reclaimVectorPage(database: StorageDatabase, workspaceId: string
     }
     const tables = [["source_index_vectors", "window_id", "vectors"],
       ["source_statement_relation_vectors", "root_key", "relation_vectors"],
+      ["source_statement_relation_pending", "root_key", "relation_vectors"],
       ["source_index_windows", "window_id", "windows"],
       ["source_index_targets", "root_key", "targets"]] as const;
     for (const [index, [table, key, count]] of tables.entries()) {
       const remainingRows = limit - result.vectors - result.relation_vectors - result.windows - result.targets;
       // Reserve the current/later probes and the final metadata deletion.
-      const remainingPhases = 5 - index;
+      const remainingPhases = 6 - index;
       const size = Math.min(remainingRows, budget.work - resources.work - remainingPhases,
         Math.floor((budget.native_bytes - resources.native_bytes) / 8));
       if (size < 1) return result;

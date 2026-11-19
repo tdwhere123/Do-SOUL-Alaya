@@ -200,9 +200,10 @@ export interface SourceIndexRepository {
     vector: SourceIndexStatementRelationVector, budget: SourceIndexBudget): SourceIndexGuardedWriteResult;
   readStatementRelationText?(workspaceId: string, generationId: string, rootKey: string,
     budget: SourceIndexBudget): SourceIndexStatementRelationTextRead;
-  /** Durable anti-join of statement-key targets still missing a relation overlay vector. */
+  /** Exact pending-queue seek of statement-key roots still missing a relation overlay vector. */
   nextStatementRelationOverlayTarget?(workspaceId: string, generationId: string, afterRootKey: string | null,
     budget: SourceIndexBudget): Readonly<{ status: "ready"; root_key: string | null; resources: SourceIndexResources }> |
+    Readonly<{ status: "resource_exhausted"; reason: string; resources: SourceIndexResources }> |
     Exclude<SourceIndexReadResult, { status: "ready" }>;
   activate(workspaceId: string, generationId: string): SourceIndexWriteResult;
   fail(workspaceId: string, generationId: string, reason: string): void;

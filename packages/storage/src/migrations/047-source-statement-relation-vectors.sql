@@ -27,3 +27,31 @@ AFTER INSERT ON source_index_invalidations BEGIN
     SELECT root_key FROM source_index_affected_roots WHERE workspace_id=NEW.workspace_id
       AND (record_id=NEW.record_id OR source_id=NEW.source_id));
 END;
+
+-- Exact statement-key overlay queue. Capture inserts only when auxiliary is
+-- present; LIKE matching of ordinary source_id values must never enqueue.
+CREATE TABLE source_statement_relation_pending (
+  workspace_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  root_key TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, generation_id, root_key)
+);
+
+CREATE TRIGGER source_statement_relation_pending_generation_delete
+AFTER DELETE ON source_index_generations BEGIN
+  DELETE FROM source_statement_relation_pending
+    WHERE workspace_id=OLD.workspace_id AND generation_id=OLD.generation_id;
+END;
+
+CREATE TRIGGER source_statement_relation_pending_target_delete
+AFTER DELETE ON source_index_targets BEGIN
+  DELETE FROM source_statement_relation_pending
+    WHERE workspace_id=OLD.workspace_id AND generation_id=OLD.generation_id AND root_key=OLD.root_key;
+END;
+
+CREATE TRIGGER source_statement_relation_pending_invalidate
+AFTER INSERT ON source_index_invalidations BEGIN
+  DELETE FROM source_statement_relation_pending WHERE workspace_id=NEW.workspace_id AND root_key IN (
+    SELECT root_key FROM source_index_affected_roots WHERE workspace_id=NEW.workspace_id
+      AND (record_id=NEW.record_id OR source_id=NEW.source_id));
+END;

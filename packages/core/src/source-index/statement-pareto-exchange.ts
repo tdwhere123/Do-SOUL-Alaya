@@ -76,14 +76,16 @@ export function quoteStatementParetoExchange(roots: number, statements: number):
 export function exchangeStatementParetoSecondary(input: Readonly<{
   association: StatementAssociation; pool: readonly string[]; head: string[]; tail: string[];
   agreed: readonly string[]; meter: SourceSemanticResourceLedger;
-}>): boolean {
+}>): Readonly<{ executed: boolean; swapped: boolean }> {
   const { association, pool, head, tail, agreed, meter } = input;
   const relations = association.relations;
-  if (relations === undefined || pool.length === 0 || association.statements < 1) return false;
+  if (relations === undefined || pool.length === 0 || association.statements < 1) {
+    return { executed: false, swapped: false };
+  }
   const sizedRoots = Math.max(pool.length, association.roots.length);
   const quote = quoteStatementParetoExchange(sizedRoots, association.statements);
   meter.charge(quote.work_units, quote.memory_bytes, "statement relation witness exchange");
-  if (relations.every(row => row.every(value => value === null))) return false;
+  if (relations.every(row => row.every(value => value === null))) return { executed: true, swapped: false };
   const n = association.statements;
   const posMap = new Map(pool.map((id, i) => [id, i]));
   const index = new Map(association.roots.map((id, row) => [id, row]));
@@ -145,5 +147,5 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
       tryPlace(candidate, column);
     }
   }
-  return exchanged;
+  return { executed: true, swapped: exchanged };
 }

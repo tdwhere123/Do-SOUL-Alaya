@@ -46,6 +46,11 @@ export class SourceIndexLifecycle {
     return this.repository.begin(structuredClone(selection));
   }
 
+  public generation(workspaceId: string, generationId: string) {
+    BoundedIdSchema.parse(workspaceId);
+    return this.repository.generation(workspaceId, generationId);
+  }
+
   public capture(workspaceId: string, generationId: string, limit: number, budget: SourceIndexBudget) {
     return this.repository.capturePage(workspaceId, generationId, limit, structuredClone(budget));
   }

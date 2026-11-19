@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import { hashContentDigest, prepareSourceIndexDocument } from "@do-soul/alaya-protocol";
 import { encodeEmbeddingBlob } from "../../../repos/memory/embedding-vector-validity.js";
-import { BUDGET, CLOCK, WORKSPACE, configuration, fieldSha256, fixture, type Fixture } from "./source-index-fixture.js";
+import { BUDGET, CLOCK, WORKSPACE, configuration, fieldSha256, fixture, publishSource, type Fixture } from "./source-index-fixture.js";
 import { contextOf, publishMessages, publishStatement } from "./source-template-fixture.js";
 
 const opened: Fixture[] = [];
@@ -160,6 +160,47 @@ it("returns unknown when statement relation text costs more work than the remain
   const { environment, generation, source } = setupStatement();
   expect(environment.index.readStatementRelationText(WORKSPACE, generation.generation_id, source.root_key,
     { work: 2, native_bytes: 10_000 })).toMatchObject({ status: "unknown", reason: "statement_relation_text_read_budget" });
+});
+
+it("does not queue an ordinary source_record whose source_id contains :statement:", () => {
+  const environment = fixture(); opened.push(environment);
+  publishSource(environment, "plain body", "foo:statement:bar");
+  const generation = environment.index.begin(environment.index.select(WORKSPACE, configuration()));
+  environment.index.capturePage(WORKSPACE, generation.generation_id, 8, BUDGET);
+  const targets = environment.index.listTargets(WORKSPACE, generation.generation_id, null, 8);
+  expect(targets.some(row => row.auxiliary !== undefined)).toBe(false);
+  expect(targets.some(row => row.source_id?.includes(":statement:"))).toBe(true);
+  expect(environment.database.connection.prepare(
+    "SELECT count(*) AS n FROM source_statement_relation_pending").get()).toEqual({ n: 0 });
+  const next = environment.index.nextStatementRelationOverlayTarget(WORKSPACE, generation.generation_id, null, BUDGET);
+  expect(next).toMatchObject({ status: "ready", root_key: null, resources: { work: 2 } });
+});
+
+it("refuses overlay target lookup before transferring a root_key when work or native bytes cannot cover the two reads", () => {
+  const { environment, generation, source } = setupStatement();
+  expect(source.root_key.length).toBeGreaterThan(1);
+  expect(environment.database.connection.prepare(
+    "SELECT count(*) AS n FROM source_statement_relation_pending").get()).toEqual({ n: 1 });
+  expect(environment.index.nextStatementRelationOverlayTarget(WORKSPACE, generation.generation_id, null,
+    { work: 1, native_bytes: 10_000 })).toMatchObject({
+    status: "resource_exhausted", reason: "overlay_target_read_budget", resources: { work: 0, native_bytes: 0 } });
+  const tiny = environment.index.nextStatementRelationOverlayTarget(WORKSPACE, generation.generation_id, null,
+    { work: 10, native_bytes: 1 });
+  expect(tiny).toMatchObject({ status: "resource_exhausted", reason: "overlay_target_read_budget" });
+  expect(tiny).not.toHaveProperty("root_key");
+});
+
+it("dequeues a pending overlay row when the vector is accepted", () => {
+  const { environment, generation, source, digest } = setupStatement();
+  expect(environment.database.connection.prepare(
+    "SELECT count(*) AS n FROM source_statement_relation_pending").get()).toEqual({ n: 1 });
+  expect(environment.index.writeStatementRelationVector(WORKSPACE, generation.generation_id, {
+    root_key: source.root_key, input_digest: digest, embedding: VECTOR, token_count: 2
+  })).toEqual({ status: "accepted" });
+  expect(environment.database.connection.prepare(
+    "SELECT count(*) AS n FROM source_statement_relation_pending").get()).toEqual({ n: 0 });
+  expect(environment.index.nextStatementRelationOverlayTarget(WORKSPACE, generation.generation_id, null, BUDGET))
+    .toMatchObject({ status: "ready", root_key: null, resources: { work: 2 } });
 });
 
 it("reclaims overlay rows with the retired generation", () => {

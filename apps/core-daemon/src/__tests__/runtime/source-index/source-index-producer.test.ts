@@ -285,6 +285,38 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     expect(generation.target_count).toBeGreaterThanOrEqual(3);
   });
 
+  it("advances overlay cursors past an unfillable statement so a later root is not starved", async () => {
+    const environment = fixture(); environments.push(environment);
+    const published = publishMessages(environment, [
+      { role: "user", text: "first statement body" },
+      { role: "user", text: "second statement body" }
+    ]);
+    publishStatement(environment, published, "relation-fair-t1", 0);
+    publishStatement(environment, published, "relation-fair-t2", 1);
+    const attempted: string[] = [];
+    const original = SourceIndexBackfill.prototype.stepRelationOverlay;
+    vi.spyOn(SourceIndexBackfill.prototype, "stepRelationOverlay").mockImplementation(async function (this: SourceIndexBackfill, input) {
+      attempted.push(input.root_key);
+      if (attempted[0] === input.root_key && attempted.filter(key => key === input.root_key).length === 1) {
+        return {
+          status: "failed", reason: "overlay_failed", accepted_vectors: 0,
+          resources: {
+            work: 0, native_bytes: 0, native_accounting: "complete" as const, sql_internal_work: "unknown" as const,
+            model_inputs_submitted: 0, model_input_bytes_submitted: 0,
+            token_count_observed: 0, inputs_without_token_count: 0, model_execution_work: "not_run" as const
+          }
+        };
+      }
+      return original.call(this, input);
+    });
+    const { bind } = labeledBind({ max_input_tokens: 32 });
+    const producer = producerFor(environment, bind, {
+      maxRootsPerPass: 1, maxCapturePages: 8, modelInputs: 32, inputBytes: 256_000
+    });
+    for (let pass = 0; pass < 40 && new Set(attempted).size < 2; pass++) await producer.runPass();
+    expect(new Set(attempted).size).toBeGreaterThanOrEqual(2);
+  });
+
   it("fails observable state after inference throws past an accepted vector and resumes without re-inferring it", async () => {
     const environment = fileEnvironment();
     publishSource(environment, "first source body", "source-a");

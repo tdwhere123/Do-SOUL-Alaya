@@ -145,6 +145,7 @@ export class SourceIndexProducer {
   private vectorFirstOnSingleSlot = false;
   // Transient scheduling hints only; every pass rechecks the durable generation/pending windows.
   private readonly targetCursors = new Map<string, { generation: string; after: string | null }>();
+  private readonly overlayCursors = new Map<string, { generation: string; after: string | null }>();
 
   public constructor(private readonly input: SourceIndexProducerInput) {
     this.repository = new SqliteSourceIndexRepository(input.database, fieldContractSha256);
@@ -288,6 +289,7 @@ export class SourceIndexProducer {
         if (pass.signal.aborted) return;
         this.lifecycle.unbind(workspace);
         this.targetCursors.delete(workspace);
+        this.overlayCursors.delete(workspace);
       } else {
         const outcome = await this.reconcileWorkspace(workspace, tracked, pass);
         if (outcome !== null) pass.outcome = combinePassOutcome(pass.outcome, outcome);
@@ -439,7 +441,7 @@ export class SourceIndexProducer {
       if (pending.status === "ready" && pending.ordinals.length === 0) continue;
       const result = await this.backfill.step({ selection, generation_id: generationId,
         root_key: target.root_key, binding, budget: remainingBudget(pass.limits, pass.spent),
-        deadline_ms: pass.deadline, signal: pass.signal, include_relation_overlay: false });
+        deadline_ms: pass.deadline, signal: pass.signal });
       pass.chargeNative(result.resources);
       pass.spent.model_inputs += result.resources.model_inputs_submitted;
       pass.spent.input_bytes += result.resources.model_input_bytes_submitted;
@@ -458,12 +460,22 @@ export class SourceIndexProducer {
   /** Optional relation overlay runs only after the generation is already active. */
   private async overlayActiveRelations(selection: SourceIndexSelection, generationId: string,
     binding: ReadyBinding, pass: Pass): Promise<void> {
-    for (let after: string | null = null; this.hasBudget(pass) && pass.visitedRoots < pass.limits.maxRootsPerPass;) {
+    const workspace = selection.workspace_id;
+    let cursor = this.overlayCursors.get(workspace);
+    if (cursor?.generation !== generationId) {
+      cursor = { generation: generationId, after: null };
+      this.overlayCursors.set(workspace, cursor);
+    }
+    while (this.hasBudget(pass) && pass.visitedRoots < pass.limits.maxRootsPerPass) {
       const pending = this.lifecycle.nextStatementRelationOverlayTarget(
-        selection.workspace_id, generationId, after, remainingBudget(pass.limits, pass.spent));
+        workspace, generationId, cursor.after, remainingBudget(pass.limits, pass.spent));
       pass.chargeNative(pending.resources);
-      if (pending.status !== "ready" || pending.root_key === null) return;
-      after = pending.root_key;
+      if (pending.status !== "ready") return;
+      if (pending.root_key === null) {
+        this.overlayCursors.delete(workspace);
+        return;
+      }
+      cursor.after = pending.root_key;
       pass.visitedRoots++;
       try {
         const result = await this.backfill.stepRelationOverlay({

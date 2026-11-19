@@ -93,7 +93,8 @@ describe("injective condition assignment and secondary exchange", () => {
       spans: roots.map((_, i) => [[i, i + 5] as const]),
       relations: roots.map(root => [root === "f" ? 0.4 : root === "d" || root === "c" ? 0.9 : root === "b" ? 0.5 : null]) });
     const head = ["a", "b", "c", "d", "e"], tail = ["f", "g", "h"];
-    expect(exchangeStatementParetoSecondary({ association: guarded, pool: roots, head, tail, agreed: [], meter: meter() })).toBe(false);
+    expect(exchangeStatementParetoSecondary({ association: guarded, pool: roots, head, tail, agreed: [], meter: meter() }))
+      .toEqual({ executed: true, swapped: false });
     expect(head).toEqual(["a", "b", "c", "d", "e"]);
   });
 
@@ -102,7 +103,8 @@ describe("injective condition assignment and secondary exchange", () => {
       spans: roots.map((_, i) => [[i, i + 5] as const]),
       relations: roots.map(root => [root === "h" ? 0.95 : root === "e" ? 0.2 : root === "b" ? 0.5 : null]) });
     const head = ["a", "b", "c", "d", "e"], tail = ["f", "g", "h"];
-    expect(exchangeStatementParetoSecondary({ association, pool: roots, head, tail, agreed: [], meter: meter() })).toBe(true);
+    expect(exchangeStatementParetoSecondary({ association, pool: roots, head, tail, agreed: [], meter: meter() }))
+      .toEqual({ executed: true, swapped: true });
     expect(head.includes("h")).toBe(true);
     expect(head.includes("e")).toBe(false);
     const alreadyHead = coverage(1, { b: [0.9], d: [0.8], e: [0.1] }, {
@@ -110,7 +112,8 @@ describe("injective condition assignment and secondary exchange", () => {
       relations: roots.map(root => [root === "d" ? 0.95 : root === "e" ? 0.2 : root === "b" ? 0.5 : null]) });
     const head2 = ["a", "b", "c", "d", "e"], tail2 = ["f", "g", "h"];
     expect(exchangeStatementParetoSecondary({
-      association: alreadyHead, pool: roots, head: head2, tail: tail2, agreed: [], meter: meter() })).toBe(false);
+      association: alreadyHead, pool: roots, head: head2, tail: tail2, agreed: [], meter: meter() }))
+      .toEqual({ executed: true, swapped: false });
   });
 
   it("keeps surviving derived variants contiguous after slot 5 when a secondary swap enters the head", () => {
@@ -264,8 +267,27 @@ describe("injective condition assignment and secondary exchange", () => {
     }));
     const association = coverage(1, { a: [0.9] }, { relations });
     expect(exchangeStatementParetoSecondary({
-      association, pool: [], head: [], tail: [], agreed: [], meter: meter(0) })).toBe(false);
+      association, pool: [], head: [], tail: [], agreed: [], meter: meter(0) }))
+      .toEqual({ executed: false, swapped: false });
     expect(scanned).toBe(false);
+  });
+
+  it("leaves Pareto not_run when native field access has an empty positioned source pool", () => {
+    const association = coverage(1, { a: [0.9] }, {
+      relations: roots.map(() => [0.5]),
+      decision: { refused: null, applied: false, pareto: "not_run" } });
+    const memory = [{ reference: "memory", root_key: "m", native_rank: 1 }];
+    const lanes: NativeRouteLane[] = ["original-lexical", "original-vector", "hint-lexical", "hint-vector"].map(lane => ({
+      lane: lane as NativeRouteLane["lane"], scope: "q", state: "measured-empty" as const }));
+    orderNativeFieldAccess({
+      lanes,
+      memory: { lane: "memory-lexical", scope: "q", state: "exact-captured", occurrences: memory },
+      pool: [{ record_id: "m", catalog_position: null }],
+      acquired_root_keys: ["m"],
+      associations: [{ occurrence_reference: "memory", root_key: "m", record_id: "m" }],
+      unvisited_sources: true, association
+    }, meter());
+    expect(association.decision.pareto).toBe("not_run");
   });
 
   it("charges the association-root quote before indexing a partial pool", () => {

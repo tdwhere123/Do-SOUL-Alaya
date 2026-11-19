@@ -112,19 +112,24 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
     let backfillAxis: NonNullable<IndexedSource["vector"]> = [0, 1, 0];
     const backfillBinding = simulatedBinding(selection,
       text => typeof backfillAxis === "function" ? backfillAxis(text) : backfillAxis, outsideTransaction);
+    const backfill = new SourceIndexBackfill(lifecycle);
+    const backfillInput = { selection, generation_id: generation.generation_id, binding: backfillBinding,
+      budget: { ...INDEX_BUDGET, model_inputs: 128, input_bytes: 1_000_000, max_body_bytes: 1_000_000 },
+      deadline_ms: Date.now() + 60_000, signal: new AbortController().signal };
     for (const target of targets) {
       // Bind the root's authored axis even when different roots have identical window text.
       backfillAxis = sources.find(source => source.id === target.source_id)?.vector ?? [0, 1, 0];
-      const result = await new SourceIndexBackfill(lifecycle).step({ selection, generation_id: generation.generation_id,
-        root_key: target.root_key, binding: backfillBinding, budget: { ...INDEX_BUDGET,
-          model_inputs: 128, input_bytes: 1_000_000, max_body_bytes: 1_000_000 },
-        deadline_ms: Date.now() + 60_000, signal: new AbortController().signal });
+      const result = await backfill.step({ ...backfillInput, root_key: target.root_key });
       const windows = Math.ceil(target.body_bytes / configuration.profile.window_bytes);
-      const relationInputs = target.auxiliary === undefined ? 0 : 1;
       expect(result).toMatchObject({ status: "root_complete", accepted_vectors: windows,
-        resources: { model_inputs_submitted: windows + relationInputs, model_execution_work: "unknown", native_accounting: "complete" } });
+        resources: { model_inputs_submitted: windows, model_execution_work: "unknown", native_accounting: "complete" } });
     }
     expect(lifecycle.publish(WS, generation.generation_id)).toEqual({ status: "accepted" });
+    for (const target of targets.filter(row => row.auxiliary !== undefined)) {
+      backfillAxis = sources.find(source => source.id === target.source_id)?.vector ?? [0, 1, 0];
+      expect(await backfill.stepRelationOverlay({ ...backfillInput, root_key: target.root_key, deadline_ms: Date.now() + 60_000 }))
+        .toMatchObject({ status: "root_complete" });
+    }
     expect(repository.generation(WS, generation.generation_id)).toMatchObject({ status: "ready",
       enumeration_complete: true, target_count: targets.length, completed_count: targets.length });
     // Later real admissions make coverage partial without fabricating or changing the active generation.

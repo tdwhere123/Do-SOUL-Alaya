@@ -17,6 +17,13 @@ import { QueryReadMeter } from "./query-read-meter.js";
 import { readSourceIndexGeneration, readSourceIndexQueryState, sourceIndexBuildGuard } from "./generation-state.js";
 
 const RELATION_TABLE = "source_statement_relation_vectors";
+const PENDING_TABLE = "source_statement_relation_pending";
+
+function dequeueStatementRelationPending(database: StorageDatabase, workspaceId: string, generationId: string,
+  rootKey: string): void {
+  database.connection.prepare(`DELETE FROM ${PENDING_TABLE} WHERE workspace_id=? AND generation_id=? AND root_key=?`)
+    .run(workspaceId, generationId, rootKey);
+}
 
 function rejected(reason: Extract<SourceIndexGuardedWriteResult, { status: "rejected" }>["reason"],
   resources: SourceIndexGuardedWriteResult["resources"]): SourceIndexGuardedWriteResult {
@@ -51,7 +58,10 @@ export function readStatementRelationText(database: StorageDatabase, records: Sq
   assertIndexBudget(budget);
   const resources = { work: 0, native_bytes: 0 };
   const unknown = (reason: string): SourceIndexStatementRelationTextRead => ({ status: "unknown", reason, resources });
-  const unavailable = (reason: string): SourceIndexStatementRelationTextRead => ({ status: "unavailable", reason, resources });
+  const unavailable = (reason: string, dequeue = false): SourceIndexStatementRelationTextRead => {
+    if (dequeue) dequeueStatementRelationPending(database, workspaceId, generationId, rootKey);
+    return { status: "unavailable", reason, resources };
+  };
   const need = (work: number, bytes: number) => {
     if (resources.work + work > budget.work || resources.native_bytes + bytes > budget.native_bytes) {
       return unknown("statement_relation_text_read_budget");
@@ -67,19 +77,19 @@ export function readStatementRelationText(database: StorageDatabase, records: Sq
   if (targetBudget !== null) return targetBudget;
   const source = statementTarget(database, workspaceId, generationId, rootKey);
   resources.work++;
-  if (source === null || source.auxiliary === undefined) return unavailable("missing_target");
+  if (source === null || source.auxiliary === undefined) return unavailable("missing_target", true);
   const guard = guardSourceIndexTarget(database, records, source, {
     work: budget.work - resources.work, native_bytes: budget.native_bytes - resources.native_bytes });
   resources.work += guard.resources.work;
   resources.native_bytes += guard.resources.native_bytes;
   if (guard.status !== "ready") {
-    return guard.reason === "read_budget" ? unknown("statement_relation_text_read_budget") : unavailable(guard.reason);
+    return guard.reason === "read_budget" ? unknown("statement_relation_text_read_budget") : unavailable(guard.reason, true);
   }
   const gistBudget = need(1, 0);
   if (gistBudget !== null) return gistBudget;
   const gist = relationFromGist(database, source.target.workspace_id, source.auxiliary.artifact_id, sha256);
   resources.work++;
-  if (gist === null) return unavailable("statement_relation_unavailable");
+  if (gist === null) return unavailable("statement_relation_unavailable", true);
   const bytes = Buffer.byteLength(gist.relation);
   const readyBudget = need(0, bytes);
   if (readyBudget !== null) return readyBudget;
@@ -127,37 +137,49 @@ export function writeStatementRelationVector(database: StorageDatabase, records:
         || !readBufferField(persisted, "embedding_blob").equals(blob)) {
       throw new StorageError("CONFLICT", "statement relation vector retry differs from its persisted result");
     }
+    dequeueStatementRelationPending(database, input.workspaceId, input.generationId, value.root_key);
     return { status: "accepted", resources };
   }
   database.connection.prepare(`INSERT INTO ${RELATION_TABLE}
     (workspace_id,generation_id,root_key,input_digest,dimensions,embedding_blob,token_count) VALUES(?,?,?,?,?,?,?)`)
     .run(input.workspaceId, input.generationId, source.root_key, value.input_digest, profile.dimensions, blob, value.token_count);
+  dequeueStatementRelationPending(database, input.workspaceId, input.generationId, source.root_key);
   return { status: "accepted", resources };
 }
 
 function overlayTableMissing(error: unknown): boolean {
-  return error instanceof Error && /no such table: source_statement_relation_vectors/u.test(error.message);
+  return error instanceof Error && /no such table: source_statement_relation_(vectors|pending)/u.test(error.message);
 }
 
+type OverlayTargetRead = Readonly<{ status: "ready"; root_key: string | null; resources: SourceIndexResources }> |
+  Readonly<{ status: "resource_exhausted"; reason: string; resources: SourceIndexResources }> |
+  Exclude<SourceIndexReadResult, { status: "ready" }>;
+
 export function nextStatementRelationOverlayTarget(database: StorageDatabase, workspaceId: string, generationId: string,
-  afterRootKey: string | null, budget: SourceIndexBudget): Readonly<{ status: "ready"; root_key: string | null;
-    resources: SourceIndexResources }> | Exclude<SourceIndexReadResult, { status: "ready" }> {
+  afterRootKey: string | null, budget: SourceIndexBudget): OverlayTargetRead {
   BoundedIdSchema.parse(workspaceId);
   assertIndexBudget(budget);
   const resources = { work: 0, native_bytes: 0 };
-  if (budget.work < 1 || budget.native_bytes < 1) return { status: "partial", reason: "read_budget", resources };
+  if (budget.work < 2 || budget.native_bytes < 1) {
+    return { status: "resource_exhausted", reason: "overlay_target_read_budget", resources };
+  }
   try {
     const generation = readSourceIndexGeneration(database, workspaceId, generationId);
     resources.work++;
     if (generation === null) return { status: "unbound", reason: "missing_generation", resources };
-    const raw = cachedReadStatement(database, `SELECT t.root_key FROM source_index_targets t
-      WHERE t.workspace_id = ? AND t.generation_id = ? AND t.root_key > ? AND t.root_key LIKE '%:statement:%'
-      AND NOT EXISTS (SELECT 1 FROM source_statement_relation_vectors r
-        WHERE r.workspace_id = t.workspace_id AND r.generation_id = t.generation_id AND r.root_key = t.root_key)
-      ORDER BY t.root_key LIMIT 1`).get(workspaceId, generationId, afterRootKey ?? "");
-    const root_key = raw === undefined ? null
-      : readStringField(readRecord(raw, "statement relation overlay target"), "root_key");
-    if (root_key !== null) resources.native_bytes += Buffer.byteLength(root_key);
+    const raw = cachedReadStatement(database, `SELECT CASE WHEN octet_length(root_key) <= ? THEN root_key ELSE NULL END AS root_key,
+      octet_length(root_key) AS key_bytes FROM ${PENDING_TABLE}
+      WHERE workspace_id = ? AND generation_id = ? AND root_key > ? ORDER BY root_key LIMIT 1`)
+      .get(budget.native_bytes, workspaceId, generationId, afterRootKey ?? "");
+    resources.work++;
+    if (raw === undefined) return { status: "ready", root_key: null, resources };
+    const row = readRecord(raw, "statement relation overlay target");
+    const keyBytes = readIntegerField(row, "key_bytes");
+    if (keyBytes > budget.native_bytes) {
+      return { status: "resource_exhausted", reason: "overlay_target_read_budget", resources };
+    }
+    const root_key = readStringField(row, "root_key");
+    resources.native_bytes += keyBytes;
     return { status: "ready", root_key, resources };
   } catch (error) {
     if (overlayTableMissing(error)) return { status: "ready", root_key: null, resources };

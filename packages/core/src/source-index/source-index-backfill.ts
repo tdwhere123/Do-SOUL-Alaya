@@ -21,12 +21,9 @@ export interface SourceIndexBackfillInput {
   /** Absolute wall-clock deadline, within the native timer range (at most 2^31-1 ms away). */
   readonly deadline_ms: number;
   readonly signal: AbortSignal;
-  /** Default true so standalone step() still overlays after key windows. Producer passes false. */
-  readonly include_relation_overlay?: boolean;
 }
 
-type CapturedInput = Omit<SourceIndexBackfillInput, "binding" | "include_relation_overlay"> & {
-  include_relation_overlay: boolean;
+type CapturedInput = Omit<SourceIndexBackfillInput, "binding"> & {
   binding: Readonly<{ status: "unsupported"; reason: string }> | Readonly<{
     status: "ready"; profile: SourceEmbeddingBinding["profile"]; profile_id: string;
     embed: SourceEmbeddingBinding["embedInputs"];
@@ -53,7 +50,7 @@ export class SourceIndexBackfill {
   }
 
   public async stepRelationOverlay(input: SourceIndexBackfillInput): Promise<SourceIndexBackfillResult> {
-    const captured = captureInput({ ...input, include_relation_overlay: true });
+    const captured = captureInput(input);
     return new CapturedRootStep(this.lifecycle, captured).runRelationOverlay();
   }
 }
@@ -89,6 +86,8 @@ class CapturedRootStep {
   public async runRelationOverlay(): Promise<SourceIndexBackfillResult> {
     const stopped = this.stop();
     if (stopped !== null) return stopped;
+    const generation = this.lifecycle.generation(this.input.selection.workspace_id, this.input.generation_id);
+    if (generation === null || generation.status !== "ready") return this.result("partial", "generation_not_active");
     const binding = this.input.binding;
     if (binding.status !== "ready") return this.result("unsupported", binding.reason);
     const deadline = new AbortController();
@@ -123,9 +122,6 @@ class CapturedRootStep {
       if (afterPending !== null) return afterPending;
       const ordinal = pending.ordinals[0];
       if (ordinal === undefined) {
-        if (this.input.include_relation_overlay) {
-          await this.embedStatementRelation(binding, prepared.document.source, signal);
-        }
         return this.result("root_complete", "no_pending_windows");
       }
       const window = prepared.document.windows[ordinal];
@@ -269,21 +265,19 @@ function captureInput(input: SourceIndexBackfillInput): CapturedInput {
       [budget.work, budget.native_bytes, budget.model_inputs, budget.input_bytes, budget.max_body_bytes]
         .some(value => !Number.isSafeInteger(value) || value < 0) ||
       budget.max_body_bytes > SOURCE_INDEX_MAX_BODY_BYTES || !Number.isSafeInteger(deadline_ms) ||
-      deadline_ms - Date.now() > 2147483647 || !(input.signal instanceof AbortSignal) ||
-      input.include_relation_overlay !== undefined && typeof input.include_relation_overlay !== "boolean") {
+      deadline_ms - Date.now() > 2147483647 || !(input.signal instanceof AbortSignal)) {
     throw new CoreError("VALIDATION", "Invalid Source backfill target or execution limits");
   }
-  const include_relation_overlay = input.include_relation_overlay !== false;
   const supplied = input.binding;
   if (supplied.status === "unsupported") return { selection, generation_id, root_key, budget, deadline_ms,
-    include_relation_overlay, signal: input.signal, binding: Object.freeze({ ...supplied }) };
+    signal: input.signal, binding: Object.freeze({ ...supplied }) };
   const profileId = supplied.profile_id;
   const profile = captureSourceEmbeddingProfile(supplied.profile, profileId);
   if (sourceIndexProfileId(configuration.profile, sourceEmbeddingSha256) !== profileId || selection.profile_id !== profileId ||
       sourceIndexConfigurationId(configuration, sourceEmbeddingSha256) !== selection.config_id) {
     throw new CoreError("VALIDATION", "Source backfill selection and runtime profile differ");
   }
-  return { selection, generation_id, root_key, budget, deadline_ms, include_relation_overlay, signal: input.signal,
+  return { selection, generation_id, root_key, budget, deadline_ms, signal: input.signal,
     binding: Object.freeze({ status: "ready", profile, profile_id: profileId, embed: supplied.embedInputs.bind(supplied) }) };
 }
 
