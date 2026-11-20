@@ -32,6 +32,7 @@ import { queryProposalFromCoordinates } from "../../../runs/recall-measurement/o
 import {
   TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION, TEXT_MCP_CONSUMER_PAID_READINESS, TEXT_MCP_WALL_MS_MEANING
 } from "../../../runs/recall-measurement/text-mcp-consumer/contract.js";
+import { projectSingleCopyToolResult } from "../../../runs/recall-measurement/text-mcp-consumer/single-copy-projection.js";
 import { executeTextMcpConsumer } from "../../../runs/recall-measurement/text-mcp-consumer/execute.js";
 import { ordinaryIndexedSnapshot, simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
 import { HIDDEN_GOLD } from "./native-recall.test-support.js";
@@ -128,12 +129,15 @@ it("dispatches model-selected soul.recall through live MCP and preserves the lit
   expect(call.origin).toBe("model_selected");
   expect(canonicalJson(call.arguments)).toBe(canonicalJson(expected));
   expect(call.response_state).toBe("received");
-  expect(call.envelope).toMatchObject({ content: expect.any(Array) });
+  expect(call.envelope).toMatchObject({ content: expect.any(Array), structuredContent: expect.any(Object) });
+  const projectedEnvelope = projectSingleCopyToolResult(call.envelope);
+  expect(projectedEnvelope).not.toHaveProperty("content");
   const second = execution.events.filter(event => event.kind === "model_turn")[1] as {
     gatewayBody: { messages: { content: string }[] };
   };
   expect(second.gatewayBody.messages[0]!.content).toContain(ALAYA_MCP_SERVER_INSTRUCTIONS);
-  expect(second.gatewayBody.messages[1]!.content).toContain(canonicalJson(call.envelope));
+  expect(second.gatewayBody.messages[1]!.content).toContain(canonicalJson(projectedEnvelope));
+  expect(second.gatewayBody.messages[1]!.content).not.toContain(canonicalJson(call.envelope));
   expect(second.gatewayBody.messages[1]!.content).not.toContain("first_page");
   expect(JSON.stringify(execution)).not.toContain(HIDDEN_GOLD);
   expect(JSON.stringify(execution)).toMatch(/Aster|Birch|Cedar|Dock/u);
@@ -196,12 +200,16 @@ it("preserves a native MCP error envelope and does not treat it as valid-empty",
   const execution = await executeTextMcpConsumer(input("native-error"), port);
   const call = execution.events.find(event => event.kind === "mcp_call")!;
   expect(call.response_state).toBe("public_error");
-  expect(call.envelope).toMatchObject({ isError: true, content: expect.any(Array) });
+  expect(call.envelope).toMatchObject({ isError: true, content: expect.any(Array), structuredContent: expect.any(Object) });
   expect(call.envelope).not.toEqual({ results: [] });
+  const projectedErrorEnvelope = projectSingleCopyToolResult(call.envelope);
+  expect(projectedErrorEnvelope).toMatchObject({ isError: true, structuredContent: expect.any(Object) });
+  expect(projectedErrorEnvelope).not.toHaveProperty("content");
   const second = execution.events.filter(event => event.kind === "model_turn")[1] as {
     gatewayBody: { messages: { content: string }[] };
   };
-  expect(second.gatewayBody.messages[1]!.content).toContain(canonicalJson(call.envelope));
+  expect(second.gatewayBody.messages[1]!.content).toContain(canonicalJson(projectedErrorEnvelope));
+  expect(second.gatewayBody.messages[1]!.content).not.toContain(canonicalJson(call.envelope));
   expect(execution.terminal).toEqual({ outcome: "answered", text: "terminal-answer" });
 }, 120000);
 

@@ -7,6 +7,7 @@ import {
   type TextMcpEncodedRequest, type TextMcpLiveSurface
 } from "./contract.js";
 import { projectLiveSurfaceForCaller } from "./caller-capability-profile.js";
+import { projectSingleCopyToolResult } from "./single-copy-projection.js";
 
 /** Named schema for the provider-bound sender. Not the scripted jsonObject fixture. */
 export const TEXT_MCP_ACTION_SCHEMA_NAME = "text_mcp_action" as const;
@@ -124,7 +125,7 @@ function formatEvent(event: Record<string, unknown>, ordinal: number): string {
       `--- ${kind} ordinal=${ordinal} origin=${origin} tool=${String(event.tool ?? "")}`,
       "arguments:", canonicalJson(event.arguments ?? null),
       `mcp_response_state: ${String(event.response_state ?? "unknown")}`,
-      "mcp_envelope:", canonicalJson(event.envelope ?? null)
+      "mcp_envelope:", canonicalJson(projectSingleCopyToolResult(event.envelope ?? null))
     ].join("\n");
   }
   if (kind === "model_turn") {

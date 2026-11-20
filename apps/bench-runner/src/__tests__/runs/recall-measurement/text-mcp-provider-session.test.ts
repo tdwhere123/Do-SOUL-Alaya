@@ -42,9 +42,13 @@ import { mapGardenHttpAttemptFailure, toBenchTransportFailureAttempt } from "../
 import { wrapGardenHttpTransportError } from "../../../runs/compile-seed/http/garden-http-terminal-error.js";
 import { providerRawAttemptPath } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { buildOrdinaryRecallRequest, mapOrdinaryRecallScope } from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
-import { TEXT_MCP_ACTION_RESPONSE_JSON_SCHEMA, TEXT_MCP_ACTION_SCHEMA_NAME, encodeTextMcpRequest } from "../../../runs/recall-measurement/text-mcp-consumer/codec.js";
+import { TEXT_MCP_ACTION_RESPONSE_JSON_SCHEMA, TEXT_MCP_ACTION_SCHEMA_NAME, encodeTextMcpRequest }
+  from "../../../runs/recall-measurement/text-mcp-consumer/codec.js";
+import { projectSingleCopyToolResult }
+  from "../../../runs/recall-measurement/text-mcp-consumer/single-copy-projection.js";
 import { TEXT_MCP_PROVIDER_BOUND_KIND } from "../../../runs/recall-measurement/text-mcp-consumer/session-authority.js";
 import { consumeTextMcpProviderSession } from "../../../runs/recall-measurement/text-mcp-consumer/session-execute.js";
+import { readSessionTranscript } from "../../../runs/recall-measurement/text-mcp-consumer/session-request.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { ordinaryIndexedSnapshot, simulateIndexedQueryPreparation } from "./ordinary-indexed-snapshot.test-support.js";
 import { HIDDEN_GOLD } from "./native-recall.test-support.js";
@@ -234,14 +238,20 @@ it("two-turn read then answer binds exact transcript wire, two reservations, and
   expect(call.origin).toBe("model_selected");
   expect(canonicalJson(call.arguments)).toBe(canonicalJson(recallArgs));
   expect(call.response_state).toBe("received");
-  expect(call.envelope).toMatchObject({ content: expect.any(Array) });
+  expect(call.envelope).toMatchObject({ content: expect.any(Array), structuredContent: expect.any(Object) });
+  const projectedEnvelope = projectSingleCopyToolResult(call.envelope);
+  expect(projectedEnvelope).not.toHaveProperty("content");
   expect(received).toHaveLength(2);
   expect(received[0]!.body).toBe(expectedBody([], result.live_surface!, fixture.selected));
   expect(received[1]!.body).toBe(expectedBody(result.events.slice(0, 2), result.live_surface!, fixture.selected));
   const secondPrompt = encodeTextMcpRequest({
     surface: result.live_surface!, query: query().original_query, events: result.events.slice(0, 2)
   }).userPrompt;
-  expect(secondPrompt).toContain(canonicalJson(call.envelope));
+  expect(secondPrompt).toContain(canonicalJson(projectedEnvelope));
+  expect(secondPrompt).not.toContain(canonicalJson(call.envelope));
+  const persistedTranscript = readSessionTranscript(fixture.grant.execution_root);
+  const persistedCall = persistedTranscript?.events.find(event => event.kind === "mcp_call");
+  expect(persistedCall?.envelope).toEqual(call.envelope);
   expect(JSON.stringify(result)).not.toContain(HIDDEN_GOLD);
   expect(JSON.stringify(result)).toMatch(/Aster|Birch|Cedar|Dock/u);
   expect(hashRegularFileNoFollow(base.config.snapshot_path)).toBe(base.config.snapshot_sha256);
@@ -274,7 +284,11 @@ it.each([false, true])("discloses the exhausted tool grant on the provider wire 
   const exhaustedRequest = JSON.parse(received.at(-1)!.body);
   const userPrompt = exhaustedRequest.messages.find((message: { role: string }) => message.role === "user").content;
   expect(userPrompt).toContain('TOOL_BUDGET_STATUS: No tool calls remain (0 remaining). Answer now from the evidence already returned using {"action":"answer","text":"..."}; state uncertainty if needed.\nEVENTS:');
-  expect(userPrompt).toContain(canonicalJson(call.envelope));
+  expect(userPrompt).toContain(canonicalJson(projectSingleCopyToolResult(call.envelope)));
+  expect(userPrompt).not.toContain(canonicalJson(call.envelope));
+  const persistedTranscript = readSessionTranscript(fixture.grant.execution_root);
+  const persistedCall = persistedTranscript?.events.find(event => event.kind === (hostSetup ? "host_setup" : "mcp_call"));
+  expect(persistedCall?.envelope).toEqual(call.envelope);
 }, 180000);
 
 it("unknown usage and caller cancellation prevent the second turn", async () => {

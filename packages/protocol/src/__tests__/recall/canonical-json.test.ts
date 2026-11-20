@@ -138,7 +138,82 @@ describe("canonicalJson", () => {
       } });
       expect(encode(proxy)).toBe("[1,2,3]");
       expect(reads).toEqual(["length", "0", "length", "1", "length", "2", "length"]);
+
+      const nanLengthProxy = new Proxy([], {
+        get(_, key) {
+          if (key === "length") return NaN;
+          throw new Error("unexpected read of " + String(key));
+        }
+      });
+      expect(encode(nanLengthProxy)).toBe("[]");
     }
+
+    const originalArrayProto = Object.getPrototypeOf(Array.prototype);
+    const setTrapProxy = new Proxy(originalArrayProto ?? Object.prototype, {
+      set() {
+        throw new Error("inherited Array.prototype Proxy set trap must not run");
+      }
+    });
+    Object.setPrototypeOf(Array.prototype, setTrapProxy);
+    try {
+      expect(canonicalJson([{ a: 1, b: [2, 3] }])).toBe('[{"a":1,"b":[2,3]}]');
+    } finally {
+      Object.setPrototypeOf(Array.prototype, originalArrayProto);
+    }
+
+    const originalIndex0Desc = Object.getOwnPropertyDescriptor(Array.prototype, "0");
+    Object.defineProperty(Array.prototype, "0", {
+      configurable: true,
+      set() {
+        throw new Error("Array.prototype[0] setter must not run");
+      }
+    });
+    try {
+      expect(canonicalJson([{ nested: [10] }])).toBe('[{"nested":[10]}]');
+    } finally {
+      if (originalIndex0Desc !== undefined) {
+        Object.defineProperty(Array.prototype, "0", originalIndex0Desc);
+      } else {
+        delete (Array.prototype as unknown as Record<string, unknown>)["0"];
+      }
+    }
+
+    const originalProtoSetDesc = Object.getOwnPropertyDescriptor(Object.prototype, "set");
+    let serialized: string;
+    Object.defineProperty(Object.prototype, "set", {
+      value: undefined,
+      configurable: true,
+      writable: true
+    });
+    try {
+      serialized = canonicalJson({ x: 1 });
+    } finally {
+      if (originalProtoSetDesc !== undefined) {
+        Object.defineProperty(Object.prototype, "set", originalProtoSetDesc);
+      } else {
+        delete (Object.prototype as unknown as Record<string, unknown>).set;
+      }
+    }
+    expect(serialized).toBe('{"x":1}');
+
+    const originalProtoTextDesc = Object.getOwnPropertyDescriptor(Object.prototype, "text");
+    let textTrapSerialized: string;
+    Object.defineProperty(Object.prototype, "text", {
+      configurable: true,
+      set() {
+        throw new Error("Object.prototype.text setter must not run");
+      }
+    });
+    try {
+      textTrapSerialized = canonicalJson([{ nested: [10], x: 1 }]);
+    } finally {
+      if (originalProtoTextDesc !== undefined) {
+        Object.defineProperty(Object.prototype, "text", originalProtoTextDesc);
+      } else {
+        delete (Object.prototype as unknown as Record<string, unknown>).text;
+      }
+    }
+    expect(textTrapSerialized).toBe('[{"nested":[10],"x":1}]');
   });
 
   it("accepts shared objects but preserves cycle, BigInt and getter failures", () => {
@@ -214,6 +289,138 @@ process.stdout.write(canonicalJson({ a: 1, B: 2, "": 0 }));`;
     const fromUs = canonicalizeInLocale("en_US.UTF-8", script);
     expect(fromC).toBe(MIXED_KEYS_CANONICAL);
     expect(fromUs).toBe(MIXED_KEYS_CANONICAL);
+  });
+
+  it("handles deeply nested arrays and objects iteratively without overflowing the call stack", () => {
+    let deepArray: unknown = 1;
+    let deepObject: Record<string, unknown> = { b: 2, a: undefined };
+    for (let depth = 1; depth < 8192; depth++) {
+      deepArray = [undefined, deepArray];
+      deepObject = { z: deepObject, a: depth === 1 ? [, 1] : null };
+    }
+    expect(canonicalJson(deepArray)).toBe("[,".repeat(8191) + "1" + "]".repeat(8191));
+    expect(canonicalJsonLength(deepArray)).toBe(canonicalJson(deepArray).length);
+    expect([...canonicalJsonChunks(deepArray)].join("")).toBe(canonicalJson(deepArray));
+    const encodedObject = canonicalJson(deepObject);
+    expect(canonicalJsonLength(deepObject)).toBe(encodedObject.length);
+    expect(encodedObject.startsWith('{"a":null,"z":{"a":null,"z":')).toBe(true);
+    expect(encodedObject.endsWith('{"a":[,1],"z":{"a":undefined,"b":2}}' + "}".repeat(8190))).toBe(true);
+    expect([...canonicalJsonChunks(deepObject)].join("")).toBe(encodedObject);
+    expect(() => canonicalJson(null)).not.toThrow();
+    const deepCycle: unknown[] = [];
+    let cursor = deepCycle;
+    for (let depth = 0; depth < 8192; depth++) {
+      const next: unknown[] = [];
+      cursor.push(next);
+      cursor = next;
+    }
+    cursor.push(deepCycle);
+    expect(() => canonicalJson(deepCycle)).toThrow(new TypeError("circular canonical preimage"));
+    expect(() => [...canonicalJsonChunks(deepCycle)]).toThrow(new TypeError("circular canonical preimage"));
+  });
+
+  it("keeps CanonicalJsonSubtrees quotation and replay immune to Array.prototype[0] and Object.prototype.next setters across block boundaries", () => {
+    const subtree = Array.from({ length: 150 }, (_, index) => index);
+    const outer = { subtree };
+    const expected = canonicalJson(outer);
+    const planner = new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 4_000_000 });
+    const execution = new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 4_000_000 });
+    const replayMeter = new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 4_000_000 });
+    const prepared = new CanonicalJsonSubtrees(subtree, undefined, planner);
+    const originalIndex0Desc = Object.getOwnPropertyDescriptor(Array.prototype, "0");
+    const originalProtoNextDesc = Object.getOwnPropertyDescriptor(Object.prototype, "next");
+    Object.defineProperty(Array.prototype, "0", {
+      configurable: true,
+      set() {
+        throw new Error("Array.prototype[0] setter must not run");
+      }
+    });
+    Object.defineProperty(Object.prototype, "next", {
+      configurable: true,
+      set() {
+        throw new Error("Object.prototype.next setter must not run");
+      }
+    });
+    let quotedCount = 0;
+    let replayed = "";
+    try {
+      for (const _ of prepared.quote(outer, execution, planner)) {
+        quotedCount += 1;
+      }
+      for (const chunk of prepared.chunks(outer, replayMeter)) {
+        replayed += chunk;
+      }
+    } finally {
+      if (originalIndex0Desc !== undefined) {
+        Object.defineProperty(Array.prototype, "0", originalIndex0Desc);
+      } else {
+        delete (Array.prototype as unknown as Record<string, unknown>)["0"];
+      }
+      if (originalProtoNextDesc !== undefined) {
+        Object.defineProperty(Object.prototype, "next", originalProtoNextDesc);
+      } else {
+        delete (Object.prototype as Record<string, unknown>).next;
+      }
+    }
+    expect(quotedCount).toBeGreaterThan(256);
+    expect(replayed).toBe(expected);
+
+    const fractionalSubtree = Array.from({ length: 150 }, (_, index) => index + 0.5);
+    const fractionalOuter = { fractionalSubtree };
+    const fractionalPlanner = new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 4_000_000 });
+    const fractionalExec = new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 4_000_000 });
+    const fractionalReplay = new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 4_000_000 });
+    const preparedFractional = new CanonicalJsonSubtrees(fractionalSubtree, undefined, fractionalPlanner);
+    Object.defineProperty(Array.prototype, "0", {
+      configurable: true,
+      set() {
+        throw new Error("Array.prototype[0] setter must not run");
+      }
+    });
+    let fractionalOut = "";
+    try {
+      for (const _ of preparedFractional.quote(fractionalOuter, fractionalExec, fractionalPlanner)) {
+        // quote across >128 fractional scalars
+      }
+      for (const chunk of preparedFractional.chunks(fractionalOuter, fractionalReplay)) {
+        fractionalOut += chunk;
+      }
+    } finally {
+      if (originalIndex0Desc !== undefined) {
+        Object.defineProperty(Array.prototype, "0", originalIndex0Desc);
+      } else {
+        delete (Array.prototype as unknown as Record<string, unknown>)["0"];
+      }
+    }
+    expect(fractionalOut).toBe(canonicalJson(fractionalOuter));
+  });
+
+  it("flattens V8 ConsString output in canonicalJson without retaining excess heap", () => {
+    const distModule = fileURLToPath(
+      new URL("../../../dist/recall/selection/capture/canonical-json.js", import.meta.url)
+    );
+    expect(fs.existsSync(distModule), "protocol dist must be built before heap retention check").toBe(true);
+    const moduleUrl = pathToFileURL(distModule).href;
+    const script = `import { getHeapStatistics } from "node:v8";
+import { canonicalJson } from ${JSON.stringify(moduleUrl)};
+let arr = Array.from({ length: 250_000 }, (_, i) => i);
+void canonicalJson([1, 2, 3]);
+globalThis.gc();
+globalThis.gc();
+const before = getHeapStatistics().used_heap_size;
+const out = canonicalJson(arr);
+arr = null;
+globalThis.gc();
+globalThis.gc();
+const retained = getHeapStatistics().used_heap_size - before;
+process.stdout.write(JSON.stringify({ len: out.length, retained }));`;
+    const raw = execFileSync(process.execPath, ["--expose-gc", "--input-type=module", "-e", script], {
+      encoding: "utf8"
+    });
+    const parsed = JSON.parse(raw) as { len: number; retained: number };
+    expect(parsed.len).toBeGreaterThan(1_500_000);
+    // Unflattened ConsString retains ~16+ MB for 250k elements; flattened SeqOneByteString is ~1.7 MB.
+    expect(parsed.retained).toBeLessThan(6 * 1024 * 1024);
   });
 });
 

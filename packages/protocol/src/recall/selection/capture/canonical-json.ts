@@ -3,12 +3,23 @@ import { compareCodeUnits } from "../../field-contract/canonical-identity.js";
 type Meter = { charge(work: number, bytes: number, phase?: string): void };
 const codeUnitLength = (codeUnits: number): number => codeUnits;
 
+type StackNode<T> =
+  | { kind: "arr"; arr: unknown[]; index: number; prev: StackNode<T> | undefined }
+  | { kind: "obj"; obj: Record<string, unknown>; keys: string[]; index: number; prev: StackNode<T> | undefined }
+  | { kind: "sub"; gen: Generator<T>; prev: StackNode<T> | undefined };
+
+type TextSink = { text: string };
+const rawScalar = (value: unknown): string => JSON.stringify(value) ?? "undefined";
+const identityToken = (value: string): string => value;
+
 export function canonicalJson(value: unknown): string {
   // Preserve the legacy root omission; streaming/quotation require a real preimage.
   if (value === undefined || typeof value === "function" || typeof value === "symbol") return JSON.stringify(value);
-  const chunks: string[] = [];
-  canonicalStructureChunks(value, encodedScalar, token => token, undefined, new Set(), chunks).next();
-  return chunks.join("");
+  const sink: TextSink = { text: "" };
+  canonicalStructureChunks<string>(value, rawScalar, identityToken, undefined, undefined, undefined, undefined, undefined, sink).next();
+  // Flatten V8's ConsString tree before returning so chunk concatenation does not pin excess heap.
+  if (sink.text.length > 0) void sink.text.charCodeAt(0);
+  return sink.text;
 }
 
 /** Exact UTF-16 length of the canonical preimage, without encoding strings or sorting keys.
@@ -20,27 +31,50 @@ export function canonicalJsonLength(value: unknown, meter?: Meter): number {
   return canonicalLength(value, meter);
 }
 
-function canonicalLength(value: unknown, meter?: Meter): number {
-  meter?.charge(1, 0, "canonical size traversal");
-  if (Array.isArray(value)) {
-    const count = value.length;
-    let length = 2 + Math.max(0, count - 1);
-    for (let index = 0; index < count; index++) {
-      const child = value[index];
-      if (child !== undefined && typeof child !== "function" && typeof child !== "symbol") length += canonicalLength(child, meter);
+type LengthFrame =
+  | { kind: "arr"; arr: unknown[]; index: number; prev: LengthFrame | undefined }
+  | { kind: "obj"; obj: Record<string, unknown>; keys: string[]; index: number; prev: LengthFrame | undefined };
+
+function canonicalLength(root: unknown, meter?: Meter): number {
+  let length = 0;
+  let top: LengthFrame | undefined;
+  const pushOrMeasureScalar = (value: unknown): void => {
+    meter?.charge(1, 0, "canonical size traversal");
+    if (Array.isArray(value)) {
+      const count = value.length;
+      length += 2 + Math.max(0, count - 1);
+      top = { kind: "arr", arr: value, index: 0, prev: top };
+      return;
     }
-    return length;
-  }
-  if (value !== null && typeof value === "object") {
-    let length = 2, count = 0;
-    // No ordered key/entry array is needed for a capacity-only scan.
-    for (const key in value) if (Object.prototype.hasOwnProperty.call(value, key)) {
-      length += (count++ === 0 ? 0 : 1) + quotedStringLength(key, meter) + 1
-        + canonicalLength((value as Record<string, unknown>)[key], meter);
+    if (value !== null && typeof value === "object") {
+      length += 2;
+      const keys: string[] = [];
+      // No ordered key/entry array is needed for a capacity-only scan.
+      for (const key in value) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) keys.push(key);
+      }
+      top = { kind: "obj", obj: value as Record<string, unknown>, keys, index: 0, prev: top };
+      return;
     }
-    return length;
+    length += scalarSize(value, meter, codeUnitLength);
+  };
+  pushOrMeasureScalar(root);
+  while (top !== undefined) {
+    if (top.kind === "arr") {
+      if (!(top.index < top.arr.length)) { top = top.prev; continue; }
+      const child = top.arr[top.index++]!;
+      if (child !== undefined && typeof child !== "function" && typeof child !== "symbol") {
+        pushOrMeasureScalar(child);
+      }
+    } else {
+      if (!(top.index < top.keys.length)) { top = top.prev; continue; }
+      const idx = top.index++;
+      const key = top.keys[idx]!;
+      length += (idx === 0 ? 0 : 1) + quotedStringLength(key, meter) + 1;
+      pushOrMeasureScalar(top.obj[key]);
+    }
   }
-  return scalarSize(value, meter, codeUnitLength);
+  return length;
 }
 
 function scalarSize<T>(value: unknown, meter: Meter | undefined,
@@ -130,66 +164,138 @@ function canonicalChunks<T>(value: unknown, scalar: (value: unknown) => T, token
   meter: Meter | undefined, ancestors: Set<object>, prepared?: CanonicalJsonSubtrees,
   planner?: Meter, execution?: Meter): Generator<T> {
   const plan = value !== null && typeof value === "object" ? prepared?.match(value, meter) : undefined;
-  if (plan === undefined) return canonicalStructureChunks(value, scalar, token, meter, ancestors, undefined, prepared, planner, execution);
+  if (plan === undefined) return canonicalStructureChunks(value, scalar, token, meter, ancestors, prepared, planner, execution);
   if (planner === undefined) return plan.replay(scalar, token, meter!);
   execution!.charge(1, 64, "canonical prepared replay frame");
   return plan.record(scalar, token, planner, execution!, ancestors);
 }
 
-/** One traversal owns ordering, omissions, access timing and chunk boundaries.
- * Eager encoding pushes into its private sink without suspending at each chunk;
- * only lazy execution dispatches prepared subtrees. Each object still owns one frame. */
+function ensureAncestorSet<T>(ancestors: Set<object> | undefined, top: StackNode<T> | undefined): Set<object> {
+  if (ancestors !== undefined) return ancestors;
+  const set = new Set<object>();
+  for (let frame = top; frame !== undefined; frame = frame.prev) {
+    if (frame.kind === "arr") set.add(frame.arr);
+    else if (frame.kind === "obj") set.add(frame.obj);
+  }
+  return set;
+}
+
+function openContainerFrame<T>(container: object, prev: StackNode<T> | undefined,
+  meter: Meter | undefined, ancestors: Set<object> | undefined): StackNode<T> {
+  if (ancestors !== undefined && ancestors.has(container)) throw new TypeError("circular canonical preimage");
+  if (Array.isArray(container)) {
+    ancestors?.add(container);
+    return { kind: "arr", arr: container, index: 0, prev };
+  }
+  const keys = Object.keys(container);
+  meter?.charge(keys.length, 64 + keys.length * 16, "canonical identity key ordering");
+  if (meter === undefined) keys.sort(compareCodeUnits);
+  else keys.sort((left, right) => {
+    meter.charge(1, 0, "canonical identity key comparison");
+    return compareCodeUnits(left, right);
+  });
+  ancestors?.add(container);
+  return { kind: "obj", obj: container as Record<string, unknown>, keys, index: 0, prev };
+}
+
+function descendChildObject<T>(child: object, top: StackNode<T>, scalar: (value: unknown) => T,
+  token: (value: string) => T, meter: Meter | undefined, ancestors: Set<object> | undefined,
+  prepared: CanonicalJsonSubtrees | undefined, planner: Meter | undefined,
+  execution: Meter | undefined): { frame: StackNode<T>; ancestors: Set<object> } {
+  const ensured = ensureAncestorSet(ancestors, top);
+  const plan = prepared?.match(child, meter);
+  if (plan !== undefined) {
+    let gen: Generator<T>;
+    if (planner === undefined) gen = plan.replay(scalar, token, meter!);
+    else {
+      execution!.charge(1, 64, "canonical prepared replay frame");
+      gen = plan.record(scalar, token, planner, execution!, ensured);
+    }
+    return { frame: { kind: "sub", gen, prev: top }, ancestors: ensured };
+  }
+  meter?.charge(1, 64, "canonical identity traversal");
+  return { frame: openContainerFrame(child, top, meter, ensured), ancestors: ensured };
+}
+
+/** One streaming traversal owns ordering, omissions, access timing and chunk boundaries.
+ * Each object still owns one frame for lazy metering and prepared-subtree dispatch. */
 function* canonicalStructureChunks<T>(value: unknown, scalar: (value: unknown) => T, token: (value: string) => T,
-  meter: Meter | undefined, ancestors: Set<object>, sink?: T[], prepared?: CanonicalJsonSubtrees,
-  planner?: Meter, execution?: Meter): Generator<T> {
+  meter: Meter | undefined, ancestors: Set<object> | undefined, prepared?: CanonicalJsonSubtrees,
+  planner?: Meter, execution?: Meter, sink?: T extends string ? TextSink : never): Generator<T> {
+  const textSink: TextSink | undefined = sink;
   // Includes the active generator frame and its ancestor bookkeeping.
   meter?.charge(1, 64, "canonical identity traversal");
   if (value === null || typeof value !== "object") {
-    const chunk = scalar(value); if (sink) sink.push(chunk); else yield chunk;
+    const chunk = scalar(value);
+    if (textSink !== undefined) textSink.text += chunk as string; else yield chunk;
     return;
   }
-  if (ancestors.has(value)) throw new TypeError("circular canonical preimage");
-  ancestors.add(value);
+  let top: StackNode<T> | undefined;
   try {
-    if (Array.isArray(value)) {
-      const open = token("["); if (sink) sink.push(open); else yield open;
-      for (let index = 0; index < value.length; index++) {
-        if (index) { const comma = token(","); if (sink) sink.push(comma); else yield comma; }
-        // Match Array.map(...).join: undefined and holes contribute an empty slot.
-        const child = value[index];
-        if (child !== undefined && typeof child !== "function" && typeof child !== "symbol") {
-          // A scalar needs a visit and its encoding, not another recursive generator.
-          if (child === null || typeof child !== "object") {
-            meter?.charge(1, 0, "canonical identity traversal");
-            const chunk = scalar(child); if (sink) sink.push(chunk); else yield chunk;
-          } else if (sink) canonicalStructureChunks(child, scalar, token, meter, ancestors, sink).next();
-          else yield* canonicalChunks(child, scalar, token, meter, ancestors, prepared, planner, execution);
+    top = openContainerFrame(value, undefined, meter, ancestors);
+    const rootOpen = token(top.kind === "arr" ? "[" : "{");
+    if (textSink !== undefined) textSink.text += rootOpen as string; else yield rootOpen;
+    while (top !== undefined) {
+      if (top.kind === "sub") {
+        const step = top.gen.next();
+        if (step.done) { top = top.prev; continue; }
+        if (textSink !== undefined) textSink.text += step.value as string; else yield step.value;
+      } else if (top.kind === "arr") {
+        if (!(top.index < top.arr.length)) {
+          ancestors?.delete(top.arr); top = top.prev;
+          const close = token("]");
+          if (textSink !== undefined) textSink.text += close as string; else yield close;
+          continue;
         }
-      }
-      const close = token("]"); if (sink) sink.push(close); else yield close;
-    } else {
-      const keys = Object.keys(value);
-      meter?.charge(keys.length, 64 + keys.length * 16, "canonical identity key ordering");
-      keys.sort((left, right) => {
-        meter?.charge(1, 0, "canonical identity key comparison");
-        return compareCodeUnits(left, right);
-      });
-      const open = token("{"); if (sink) sink.push(open); else yield open;
-      for (let index = 0; index < keys.length; index++) {
-        const key = keys[index]!;
-        if (index) { const comma = token(","); if (sink) sink.push(comma); else yield comma; }
-        const name = scalar(key); if (sink) sink.push(name); else yield name;
-        const colon = token(":"); if (sink) sink.push(colon); else yield colon;
-        const child = (value as Record<string, unknown>)[key];
+        const idx = top.index++;
+        if (idx > 0) { const c = token(","); if (textSink !== undefined) textSink.text += c as string; else yield c; }
+        // Match Array.map(...).join: undefined and holes contribute an empty slot.
+        const child = top.arr[idx];
+        if (child === undefined || typeof child === "function" || typeof child === "symbol") continue;
         if (child === null || typeof child !== "object") {
           meter?.charge(1, 0, "canonical identity traversal");
-          const chunk = scalar(child); if (sink) sink.push(chunk); else yield chunk;
-        } else if (sink) canonicalStructureChunks(child, scalar, token, meter, ancestors, sink).next();
-        else yield* canonicalChunks(child, scalar, token, meter, ancestors, prepared, planner, execution);
+          const chunk = scalar(child);
+          if (textSink !== undefined) textSink.text += chunk as string; else yield chunk;
+        } else {
+          const next = descendChildObject(child, top, scalar, token, meter, ancestors, prepared, planner, execution);
+          ancestors = next.ancestors; top = next.frame;
+          if (top.kind !== "sub") {
+            const open = token(top.kind === "arr" ? "[" : "{");
+            if (textSink !== undefined) textSink.text += open as string; else yield open;
+          }
+        }
+      } else if (top.index >= top.keys.length) {
+        ancestors?.delete(top.obj); top = top.prev;
+        const close = token("}");
+        if (textSink !== undefined) textSink.text += close as string; else yield close;
+      } else {
+        const idx = top.index++;
+        const key = top.keys[idx]!;
+        if (idx > 0) { const c = token(","); if (textSink !== undefined) textSink.text += c as string; else yield c; }
+        const name = scalar(key); if (textSink !== undefined) textSink.text += name as string; else yield name;
+        const colon = token(":"); if (textSink !== undefined) textSink.text += colon as string; else yield colon;
+        const child = top.obj[key];
+        if (child === null || typeof child !== "object") {
+          meter?.charge(1, 0, "canonical identity traversal");
+          const chunk = scalar(child);
+          if (textSink !== undefined) textSink.text += chunk as string; else yield chunk;
+        } else {
+          const next = descendChildObject(child, top, scalar, token, meter, ancestors, prepared, planner, execution);
+          ancestors = next.ancestors; top = next.frame;
+          if (top.kind !== "sub") {
+            const open = token(top.kind === "arr" ? "[" : "{");
+            if (textSink !== undefined) textSink.text += open as string; else yield open;
+          }
+        }
       }
-      const close = token("}"); if (sink) sink.push(close); else yield close;
     }
-  } finally { ancestors.delete(value); }
+  } finally {
+    for (let frame = top; frame !== undefined; frame = frame.prev) {
+      if (frame.kind === "arr") ancestors?.delete(frame.arr);
+      else if (frame.kind === "obj") ancestors?.delete(frame.obj);
+      else frame.gen.return(undefined);
+    }
+  }
 }
 
 function chargeScalarEncoding(codeUnits: number, meter?: Meter): void {
@@ -203,10 +309,24 @@ function encodedScalar(value: unknown, meter?: Meter): string {
   return encoded;
 }
 
-type Opcodes = { bytes: Uint8Array; used: number; next?: Opcodes };
+type Opcodes = { bytes: Uint8Array; used: number; next: Opcodes | undefined };
 type Scalars = unknown[];
 const TOKENS = ["{", "}", "[", "]", ",", ":"] as const;
 const BLOCK_BYTES = 256, SCALAR_SLOTS = 128;
+
+function setScalarSlot(block: Scalars, index: number, value: unknown): void {
+  if (Object.getPrototypeOf(Array.prototype) !== Object.prototype || index in Array.prototype) {
+    Object.defineProperty(block, index, {
+      __proto__: null,
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true
+    } as PropertyDescriptor);
+  } else {
+    block[index] = value;
+  }
+}
 
 /** Private instructions retain primitive references, never encoded strings or growing tables. */
 class CanonicalSubtree {
@@ -253,7 +373,7 @@ class CanonicalSubtree {
         execution?.charge(1, 0, "canonical prepared instruction replay");
         const opcode = codes.bytes[index]!;
         if (opcode === 0) {
-          if (offset === SCALAR_SLOTS) { scalars = scalars![SCALAR_SLOTS] as Scalars; offset = 0; }
+          if (offset === SCALAR_SLOTS) { scalars = scalars![SCALAR_SLOTS] as Scalars | undefined; offset = 0; }
           yield scalar(scalars![offset++]);
         } else yield token(TOKENS[opcode - 1]!);
       }
@@ -267,7 +387,7 @@ class CanonicalSubtree {
     if (this.tail === undefined || this.tail.used === BLOCK_BYTES) {
       // ArrayBuffer and typed-array headers, bytes, and the three-slot link record.
       planner.charge(1 + BLOCK_BYTES, BLOCK_BYTES + 128 + 64 + 3 * 8, "canonical prepared opcode block");
-      const next: Opcodes = { bytes: new Uint8Array(BLOCK_BYTES), used: 0 };
+      const next: Opcodes = { bytes: new Uint8Array(BLOCK_BYTES), used: 0, next: undefined };
       if (this.tail === undefined) this.head = next;
       else this.tail.next = next;
       this.tail = next;
@@ -280,12 +400,13 @@ class CanonicalSubtree {
     if (this.scalarOffset === SCALAR_SLOTS) {
       // Reference-array slots, not identity-container slots or copied scalar bodies.
       planner.charge(1 + SCALAR_SLOTS + 1, 64 + (SCALAR_SLOTS + 1) * 8, "canonical prepared scalar block");
-      const next: Scalars = new Array(SCALAR_SLOTS + 1).fill(undefined);
+      const next: Scalars = new Array(SCALAR_SLOTS + 1);
+      setScalarSlot(next, SCALAR_SLOTS, undefined);
       if (this.scalarTail === undefined) this.scalars = next;
-      else this.scalarTail[SCALAR_SLOTS] = next;
+      else setScalarSlot(this.scalarTail, SCALAR_SLOTS, next);
       this.scalarTail = next; this.scalarOffset = 0;
     }
-    this.scalarTail![this.scalarOffset++] = value;
+    setScalarSlot(this.scalarTail!, this.scalarOffset++, value);
   }
 
   get sealed(): boolean { return this.state === "sealed"; }
