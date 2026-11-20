@@ -41,7 +41,7 @@ export function injectiveConditionWitnessAssignment(pool: readonly string[],
   const n = ranks.length;
   if (n > 5) return undefined;
   const posMap = new Map<string, number>(), size = pool.length;
-  for (let i = 0; i < size; i++) posMap.set(pool[i]!, i);
+  for (let i = 0; i < size; i++) if (!posMap.has(pool[i]!)) posMap.set(pool[i]!, i);
   const marginal = ranks.map(row => row[0] ?? null);
   const present = marginal.filter((id): id is string => id !== null);
   if (new Set(present).size === present.length) return undefined;
@@ -137,8 +137,10 @@ export function quoteStatementParetoExchange(roots: number, statements: number):
   const dpWork = n >= 2
     ? 3 * R + R * M + R * n * (1 << (n - 1)) * (R <= PACKED_POOL_LIMIT ? 4 : 2 * n + 4) + M * (n + 2)
     : 0;
-  const pairs = Math.floor(((R - 1) * (R - 1)) / 4);
-  const dominance = 2 * n * (R * (2 * n + 5) + n * 2 * pairs);
+  const maxH = Math.min(4, Math.max(0, R - 1));
+  const htPairs = R <= 9 ? Math.floor(((R - 1) * (R - 1)) / 4) : 4 * (R - 5);
+  const vetoPairs = maxH * Math.max(0, maxH - 1);
+  const dominance = 2 * n * (R * (2 * n + 5) + n * 2 * htPairs) + 4 * n * n * vetoPairs;
   return {
     work_units: setupAndSort + dpWork + dominance,
     memory_bytes: 2048 + R * (256 + 32 * n) + n * 384
@@ -152,7 +154,7 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
 }>): Readonly<{ executed: boolean; swapped: boolean }> {
   const { association, pool, head, tail, agreed, meter } = input;
   const relations = association.relations;
-  if (relations === undefined || pool.length === 0 || association.statements < 1 || association.statements > 5) {
+  if (relations === undefined || pool.length === 0 || head.length > 5 || association.statements < 1 || association.statements > 5) {
     return { executed: false, swapped: false };
   }
   const sizedRoots = Math.max(pool.length, association.roots.length, head.length + tail.length, agreed.length);
@@ -160,39 +162,25 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
   meter.charge(quote.work_units, quote.memory_bytes, "statement relation witness exchange");
   if (relations.every(row => row.every(value => value === null))) return { executed: true, swapped: false };
   const n = association.statements;
+  const uniquePool: string[] = [];
   const posMap = new Map<string, number>();
-  for (let i = 0; i < pool.length; i++) posMap.set(pool[i]!, i);
+  for (let i = 0; i < pool.length; i++) {
+    const id = pool[i]!;
+    if (!posMap.has(id)) {
+      posMap.set(id, uniquePool.length);
+      uniquePool.push(id);
+    }
+  }
   const rootRow = new Map<string, number>();
   for (let i = 0; i < association.roots.length; i++) rootRow.set(association.roots[i]!, i);
   const coverage = (id: string, column: number) => {
     const row = rootRow.get(id); return row === undefined ? null : association.coverage[row]![column]!;
   };
   const possible = (id: string, column: number) => association.possible?.[rootRow.get(id) ?? -1]?.[column] === true;
-  const ranks = Array.from({ length: n }, (_, column) => pool.filter(id => coverage(id, column) !== null)
+  const ranks = Array.from({ length: n }, (_, column) => uniquePool.filter(id => coverage(id, column) !== null)
     .sort((left, right) => coverage(right, column)! - coverage(left, column)! || posMap.get(left)! - posMap.get(right)!));
   const marginal = ranks.map(row => row[0] ?? null);
-  let match: ReturnType<typeof injectiveConditionWitnessAssignment> | null = null;
-  if (n >= 2) {
-    const rankTable = new Int32Array(pool.length * n).fill(-1);
-    for (let column = 0; column < n; column++) {
-      const ranked = ranks[column]!;
-      for (let rank = 0; rank < ranked.length; rank++) {
-        const cell = posMap.get(ranked[rank]!)! * n + column;
-        if (rankTable[cell]! < 0) rankTable[cell] = rank;
-      }
-    }
-    const quantile = (id: string, column: number): number | null => {
-      const pos = posMap.get(id);
-      if (pos === undefined) return null;
-      const rank = rankTable[pos * n + column]!;
-      return rank < 0 ? null : (ranks[column]!.length - rank) / ranks[column]!.length;
-    };
-    match = injectiveConditionWitnessAssignment(pool, ranks, quantile) ?? {
-      roots: marginal, count: marginal.filter(Boolean).length,
-      weight: marginal.reduce((sum, id, column) => sum + (id === null ? 0 : quantile(id, column)!), 0),
-      marginal, identity: "root" as const
-    };
-  }
+  const match = n >= 2 ? matchQuantileAssignment(uniquePool, posMap, ranks, marginal, n) : null;
   const placed = new Set((match?.roots ?? []).filter((id): id is string => id !== null && head.includes(id)));
   const agreedSet = new Set(agreed);
   const marginalSet = new Set(marginal.filter((id): id is string => id !== null));
@@ -328,4 +316,93 @@ function swapHeadTail(head: string[], tail: string[], tailRows: Int32Array, root
   head[slot] = tail[at]!;
   tail[at] = displaced;
   tailRows[at] = rootRow.get(displaced) ?? -1;
+}
+
+function gcdBig(a: bigint, b: bigint): bigint {
+  while (b !== 0n) { const t = a % b; a = b; b = t; }
+  return a;
+}
+
+function matchQuantileAssignment(uniquePool: readonly string[], posMap: ReadonlyMap<string, number>,
+  ranks: readonly (readonly string[])[], marginal: readonly (string | null)[], n: number) {
+  const rankTable = new Int32Array(uniquePool.length * n).fill(-1);
+  let commonDenomBig = 1n;
+  for (let column = 0; column < n; column++) {
+    const ranked = ranks[column]!, len = BigInt(ranked.length);
+    if (len > 0n) commonDenomBig = (commonDenomBig / gcdBig(commonDenomBig, len)) * len;
+    for (let rank = 0; rank < ranked.length; rank++) {
+      const cell = posMap.get(ranked[rank]!)! * n + column;
+      if (rankTable[cell]! < 0) rankTable[cell] = rank;
+    }
+  }
+  if (BigInt(n) * commonDenomBig <= BigInt(Number.MAX_SAFE_INTEGER)) {
+    const scale = Number(commonDenomBig);
+    const scaledQuantile = (id: string, column: number): number | null => {
+      const pos = posMap.get(id);
+      if (pos === undefined) return null;
+      const rank = rankTable[pos * n + column]!;
+      const m = ranks[column]!.length;
+      return rank < 0 ? null : (m - rank) * (scale / m);
+    };
+    return injectiveConditionWitnessAssignment(uniquePool, ranks, scaledQuantile) ?? {
+      roots: marginal, count: marginal.filter(Boolean).length,
+      weight: marginal.reduce((sum, id, column) => sum + (id === null ? 0 : scaledQuantile(id, column)!), 0),
+      marginal, identity: "root" as const
+    };
+  }
+  return exactBigIntAssignment(uniquePool, ranks, posMap, rankTable, marginal, commonDenomBig, n);
+}
+
+function exactBigIntAssignment(uniquePool: readonly string[], ranks: readonly (readonly string[])[],
+  posMap: ReadonlyMap<string, number>, rankTable: Int32Array, marginal: readonly (string | null)[],
+  commonDenomBig: bigint, n: number) {
+  const present = marginal.filter((id): id is string => id !== null);
+  const units = ranks.map(row => row.length > 0 ? commonDenomBig / BigInt(row.length) : 0n);
+  if (new Set(present).size === present.length) {
+    const weight = marginal.reduce((sum, id, column) =>
+      sum + (id === null ? 0n : BigInt(ranks[column]!.length) * units[column]!), 0n);
+    return { roots: marginal, count: present.length, weight: Number(weight), marginal, identity: "root" as const };
+  }
+  const masks = 1 << n, size = uniquePool.length;
+  const counts = new Int32Array(masks).fill(-1);
+  const weights: bigint[] = Array.from({ length: masks }, () => 0n);
+  const assigned: Array<(string | null)[] | undefined> = Array.from({ length: masks }, () => undefined);
+  counts[0] = 0;
+  assigned[0] = Array.from({ length: n }, () => null);
+  for (let itemPos = 0; itemPos < size; itemPos++) {
+    const id = uniquePool[itemPos]!;
+    for (let mask = masks - 2; mask >= 0; mask--) {
+      const count = counts[mask]!;
+      if (count < 0) continue;
+      for (let column = 0; column < n; column++) {
+        if ((mask & (1 << column)) !== 0) continue;
+        const rank = rankTable[itemPos * n + column]!;
+        if (rank < 0) continue;
+        const nextMask = mask | (1 << column);
+        const candCount = count + 1, incCount = counts[nextMask]!;
+        const candWeight = weights[mask]! + BigInt(ranks[column]!.length - rank) * units[column]!;
+        if (incCount < 0 || candCount > incCount || candCount === incCount && candWeight >= weights[nextMask]!) {
+          const candRoots = assigned[mask]!.slice();
+          candRoots[column] = id;
+          if (candCount > incCount || candWeight > weights[nextMask]!
+              || sourceEarlier(posMap, size, candRoots, assigned[nextMask]!)) {
+            counts[nextMask] = candCount; weights[nextMask] = candWeight; assigned[nextMask] = candRoots;
+          }
+        }
+      }
+    }
+  }
+  let bestMask = 0;
+  for (let mask = 1; mask < masks; mask++) {
+    const count = counts[mask]!;
+    if (count < 0) continue;
+    if (count > counts[bestMask]! || count === counts[bestMask]! && (weights[mask]! > weights[bestMask]!
+        || weights[mask]! === weights[bestMask]! && sourceEarlier(posMap, size, assigned[mask]!, assigned[bestMask]!))) {
+      bestMask = mask;
+    }
+  }
+  return {
+    roots: assigned[bestMask]!, count: counts[bestMask]!, weight: Number(weights[bestMask]!),
+    marginal, identity: "root" as const
+  };
 }

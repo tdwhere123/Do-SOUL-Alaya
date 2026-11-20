@@ -81,7 +81,7 @@ it("executes exact event operands before native restoration while preserving raw
     const first = capture.outcome.value;
     expect(ids(first)[0], JSON.stringify(capture.observations.flatMap(frame => frame.events)
       .filter(event => event.kind === "source_index_acquisition").map(event => event.data))).toBe(target.root_id);
-    expect(ids(first).slice(1)).toEqual(ids(baseline).slice(0, 4));
+    expect(ids(first).slice(1, ids(baseline).length)).toEqual(ids(baseline).slice(1));
     const withObservation = (row: unknown) => ({ ...proposal,
       source_task_observation: { ...proposal.source_task_observation, observations: [row] } });
     // Only the explicit operand changes. Record clock, bytes, Q, H and C remain fixed.
@@ -144,6 +144,8 @@ it("executes exact event operands before native restoration while preserving raw
       const nextPage = await call(proposal, { continuation }); found.push(...ids(nextPage)); continuation = nextPage.index!.continuation;
     }
     expect(continuation).toBeNull(); expect(new Set(found).size).toBe(16);
+    // Displaced slot-0 incumbent stays in the 16-root pool after task promotion and agreed-head swap.
+    expect(found).toContain(ids(baseline)[0]);
     expect(ids(await call(undefined, { query: "silver wrench" }))).toContain(target.root_id);
     await selected.withdraw();
     const withdrawn = await call(proposal);

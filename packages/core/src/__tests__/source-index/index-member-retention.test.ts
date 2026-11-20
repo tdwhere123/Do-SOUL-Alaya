@@ -331,3 +331,139 @@ it("interleaves raw-passage tail in question-time 3-way overflow without exceedi
   expect(admit).toHaveBeenCalledTimes(baseCalls);
   expect(capped.result.nominations).toEqual(base.result.nominations);
 });
+
+it("isolates tail admitQueryCandidate throws at max_attempts=2 without losing nominations or acquisition_complete", () => {
+  const lexicalRows = Array.from({ length: 4 }, (_, i) => templateStatement(`lex-${i}`));
+  const stmtRows = Array.from({ length: 4 }, (_, i) => templateStatement(`stmt-${i}`));
+  const rawRows = Array.from({ length: 4 }, (_, i) => templateStatement(`raw-${i}`));
+  const config = configuration({ dimensions: 2, window_bytes: 8 });
+  const profileId = sourceIndexProfileId(config.profile, fieldSha256);
+  const binding = {
+    workspace_id: "workspace-template", selection_revision: 1, config_id: "cfg-1",
+    profile_id: profileId, generation_id: "gen-throw", source_epoch: 1, dimensions: 2
+  };
+  const candidates: SourceIndexVectorRead["candidates"] = [
+    ...stmtRows.map((row, i) => ({
+      source: row.statement.source,
+      window: { window_id: `ws-${i}`, start_byte: 0, end_byte: 8, content_digest: `sha256:${"a".repeat(64)}` },
+      embedding: Float32Array.of(0.95 - i * 0.05, 0.1)
+    })),
+    ...rawRows.map((row, i) => ({
+      source: row.source,
+      window: { window_id: `wr-${i}`, start_byte: 0, end_byte: 8, content_digest: `sha256:${"b".repeat(64)}` },
+      embedding: Float32Array.of(0.70 - i * 0.05, 0.1)
+    }))
+  ];
+  let admitCalls = 0;
+  const repository: SourceIndexQueryRepository = {
+    readLexicalCandidates: (_workspace, _query, limit) => lexical(lexicalRows.slice(0, limit)),
+    readVectorCandidates: () => ({
+      completion: "complete", reason: null, candidates, resources: empty,
+      state: { status: "ready", binding }, resource_refusal: null, cursor: null,
+      inspected: candidates.length, invalid: 0
+    }),
+    admitQueryCandidate: () => {
+      admitCalls++;
+      if (admitCalls > 2) throw new Error("tail admission failure");
+      return { status: "ready", scope_class: "project", resources: empty };
+    }
+  };
+  const input: SourceIndexAcquisitionInput = {
+    workspace_id: "workspace-template", navigation_text: "game",
+    allowance: { max_attempts: 2, max_roots: 2, max_vector_windows: 32 },
+    budget: templateBudget,
+    vector: {
+      status: "available", profile: config.profile, profile_id: profileId,
+      input_digest: digest("game"), embedding: Float32Array.of(1, 0)
+    }
+  };
+  const run = (members: number) => {
+    admitCalls = 0;
+    const observed: SourceIndexAcquisitionFact[] = [];
+    const capture = new SourceIndexAcquisition(repository, fieldSha256)
+      .nominateWithWitness(input, () => "admitted", "original", fact => { observed.push(fact()); },
+        undefined, undefined, undefined, members);
+    return { capture, observed };
+  };
+  const base = run(0);
+  const listed = run(16);
+  expect(listed.capture.result).toEqual(base.capture.result);
+  expect(listed.capture.witness).toEqual(base.capture.witness);
+  expect(listed.capture.index_members).toEqual([]);
+  const baseComplete = base.observed.filter(fact => fact.kind === "acquisition_complete");
+  const listedComplete = listed.observed.filter(fact => fact.kind === "acquisition_complete");
+  expect(listedComplete).toHaveLength(1);
+  expect(listedComplete).toEqual(baseComplete);
+});
+
+it("keeps nominations, resources, and completion identical when listingMeter exhausts during vector scan", () => {
+  const lexicalRows = Array.from({ length: 16 }, (_, i) => templateStatement(`lex-${i}`));
+  const sample = templateStatement("overflow-sample");
+  const longPrefix = "r".repeat(520);
+  const targetForIndex = (i: number, auxiliary: boolean) => {
+    const rootId = `${longPrefix}-${i.toString().padStart(5, "0")}`;
+    const baseTarget = { ...sample.source.target, root_id: rootId };
+    if (!auxiliary) {
+      return { ...sample.source, source_id: `raw-${i}`, root_key: rootId, target: baseTarget };
+    }
+    const aux = { ...sample.statement.source.auxiliary!, artifact_id: `art-${i}` };
+    return {
+      ...sample.statement.source, source_id: `stmt-${i}`,
+      root_key: `${rootId}:statement:${aux.artifact_id}:${aux.artifact_digest}`,
+      target: baseTarget, auxiliary: aux
+    };
+  };
+  const allCandidates: SourceIndexVectorRead["candidates"] = [
+    ...Array.from({ length: 2048 }, (_, i) => ({
+      source: targetForIndex(i, true),
+      window: { window_id: `ws-${i.toString().padStart(5, "0")}`, start_byte: 0, end_byte: 8, content_digest: `sha256:${"a".repeat(64)}` },
+      embedding: Float32Array.of(0.95 - (i % 100) * 0.001, 0.1)
+    })),
+    ...Array.from({ length: 2048 }, (_, i) => ({
+      source: targetForIndex(2048 + i, false),
+      window: { window_id: `wr-${i.toString().padStart(5, "0")}`, start_byte: 0, end_byte: 8, content_digest: `sha256:${"b".repeat(64)}` },
+      embedding: Float32Array.of(0.80 - (i % 100) * 0.001, 0.1)
+    }))
+  ];
+  const config = configuration({ dimensions: 2, window_bytes: 8 });
+  const profileId = sourceIndexProfileId(config.profile, fieldSha256);
+  const binding = {
+    workspace_id: "workspace-template", selection_revision: 1, config_id: "cfg-1",
+    profile_id: profileId, generation_id: "gen-overflow-exhaust", source_epoch: 1, dimensions: 2
+  };
+  const repository: SourceIndexQueryRepository = {
+    readLexicalCandidates: (_workspace, _query, limit) => lexical(lexicalRows.slice(0, limit)),
+    readVectorCandidates: (_workspace, cursor, limit) => {
+      const start = cursor === null ? 0 : allCandidates.findIndex(c => c.window.window_id > cursor.after_window_id);
+      const offset = start < 0 ? allCandidates.length : start;
+      const slice = allCandidates.slice(offset, offset + limit);
+      const done = offset + slice.length >= allCandidates.length;
+      return {
+        completion: done ? "complete" : "partial", reason: done ? null : "window_page_limit",
+        candidates: slice, resources: empty, state: { status: "ready", binding }, resource_refusal: null,
+        cursor: slice.length === 0 ? null : { binding, after_window_id: slice.at(-1)!.window.window_id },
+        inspected: slice.length, invalid: 0
+      };
+    },
+    admitQueryCandidate: () => ({ status: "ready", scope_class: "project", resources: empty })
+  };
+  const input: SourceIndexAcquisitionInput = {
+    workspace_id: "workspace-template", navigation_text: "game",
+    allowance: { max_attempts: 32, max_roots: 16, max_vector_windows: 4096 },
+    budget: { work_units: 50_000_000, memory_bytes: 128 * 1024 * 1024 },
+    vector: {
+      status: "available", profile: config.profile, profile_id: profileId,
+      input_digest: digest("game"), embedding: Float32Array.of(1, 0)
+    }
+  };
+  const run = (members: number) => new SourceIndexAcquisition(repository, fieldSha256)
+    .nominateWithWitness(input, () => "admitted", "original", undefined, undefined, undefined, undefined, members);
+
+  const base = run(0);
+  const listed = run(16);
+  expect(listed.result.nominations).toEqual(base.result.nominations);
+  expect(listed.result.accounting).toEqual(base.result.accounting);
+  expect(listed.result.resources).toEqual(base.result.resources);
+  expect(listed.result.completion).toBe(base.result.completion);
+  expect(listed.result.resource_refusals).toEqual(base.result.resource_refusals);
+});

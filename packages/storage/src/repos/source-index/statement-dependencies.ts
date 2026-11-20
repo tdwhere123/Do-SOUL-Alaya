@@ -20,6 +20,9 @@ function unavailableDependencySql(dependency: string): string {
   return dependencyCheckSql(dependency, "retained.source_body IS NOT NULL");
 }
 
+// source_body IS NOT NULL already satisfies unavailableDependencySql (ready even when cached
+// retained_content_bytes is NULL or 0); retained_content_bytes > 0 distinguishes partial
+// body-omitted retention from stale removal when source_body IS NULL.
 function staleDependencySql(dependency: string): string {
   return dependencyCheckSql(dependency, "(retained.source_body IS NOT NULL OR retained.retained_content_bytes > 0)");
 }

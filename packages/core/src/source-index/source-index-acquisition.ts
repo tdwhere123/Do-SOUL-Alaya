@@ -11,8 +11,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import { createValidatedCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
-import { agreedQuestionTimeHeadPrefix, collectQuestionTimeIndexMembers, interleaveThreeWayIndexMembers, preferQuestionTime, recordedQuestionTime,
-  type QuestionTimeIndexMemberPrefix, type SourcePreferenceRetention } from "./question-time-preference.js";
+import { agreedQuestionTimeHeadPrefix, collectQuestionTimeIndexMembers, interleaveThreeWayIndexMembers, preferQuestionTime,
+  rankOverflowVectorCandidates, recordOverflowVectorCandidate, recordedQuestionTime,
+  type QuestionTimeIndexMemberPrefix, type ScoredVectorRoot, type SourcePreferenceRetention } from "./question-time-preference.js";
 import { validateInput } from "./source-index-acquisition-input.js";
 import { collapseStatementCandidates, evidenceWindow, StatementKeyRetention, quoteStatementAssociation, type EvidenceDemands,
   type StatementAssociation } from "./statement-association.js";
@@ -29,9 +30,7 @@ import {
 } from "./source-index-query-preparation.js";
 
 type QueryResourceRefusal = SourceIndexAcquisitionResult["resource_refusals"][number];
-type ScoredRoot = Readonly<{
-  source: SourceIndexTarget; vector: NonNullable<SourceIndexRootNomination["vector"]>;
-}>;
+type ScoredRoot = ScoredVectorRoot;
 type RetainedNomination = {
   source: SourceIndexTarget; lexical: SourceIndexLexicalRank[]; vector: SourceIndexRootNomination["vector"];
 };
@@ -165,6 +164,8 @@ class AcquisitionQuery {
   /** Admitted overflow in native order, including roots displaced by question-time preference. */
   public readonly indexMembers: SourceIndexTarget[] = [];
   private readonly indexMemberKeys = new Set<string>();
+  private listingMeter: SourceSemanticResourceLedger | undefined;
+  private overflowExhausted = false;
   private readonly statements?: StatementKeyRetention;
 
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
@@ -192,7 +193,11 @@ class AcquisitionQuery {
 
   run(captureOnly = false): SourceIndexAcquisitionResult {
     const targetCount = this.capture?.indexMembers ?? 0;
+    if (!captureOnly && targetCount > 0) {
+      this.listingMeter = new SourceSemanticResourceLedger({ work_units: 524_288, memory_bytes: 8 * 1024 * 1024 });
+    }
     let listing: QuestionTimeIndexMemberPrefix | undefined;
+    let completedNomination = false;
     try {
       // Result envelope and per-nomination output references are admitted before discovery can exhaust the ledger.
       const envelope = acquisitionResultEnvelopeCost(this.input.allowance.max_roots);
@@ -207,6 +212,7 @@ class AcquisitionQuery {
         const prefix = this.nominateRetainedRoots(targetCount);
         this.associateStatementWitnesses();
         listing = prefix;
+        completedNomination = true;
       }
     } catch (error) {
       // Keep all completed debits even when a repository or admission callback fails.
@@ -218,17 +224,25 @@ class AcquisitionQuery {
       }
       this.limited = true;
     }
-    if (!this.timeRoute && this.rawVectorCandidates.length > 0 && this.statementVectorCandidates.length > 0 && targetCount > 0) {
-      this.populateThreeWayIndexMembers(targetCount);
+    if (completedNomination && targetCount > 0) {
+      try {
+        if (!this.timeRoute && this.rawVectorCandidates.length > 0 && this.statementVectorCandidates.length > 0) {
+          this.populateThreeWayIndexMembers(targetCount);
+        } else if (this.timeRoute && listing !== undefined) {
+          collectQuestionTimeIndexMembers({
+            ...listing, targetCount,
+            maxExtraAttempts: Math.max(0, this.input.allowance.max_attempts - this.counts.attempted),
+            nominationKeys: this.nominations.keys(), indexMembers: this.indexMembers, indexMemberKeys: this.indexMemberKeys,
+            retainIndexMember: (key, source) => this.retainIndexMember(key, source),
+            repository: this.repository, vectorBinding: this.vectorBinding, admitScope: this.admitScope,
+            unboundAdmissions: this.unboundAdmissions, boundAdmissions: this.boundAdmissions,
+            ...(this.listingMeter === undefined ? {} : { listingMeter: this.listingMeter })
+          });
+        }
+      } catch {
+        // Optional tail listing failures never abort completed nomination or acquisition_complete observation.
+      }
     }
-    if (this.timeRoute && listing !== undefined) collectQuestionTimeIndexMembers({
-      ...listing, targetCount,
-      maxExtraAttempts: Math.max(0, this.input.allowance.max_attempts - this.counts.attempted),
-      nominationKeys: this.nominations.keys(), indexMembers: this.indexMembers, indexMemberKeys: this.indexMemberKeys,
-      retainIndexMember: (key, source) => this.retainIndexMember(key, source),
-      repository: this.repository, vectorBinding: this.vectorBinding, admitScope: this.admitScope,
-      unboundAdmissions: this.unboundAdmissions, boundAdmissions: this.boundAdmissions
-    });
     const result = this.result();
     this.observe("acquisition_complete", () => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
       lexical_completion: this.lexical.completion, vector_completion: this.vector.completion,
@@ -520,9 +534,15 @@ class AcquisitionQuery {
       });
       // Publish only after the whole ranked set is retained. A later meter refusal discards this map.
       this.vectorCandidates = retained;
-      if (bestRaw !== undefined && bestStatement !== undefined && bestRaw.size > 0 && bestStatement.size > 0) {
-        this.rawVectorCandidates = sortScoredRoots(bestRaw);
-        this.statementVectorCandidates = sortScoredRoots(bestStatement);
+      if (!this.overflowExhausted && this.listingMeter !== undefined
+          && bestRaw !== undefined && bestStatement !== undefined && bestRaw.size > 0 && bestStatement.size > 0) {
+        try {
+          this.rawVectorCandidates = rankOverflowVectorCandidates(bestRaw, this.listingMeter);
+          this.statementVectorCandidates = rankOverflowVectorCandidates(bestStatement, this.listingMeter);
+        } catch (error) {
+          if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+          this.clearOverflowVectors(bestRaw, bestStatement);
+        }
       }
       for (const rankedCandidate of retained) {
         this.observe("vector_ranked", () => ({ kind: "vector_ranked", target: structuredClone(rankedCandidate.source.target),
@@ -544,6 +564,14 @@ class AcquisitionQuery {
     }
   }
 
+  private clearOverflowVectors(bestRaw?: Map<string, ScoredRoot>, bestStatement?: Map<string, ScoredRoot>): void {
+    this.overflowExhausted = true;
+    bestRaw?.clear();
+    bestStatement?.clear();
+    this.rawVectorCandidates = [];
+    this.statementVectorCandidates = [];
+  }
+
   private considerVector(best: Map<string, ScoredRoot>, candidate: SourceIndexVectorCandidate,
     bestRaw?: Map<string, ScoredRoot>, bestStatement?: Map<string, ScoredRoot>): void {
     const dimensions = this.queryVector!.length;
@@ -560,13 +588,23 @@ class AcquisitionQuery {
       window: structuredClone(candidate.window), cosine }));
     const key = this.capture?.grouped === true ? candidate.window.window_id : sourceIndexNativeRootKey(candidate.source);
     const channelBest = isAuxiliary ? bestStatement : bestRaw;
-    if (channelBest !== undefined) retainBestScoredRoot(channelBest, key, candidate, cosine);
+    if (channelBest !== undefined && this.listingMeter !== undefined && !this.overflowExhausted) {
+      try {
+        recordOverflowVectorCandidate(channelBest, key, candidate, cosine, this.listingMeter);
+      } catch (error) {
+        if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+        this.clearOverflowVectors(bestRaw, bestStatement);
+      }
+    }
     // Both keys are captured by the native reader. Reuse their identities rather
     // than reconstructing the same canonical root for every vector window.
     this.meter.charge(VECTOR_COST.lookup_work, 0, "source vector root lookup");
-    if (!retainBestScoredRoot(best, key, candidate, cosine)) return;
+    const previous = best.get(key);
+    if (previous !== undefined && (previous.vector.cosine > cosine || previous.vector.cosine === cosine &&
+        compareKey(previous.vector.window.window_id, candidate.window.window_id) <= 0)) return;
     this.meter.charge(VECTOR_COST.replacement_work, VECTOR_COST.replacement_bytes
       + VECTOR_COST.key_bytes_per_character * key.length, "source vector best-window retention");
+    best.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
   }
 
   private nominatePrefix(stopAtRootLimit = false,
@@ -718,7 +756,8 @@ class AcquisitionQuery {
       retainIndexMember: (key, source) => this.retainIndexMember(key, source),
       repository: this.repository, vectorBinding: this.vectorBinding,
       unboundAdmissions: this.unboundAdmissions, boundAdmissions: this.boundAdmissions,
-      admitScope: this.admitScope
+      admitScope: this.admitScope,
+      ...(this.listingMeter === undefined ? {} : { listingMeter: this.listingMeter })
     });
   }
 
@@ -749,19 +788,3 @@ class AcquisitionQuery {
 }
 
 function compareKey(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
-
-function retainBestScoredRoot(best: Map<string, ScoredRoot>, key: string, candidate: SourceIndexVectorCandidate, cosine: number): boolean {
-  const previous = best.get(key);
-  if (previous !== undefined && (previous.vector.cosine > cosine || previous.vector.cosine === cosine &&
-      compareKey(previous.vector.window.window_id, candidate.window.window_id) <= 0)) return false;
-  best.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
-  return true;
-}
-
-function sortScoredRoots(best: ReadonlyMap<string, ScoredRoot>): ScoredRoot[] {
-  const ranked = [...best.values()];
-  ranked.sort((left, right) => right.vector.cosine - left.vector.cosine
-    || compareKey(left.source.root_key, right.source.root_key)
-    || compareKey(left.vector.window.window_id, right.vector.window.window_id));
-  return ranked;
-}

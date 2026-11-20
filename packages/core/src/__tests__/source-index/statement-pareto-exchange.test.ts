@@ -562,4 +562,98 @@ describe("injective condition assignment and secondary exchange", () => {
     expect(head).toEqual(["a", "b", "c", "d", "g"]);
     expect(tail).toContain("h");
   });
+
+  it("breaks exact rational 12/5 === 12/5 quantile ties without IEEE-754 float sum drift", () => {
+    const tiePool = ["x", "a", "b", "c", "d", "e"];
+    const tieCoverage: Record<string, (number | null)[]> = {
+      x: [null, null, null],
+      a: [0.90, 0.90, 0.90],
+      c: [0.80, 0.80, 0.80],
+      d: [0.60, 0.70, 0.70],
+      e: [0.50, 0.50, 0.50],
+      b: [0.70, 0.60, 0.60]
+    };
+    const tieRanks = [0, 1, 2].map(col => tiePool.filter(id => tieCoverage[id]![col] !== null)
+      .sort((left, right) => tieCoverage[right]![col]! - tieCoverage[left]![col]!));
+    expect(tieRanks.map(row => row.join(""))).toEqual(["acbde", "acdbe", "acdbe"]);
+    // Unscaled binary64 sums ((1 + 3/5) + 4/5 = 2.4000000000000004 vs (1 + 4/5) + 3/5 = 2.4) flip to ["b", "a", "c"].
+    const rawFloatQuantile = (id: string, col: number) => {
+      const rank = tieRanks[col]!.indexOf(id);
+      return rank < 0 ? null : (tieRanks[col]!.length - rank) / tieRanks[col]!.length;
+    };
+    expect(injectiveConditionWitnessAssignment(tiePool, tieRanks, rawFloatQuantile)?.roots).toEqual(["b", "a", "c"]);
+
+    const association: StatementAssociation = {
+      roots: tiePool, statements: 3,
+      coverage: tiePool.map(id => tieCoverage[id]!),
+      relations: tiePool.map(id => id === "e" ? [0.1, 0.1, 0.1] : [0.9, 0.9, 0.9]),
+      decision: { refused: null, applied: false }
+    };
+    const head = ["x", "a", "c", "d", "e"], tail = ["b"];
+    expect(exchangeStatementParetoSecondary({ association, pool: tiePool, head, tail, agreed: [], meter: meter() }))
+      .toEqual({ executed: true, swapped: false });
+    expect(head).toEqual(["x", "a", "c", "d", "e"]);
+  });
+
+  it("deduplicates repeated pool IDs preserving first-seen order", () => {
+    const association = coverage(2, {
+      a: [0.95, null],
+      b: [null, 0.95],
+      e: [0.10, 0.10],
+      g: [0.80, null],
+      h: [null, 0.80]
+    }, {
+      spans: roots.map((_, i) => [[i, i + 5] as const, [i + 10, i + 15] as const]),
+      relations: roots.map(root => root === "e" ? [0.1, 0.1] : [0.9, 0.9])
+    });
+    const cleanHead = ["a", "b", "c", "d", "e"], cleanTail = ["f", "g", "h"];
+    const dupHead = ["a", "b", "c", "d", "e"], dupTail = ["f", "g", "h"];
+    expect(exchangeStatementParetoSecondary({ association, pool: roots, head: cleanHead, tail: cleanTail, agreed: [], meter: meter() }))
+      .toEqual({ executed: true, swapped: true });
+    expect(exchangeStatementParetoSecondary({
+      association, pool: ["a", "a", "a", ...roots, "g", "g"], head: dupHead, tail: dupTail, agreed: [], meter: meter()
+    })).toEqual({ executed: true, swapped: true });
+    expect(dupHead).toEqual(cleanHead);
+    expect(dupTail).toEqual(cleanTail);
+  });
+
+  it("abstains without charging the meter when head exceeds five slots", () => {
+    const association = coverage(1, { a: [0.9], g: [0.8], f: [0.1] }, {
+      relations: roots.map(() => [0.5])
+    });
+    const head = ["a", "b", "c", "d", "e", "f"], tail = ["g", "h"];
+    const ledger = meter(0);
+    expect(exchangeStatementParetoSecondary({ association, pool: roots, head, tail, agreed: [], meter: ledger }))
+      .toEqual({ executed: false, swapped: false });
+    expect(head).toEqual(["a", "b", "c", "d", "e", "f"]);
+  });
+
+  it.each([5, 16, 128, 1025])("bounds elementary array reads at R=%i within quoteStatementParetoExchange(R, 1).work_units", R => {
+    const ids = Array.from({ length: R }, (_, index) => `r${index}`);
+    let reads = 0;
+    const watchRow = (row: (number | null)[]) => new Proxy(row, {
+      get(target, prop, receiver) {
+        if (typeof prop === "string" && /^\d+$/.test(prop)) reads++;
+        return Reflect.get(target, prop, receiver);
+      }
+    });
+    const covRows = ids.map((_, index) => watchRow([
+      index === 0 ? 0.95 : index === 1 ? 0.10 : index <= 4 ? 0.20 + index * 0.05 : index === 5 ? 0.85 : 0.70
+    ]));
+    const relRows = ids.map((_, index) => watchRow([
+      index === 1 ? 0.99 : index <= 4 ? 0.10 : 0.80
+    ]));
+    const association: StatementAssociation = {
+      roots: ids, statements: 1,
+      coverage: covRows,
+      relations: relRows,
+      spans: ids.map((_, index) => [[index, index + 4] as const]),
+      decision: { refused: null, applied: false }
+    };
+    const quote = quoteStatementParetoExchange(R, 1);
+    const ledger = meter(quote.work_units, quote.memory_bytes);
+    const head = ids.slice(0, 5), tail = ids.slice(5);
+    expect(exchangeStatementParetoSecondary({ association, pool: ids, head, tail, agreed: [], meter: ledger }).executed).toBe(true);
+    expect(reads).toBeLessThanOrEqual(quote.work_units);
+  });
 });

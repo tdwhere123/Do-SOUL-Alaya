@@ -1,10 +1,12 @@
 import {
-  SourceSemanticResourceExhausted, SourceSemanticResourceLedger, sourceIndexNativeRootKey,
+  SourceSemanticResourceLedger, sourceIndexNativeRootKey,
   type QuestionTimePreference, type SourceIndexAcquisitionResult, type SourceIndexLexicalCandidate,
   type SourceIndexNominationAccounting, type SourceIndexQueryAdmission, type SourceIndexQueryRepository,
-  type SourceIndexQueryResources, type SourceIndexScopeAdmission, type SourceIndexTarget,
-  type SourceIndexVectorBinding, type SourceSemanticNominationOccurrence, type QualifiedTaskObservation
+  type SourceIndexQueryResources, type SourceIndexRootNomination, type SourceIndexScopeAdmission,
+  type SourceIndexTarget, type SourceIndexVectorBinding, type SourceIndexVectorCandidate,
+  type SourceSemanticNominationOccurrence, type QualifiedTaskObservation
 } from "@do-soul/alaya-protocol";
+import { VECTOR_COST } from "./acquisition-prices.js";
 
 /** The window dates the asked event. A past event is recorded at or after its start and never after the
  * question clock, so the recorded-time domain is [earliest start, clock date]; a window wholly after the
@@ -144,7 +146,46 @@ type QuestionTimeIndexMemberInput = QuestionTimeIndexMemberPrefix & Readonly<{
   unboundAdmissions: ReadonlyMap<string, SourceIndexQueryAdmission>;
   boundAdmissions: ReadonlyMap<string, SourceIndexQueryAdmission>;
   admitScope: SourceIndexScopeAdmission;
+  listingMeter?: SourceSemanticResourceLedger;
 }>;
+
+export type ScoredVectorRoot = Readonly<{
+  source: SourceIndexTarget; vector: NonNullable<SourceIndexRootNomination["vector"]>;
+}>;
+
+function compareVectorKey(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
+
+export function recordOverflowVectorCandidate(
+  best: Map<string, ScoredVectorRoot>,
+  key: string,
+  candidate: SourceIndexVectorCandidate,
+  cosine: number,
+  meter: SourceSemanticResourceLedger
+): void {
+  meter.charge(VECTOR_COST.lookup_work, 0, "source vector overflow lookup");
+  const previous = best.get(key);
+  if (previous !== undefined && (previous.vector.cosine > cosine || previous.vector.cosine === cosine &&
+      compareVectorKey(previous.vector.window.window_id, candidate.window.window_id) <= 0)) return;
+  meter.charge(VECTOR_COST.replacement_work, VECTOR_COST.replacement_bytes
+    + VECTOR_COST.key_bytes_per_character * key.length, "source vector overflow best-window retention");
+  best.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
+}
+
+export function rankOverflowVectorCandidates(
+  best: ReadonlyMap<string, ScoredVectorRoot>,
+  meter: SourceSemanticResourceLedger
+): ScoredVectorRoot[] {
+  meter.charge(VECTOR_COST.ordering_work, VECTOR_COST.ordering_bytes
+    + best.size * VECTOR_COST.ordering_reference_bytes, "source vector overflow ordering");
+  const ranked = [...best.values()];
+  ranked.sort((left, right) => {
+    meter.charge(VECTOR_COST.comparison_work, 0, "source vector overflow comparison");
+    return right.vector.cosine - left.vector.cosine
+      || compareVectorKey(left.source.root_key, right.source.root_key)
+      || compareVectorKey(left.vector.window.window_id, right.vector.window.window_id);
+  });
+  return ranked;
+}
 
 /** Use the saved native order and the final ranked set. Tail reads share the pinned snapshot
  * but only spend the listing allowance. */
@@ -159,7 +200,8 @@ export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberIn
     retainIndexMember(key, source);
   }
   if (indexMembers.length >= targetCount) return;
-  const listingMeter = new SourceSemanticResourceLedger({ work_units: 524_288, memory_bytes: 8 * 1024 * 1024 });
+  const listingMeter = input.listingMeter
+    ?? new SourceSemanticResourceLedger({ work_units: 524_288, memory_bytes: 8 * 1024 * 1024 });
   if (unrestrictedRawVector !== undefined && unrestrictedRawVector.length > 0
       && unrestrictedStatementVector !== undefined && unrestrictedStatementVector.length > 0) {
     interleaveThreeWayIndexMembers({
@@ -198,8 +240,8 @@ export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberIn
       seen.add(key);
       retainIndexMember(key, source);
     }
-  } catch (error) {
-    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+  } catch {
+    // Optional tail listing failures never abort ranked nominations or observation completion.
   }
 }
 
@@ -264,7 +306,7 @@ export function interleaveThreeWayIndexMembers(input: Readonly<{
       }
       lane = (lane + 1) % 3;
     }
-  } catch (error) {
-    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+  } catch {
+    // Optional tail listing failures never abort ranked nominations or observation completion.
   }
 }
