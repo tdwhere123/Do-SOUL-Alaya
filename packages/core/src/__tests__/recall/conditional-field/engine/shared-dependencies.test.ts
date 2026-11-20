@@ -30,7 +30,8 @@ import { composedFacetPathId, samePathAccepts } from "../../../../recall/conditi
 import { transitionKey } from "../../../../recall/conditional-field/engine/path-composition.js";
 import { recoverExplanationForest } from "../../../../recall/conditional-field/index/explanation.js";
 import { projectAcceptingIndex } from "../../../../recall/conditional-field/index/project-accepting-index.js";
-import { fieldPartitionNodeId } from "../../../../recall/conditional-field/cap-contract.js";
+import { fieldPartitionNodeId, hardIdentityCapContractId } from "../../../../recall/conditional-field/cap-contract.js";
+import { capOrPermissionRevisions } from "../../../../recall/conditional-field/engine/dependency-equations.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, defaultView, facetObligation, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 import {
@@ -371,6 +372,112 @@ describe("shared dependencies, witnesses, and SCC withdrawal", () => {
     }
     expect(revoked.support).toEqual([]);
     expect(revoked.transitions.some((row) => row.relation_kind === "ab" && row.applicable)).toBe(false);
+  });
+
+  it("clears SCC support when one page replaces a rule with multiple disabled revisions", () => {
+    const a = productKey("a");
+    const b = productKey("b");
+    const state = createConditionalField({
+      interpretation: interpretation(),
+      budget: defaultBudget(),
+      seeds: [activation(a, 1000)],
+      transitions: [
+        { ...edge(a, b, "ab", 900), instance_id: "ab-assertion", revision_id: "v1" },
+        edge(b, a, "ba", 900)
+      ],
+      support: [
+        supportRecord("a", [witnessOf("cycle-a", ["a"], 1)]),
+        supportRecord("b", [witnessOf("cycle-b", ["b"], 1)])
+      ]
+    });
+    expect(gradeOf(state, b)).toBe(900);
+    const revoked = applyObserverPage(state, {
+      page: adjacencyPage(),
+      effects: [
+        { observation_id: "ab-denied-v2", transition: { ...edge(a, b, "ab", 900, false), instance_id: "ab-assertion", revision_id: "v2" } },
+        { observation_id: "ab-denied-v3", transition: { ...edge(a, b, "ab", 500, false), instance_id: "ab-assertion", revision_id: "v3" } }
+      ]
+    });
+    expect(activationOf(revoked, b)).toEqual({ kind: "unreachable" });
+    expect(revoked.support).toEqual([]);
+  });
+
+  it("triggers revision when Soft coordinate changes and avoids phantom cross-coordinate SCC wipeout", () => {
+    const a = productKey("a");
+    const b = productKey("b");
+    const c = productKey("c");
+    const gamma = "coord:gamma";
+    const delta = "coord:delta";
+    const hard = hardIdentityCapContractId();
+
+    // Soft gamma -> Soft delta replacement at equal strength still triggers capOrPermissionRevisions,
+    // while Soft replacement for a revoked Hard rule also triggers revision.
+    const priorGamma: Transition = { ...edge(a, b, "ab", 900), instance_id: "ab-1", revision_id: "v1", cap_contract_id: gamma };
+    const nextDelta: Transition = { ...edge(a, b, "ab", 900), instance_id: "ab-1", revision_id: "v2", cap_contract_id: delta };
+    expect(capOrPermissionRevisions([priorGamma], [nextDelta])).toHaveLength(1);
+
+    const priorHard: Transition = { ...edge(a, b, "ab", 1000), instance_id: "ab-h", revision_id: "v1", cap_contract_id: hard };
+    const nextSoft: Transition = { ...edge(a, b, "ab", 1000), instance_id: "ab-h", revision_id: "v2", cap_contract_id: gamma };
+    expect(capOrPermissionRevisions([priorHard], [nextSoft])).toHaveLength(1);
+
+    // Cross-coordinate transitions: a -> b and c -> b in gamma; b -> c in delta.
+    // Downgrading a -> b in gamma must NOT create a phantom b <-> c cycle that evicts c!
+    const state = createConditionalField({
+      interpretation: interpretation(),
+      budget: defaultBudget(),
+      seeds: [
+        { ...activation(a, 1000), cap_contract_id: gamma },
+        { ...activation(c, 900), cap_contract_id: delta }
+      ],
+      transitions: [
+        priorGamma,
+        { ...edge(c, b, "cb", 900), cap_contract_id: gamma },
+        { ...edge(b, c, "bc", 900), cap_contract_id: delta }
+      ],
+      support: [
+        supportRecord("a", [witnessOf("w-a", ["a"], 1)]),
+        supportRecord("b", [witnessOf("w-b", ["a"], 1)]),
+        supportRecord("c", [witnessOf("w-c", ["c"], 1)])
+      ]
+    });
+
+    const revised = applyObserverPage(state, {
+      page: adjacencyPage(),
+      effects: [{ observation_id: "ab-gamma-to-delta", transition: nextDelta }]
+    });
+    expect(revised.support.map((row) => row.proposition_id)).toEqual(["c"]);
+  });
+
+  it("repairs Hard-edge cycle revision with many Soft seeds and zero Soft transitions", () => {
+    const a = productKey("a");
+    const b = productKey("b");
+    const hard = hardIdentityCapContractId();
+    const softSeeds = Array.from({ length: 24 }, (_, idx) => ({
+      ...activation(productKey(`soft-${idx}`), 500),
+      cap_contract_id: `coord:soft-${idx}`
+    }));
+    const state = createConditionalField({
+      interpretation: interpretation(),
+      budget: defaultBudget({ memory_bytes: 10_000_000, work_units: 100_000 }),
+      seeds: [{ ...activation(a, 1000), cap_contract_id: hard }, ...softSeeds],
+      transitions: [
+        { ...edge(a, b, "ab", 1000), instance_id: "ab-hard", revision_id: "v1", cap_contract_id: hard },
+        { ...edge(b, a, "ba", 1000), cap_contract_id: hard }
+      ],
+      support: [
+        supportRecord("a", [witnessOf("w-a", ["a"], 1)]),
+        supportRecord("b", [witnessOf("w-b", ["b"], 1)]),
+        supportRecord("soft-0", [witnessOf("w-soft-0", ["soft-0"], 1)])
+      ]
+    });
+    const revoked = applyObserverPage(state, {
+      page: adjacencyPage(),
+      effects: [{
+        observation_id: "ab-hard-off",
+        transition: { ...edge(a, b, "ab", 1000, false), instance_id: "ab-hard", revision_id: "v2", cap_contract_id: hard }
+      }]
+    });
+    expect(revoked.support.map((row) => row.proposition_id)).toEqual(["soft-0"]);
   });
 });
 

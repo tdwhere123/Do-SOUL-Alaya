@@ -5,7 +5,11 @@ import {
   type SupportRecord,
   type Transition
 } from "@do-soul/alaya-protocol";
-import { fieldPartitionNodeId, normalizeFieldPartitionContract } from "../cap-contract.js";
+import {
+  fieldPartitionNodeId,
+  hardIdentityCapContractId,
+  normalizeFieldPartitionContract
+} from "../cap-contract.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import type { RetainedRows } from "./retained-sequence.js";
 import { ruleIdentity, transitionKey } from "./path-composition.js";
@@ -213,29 +217,43 @@ export function capOrPermissionRevisions(
   prior: RetainedRows<Transition>,
   next: RetainedRows<Transition>
 ): readonly Transition[] {
+  const hardCoord = hardIdentityCapContractId();
   const nextKeys = new Set(next.map((row) => transitionKey(row)));
-  const nextByRule = new Map<string, Transition[]>();
+  const bestByRuleCoord = new Map<string, Map<string, number>>();
+  const bestHardByRule = new Map<string, number>();
   for (const row of next) {
+    if (!row.applicable) continue;
     const id = ruleIdentity(row);
-    const group = nextByRule.get(id);
-    if (group === undefined) nextByRule.set(id, [row]);
-    else group.push(row);
+    const coord = normalizeFieldPartitionContract(row.cap_contract_id);
+    if (coord === hardCoord) {
+      bestHardByRule.set(id, Math.max(bestHardByRule.get(id) ?? -1, row.strength_milligrades));
+      continue;
+    }
+    let byCoord = bestByRuleCoord.get(id);
+    if (byCoord === undefined) {
+      byCoord = new Map<string, number>();
+      bestByRuleCoord.set(id, byCoord);
+    }
+    byCoord.set(coord, Math.max(byCoord.get(coord) ?? -1, row.strength_milligrades));
   }
   const revised: Transition[] = [];
   for (const row of prior) {
-    if (!row.applicable) continue;
-    if (nextKeys.has(transitionKey(row))) continue;
-    const laters = nextByRule.get(ruleIdentity(row)) ?? [];
-    if (laters.length === 1) {
-      const later = laters[0]!;
-      if (!later.applicable || later.strength_milligrades < row.strength_milligrades) {
-        revised.push(later);
-      }
-      continue;
+    if (!row.applicable || nextKeys.has(transitionKey(row))) continue;
+    const id = ruleIdentity(row);
+    const coord = normalizeFieldPartitionContract(row.cap_contract_id);
+    const effective = coord === hardCoord
+      ? bestHardByRule.get(id)
+      : maxDefined(bestByRuleCoord.get(id)?.get(coord), bestHardByRule.get(id));
+    if (effective === undefined || effective < row.strength_milligrades) {
+      revised.push(row);
     }
-    if (laters.length === 0) revised.push(row);
   }
   return revised;
+}
+
+function maxDefined(a: number | undefined, b: number | undefined): number | undefined {
+  const best = Math.max(a ?? -1, b ?? -1);
+  return best >= 0 ? best : undefined;
 }
 
 export function repairSupportAfterRuleRevision(input: {
@@ -246,22 +264,64 @@ export function repairSupportAfterRuleRevision(input: {
 }): readonly SupportRecord[] {
   const revised = capOrPermissionRevisions(input.priorTransitions, input.nextTransitions);
   if (revised.length === 0) return input.support;
-  const nodeIds = [
-    ...input.seeds.map((seed) => productStateNodeId(seed.state)),
-    ...input.priorTransitions.flatMap((row) => [
-      productStateNodeId(row.from),
-      productStateNodeId(row.to)
-    ])
-  ];
-  const edges = input.priorTransitions.flatMap((row) => row.applicable
-    ? [{ from: productStateNodeId(row.from), to: productStateNodeId(row.to) }]
-    : []);
-  const touched = new Set<string>();
-  for (const row of revised) {
-    touched.add(productStateNodeId(row.from));
-    touched.add(productStateNodeId(row.to));
-  }
-  const affected = sccMembersOf(productSccs(nodeIds, edges), touched);
+  const affected = affectedByCoordinateScc(input.seeds, input.priorTransitions, revised);
   const subjects = affectedSubjectsOf(input.seeds, input.priorTransitions, affected);
   return reviseSccSupport(input.support, "", affected, subjects);
+}
+
+function affectedByCoordinateScc(
+  seeds: RetainedRows<SeedActivation>,
+  priorTransitions: RetainedRows<Transition>,
+  revised: readonly Transition[]
+): Set<string> {
+  const hardCoord = hardIdentityCapContractId();
+  const softCoords = new Set<string>();
+  for (const row of priorTransitions) {
+    if (!row.applicable) continue;
+    const c = normalizeFieldPartitionContract(row.cap_contract_id);
+    if (c !== hardCoord) softCoords.add(c);
+  }
+  const revisedSoftCoords = new Set<string>();
+  let hasHardRevision = false;
+  for (const row of revised) {
+    const c = normalizeFieldPartitionContract(row.cap_contract_id);
+    if (c === hardCoord) hasHardRevision = true;
+    else {
+      softCoords.add(c);
+      revisedSoftCoords.add(c);
+    }
+  }
+
+  const affected = new Set<string>();
+  const collectPartition = (coord: string, includeSoft: boolean): void => {
+    const matches = (contract: string | undefined): boolean => {
+      const c = normalizeFieldPartitionContract(contract);
+      return includeSoft ? c === coord || c === hardCoord : c === hardCoord;
+    };
+    const touched = new Set<string>();
+    for (const row of revised) {
+      if (!matches(row.cap_contract_id)) continue;
+      touched.add(productStateNodeId(row.from));
+      touched.add(productStateNodeId(row.to));
+    }
+    if (touched.size === 0) return;
+    const nodeIds: string[] = [];
+    for (const seed of seeds) if (matches(seed.cap_contract_id)) nodeIds.push(productStateNodeId(seed.state));
+    const edges: Array<{ readonly from: string; readonly to: string }> = [];
+    for (const row of priorTransitions) {
+      if (!row.applicable || !matches(row.cap_contract_id)) continue;
+      const from = productStateNodeId(row.from);
+      const to = productStateNodeId(row.to);
+      nodeIds.push(from, to);
+      edges.push({ from, to });
+    }
+    for (const from of touched) nodeIds.push(from);
+    for (const id of sccMembersOf(productSccs(nodeIds, edges), touched)) affected.add(id);
+  };
+
+  for (const coord of softCoords) {
+    if (hasHardRevision || revisedSoftCoords.has(coord)) collectPartition(coord, true);
+  }
+  if (hasHardRevision) collectPartition(hardCoord, false);
+  return affected;
 }

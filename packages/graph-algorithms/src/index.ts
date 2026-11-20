@@ -25,6 +25,23 @@ export {
   type OrBooleanHyperedge,
   type IdentityBooleanEdge
 } from "./boolean-hypergraph.js";
+export {
+  solveBottleneckHypergraph,
+  type BottleneckHyperedge,
+  type BottleneckHypergraphInput,
+  type BottleneckWitness,
+  type BottleneckSolveResult
+} from "./bottleneck-hypergraph.js";
+export {
+  MonotonicHypergraphMaintainer,
+  type MonotonicMaintainerInput,
+  type MonotonicMaintainerStats
+} from "./bottleneck-hypergraph-maintainer.js";
+export {
+  repairBottleneckHypergraph,
+  type BottleneckRepairInput,
+  type BottleneckRepairResult
+} from "./bottleneck-hypergraph-repair.js";
 export { MaxMinWorkQueue } from "./max-min-work-queue.js";
 export { PersistentStringMap } from "./persistent-string-map.js";
 
