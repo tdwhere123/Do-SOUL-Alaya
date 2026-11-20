@@ -400,11 +400,11 @@ describe("injective condition assignment and secondary exchange", () => {
       a: [0.90, 0.50, null, null],
       b: [0.20, null, null, null],
       c: [null, null, 0.80, null],
-      d: [null, null, null, 0.85],
+      d: [null, null, 0.60, 0.85],
       e: [0.10, 0.10, null, null],
       f: [0.15, 0.45, null, null],
       g: [0.89, 0.15, null, null],
-      h: [null, null, null, null]
+      h: [null, null, 0.40, null]
     };
     const transforms = [
       (s: number) => Math.exp(5 * s),
@@ -412,9 +412,11 @@ describe("injective condition assignment and secondary exchange", () => {
       (x: number) => 10 * x + 1,
       (y: number) => y ** 3
     ];
-    const scaledValues = Object.fromEntries(Object.entries(rawValues).map(([root, row]) => [
-      root, row.map((value, column) => value === null ? null : transforms[column]!(value))
-    ]));
+    const scaleValues = (values: Record<string, (number | null)[]>) =>
+      Object.fromEntries(Object.entries(values).map(([root, row]) => [
+        root, row.map((value, column) => value === null ? null : transforms[column]!(value))
+      ]));
+    const scaledValues = scaleValues(rawValues);
     const ranksFor = (values: Record<string, (number | null)[]>) => [0, 1, 2, 3].map(column =>
       roots.filter(root => values[root]![column] !== null)
         .sort((left, right) => values[right]![column]! - values[left]![column]! || roots.indexOf(left) - roots.indexOf(right))
@@ -425,26 +427,116 @@ describe("injective condition assignment and secondary exchange", () => {
     expect(injectiveConditionWitnessAssignment(roots, ranksFor(scaledValues), (id, col) => scaledValues[id]![col]!)?.roots)
       .toEqual(["a", "f", "c", "d"]);
 
+    const spans = roots.map((_, i) => Array.from({ length: 4 }, (_, d) => [i * 10 + d, i * 10 + d + 5] as const));
     const relations = roots.map(root => {
       if (root === "e") return [0.1, 0.1, null, null];
       if (root === "f") return [0.8, 0.9, null, null];
       if (root === "g") return [0.9, 0.8, null, null];
+      if (root === "b") return [0.99, null, null, null];
+      if (root === "h") return [null, null, 0.9, null];
       return [0.5, 0.5, 0.5, 0.5];
     });
     const baseHead = ["a", "b", "c", "d", "e"], baseTail = ["f", "g", "h"];
     const scaledHead = ["a", "b", "c", "d", "e"], scaledTail = ["f", "g", "h"];
     expect(exchangeStatementParetoSecondary({
-      association: coverage(4, rawValues, { relations }),
+      association: coverage(4, rawValues, { relations, spans }),
       pool: roots, head: baseHead, tail: baseTail, agreed: [], meter: meter()
     })).toEqual({ executed: true, swapped: true });
     expect(exchangeStatementParetoSecondary({
-      association: coverage(4, scaledValues, { relations }),
+      association: coverage(4, scaledValues, { relations, spans }),
       pool: roots, head: scaledHead, tail: scaledTail, agreed: [], meter: meter()
     })).toEqual({ executed: true, swapped: true });
     expect(scaledHead).toEqual(baseHead);
     expect(scaledTail).toEqual(baseTail);
     expect(baseHead).toContain("g");
     expect(baseHead).not.toContain("f");
+
+    // Also confirm Stage-2b Pass 2 + U_min veto remains 100% invariant under per-column exp(...) transforms.
+    const vetoPass2Raw: Record<string, (number | null)[]> = {
+      a: [0.95, null, 0.70],
+      b: [null, 0.95, null],
+      c: [0.20, null, null],
+      d: [0.30, null, null],
+      e: [null, null, 0.95],
+      f: [null, null, null],
+      g: [0.80, null, null],
+      h: [null, null, 0.40]
+    };
+    const vetoPass2Scaled = scaleValues(vetoPass2Raw);
+    const vetoSpans = roots.map((_, i) => Array.from({ length: 3 }, (_, d) => [i * 10 + d, i * 10 + d + 5] as const));
+    const vetoRel = roots.map(root => {
+      if (root === "c") return [0.99, null, null];
+      if (root === "d") return [0.10, null, null];
+      return [0.5, 0.5, 0.5];
+    });
+    const vetoHead1 = ["a", "b", "c", "d", "e"], vetoTail1 = ["f", "g", "h"];
+    const vetoHead2 = ["a", "b", "c", "d", "e"], vetoTail2 = ["f", "g", "h"];
+    expect(exchangeStatementParetoSecondary({
+      association: coverage(3, vetoPass2Raw, { relations: vetoRel, spans: vetoSpans }),
+      pool: roots, head: vetoHead1, tail: vetoTail1, agreed: [], meter: meter()
+    })).toEqual({ executed: true, swapped: false });
+    expect(exchangeStatementParetoSecondary({
+      association: coverage(3, vetoPass2Scaled, { relations: vetoRel, spans: vetoSpans }),
+      pool: roots, head: vetoHead2, tail: vetoTail2, agreed: [], meter: meter()
+    })).toEqual({ executed: true, swapped: false });
+    expect(vetoHead2).toEqual(vetoHead1);
+    expect(vetoTail2).toEqual(vetoTail1);
+  });
+
+  it("vetoes Stage-2b eviction of a dominated occupant when a weaker-coverage peer has the same masks", () => {
+    const association = coverage(2, {
+      a: [0.95, null],
+      b: [null, 0.95],
+      c: [0.20, null],
+      d: [0.30, null],
+      g: [0.80, null]
+    }, {
+      spans: roots.map((_, i) => [[i, i + 5] as const, [i + 10, i + 15] as const]),
+      relations: roots.map(root => root === "c" ? [0.99, null]
+        : root === "d" ? [0.10, null]
+        : root === "g" ? [0.50, null]
+        : [0.5, 0.5])
+    });
+    const head = ["a", "b", "c", "d", "e"], tail = ["f", "g", "h"];
+    expect(exchangeStatementParetoSecondary({ association, pool: roots, head, tail, agreed: [], meter: meter() }))
+      .toEqual({ executed: true, swapped: false });
+    expect(head).toEqual(["a", "b", "c", "d", "e"]);
+  });
+
+  it("runs breadth-first Pass 1 rank-2 derived witnesses before Pass 2 fallback tail witnesses", () => {
+    const association = coverage(2, {
+      a: [0.95, null],
+      b: [0.85, 0.95],
+      e: [0.10, 0.10],
+      f: [0.75, null],
+      g: [null, 0.80]
+    }, {
+      spans: roots.map((_, i) => [[i, i + 5] as const, [i + 10, i + 15] as const]),
+      relations: roots.map(root => root === "e" ? [0.1, 0.1] : [0.9, 0.9])
+    });
+    // Only slot 4 (e) is replaceable; Col 0's ranked[1] (b) is already in head, so Pass 1 places Col 1's g first.
+    const head = ["a", "b", "c", "d", "e"], tail = ["f", "g", "h"];
+    expect(exchangeStatementParetoSecondary({ association, pool: roots, head, tail, agreed: [], meter: meter() }))
+      .toEqual({ executed: true, swapped: true });
+    expect(head).toEqual(["a", "b", "c", "d", "g"]);
+    expect(tail).toContain("f");
+
+    // When a second replaceable slot (d) is also available, Pass 2 promotes Col 0's first unplaced tail witness (f).
+    const twoSlots = coverage(2, {
+      a: [0.95, null],
+      b: [0.85, 0.95],
+      d: [0.12, null],
+      e: [null, 0.10],
+      f: [0.75, null],
+      g: [null, 0.80]
+    }, {
+      spans: roots.map((_, i) => [[i, i + 5] as const, [i + 10, i + 15] as const]),
+      relations: roots.map(root => root === "d" || root === "e" ? [0.1, 0.1] : [0.9, 0.9])
+    });
+    const head2 = ["a", "b", "c", "d", "e"], tail2 = ["f", "g", "h"];
+    expect(exchangeStatementParetoSecondary({ association: twoSlots, pool: roots, head: head2, tail: tail2, agreed: [], meter: meter() }))
+      .toEqual({ executed: true, swapped: true });
+    expect(head2).toEqual(["a", "b", "c", "f", "g"]);
   });
 
   it("protects a placed derived rank-2 witness from eviction by a later derived column", () => {

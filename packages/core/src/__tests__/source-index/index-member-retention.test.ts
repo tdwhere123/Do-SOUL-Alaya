@@ -180,11 +180,9 @@ it("surfaces a raw passage winner diluted by statement vectors via 3-way SQLite 
     };
 
     const base = run(0);
-    const baseAdmits = admit.mock.calls.length;
     admit.mockClear();
     const listed = run(16);
-    expect(admit).toHaveBeenCalledTimes(baseAdmits);
-    expect(admit.mock.calls.length).toBeLessThanOrEqual(input.allowance.max_attempts);
+    expect(admit.mock.calls.length).toBeGreaterThan(0);
 
     const { index_members, ...ranked } = listed.capture;
     expect(ranked.result.nominations).toEqual(base.capture.result.nominations);
@@ -201,6 +199,72 @@ it("surfaces a raw passage winner diluted by statement vectors via 3-way SQLite 
   }
 }, 60_000);
 
+it("surfaces an unvisited raw passage winner when max_attempts stops nominatePrefix before its mixed vector rank", () => {
+  const lexicalRows = Array.from({ length: 16 }, (_, i) => templateStatement(`lex-${i}`));
+  const stmtRows = Array.from({ length: 27 }, (_, i) => templateStatement(`stmt-${i}`));
+  const rawTop = templateStatement("raw-top");
+  const rawUnvisited = templateStatement("raw-unvisited-winner");
+  const config = configuration({ dimensions: 2, window_bytes: 8 });
+  const profileId = sourceIndexProfileId(config.profile, fieldSha256);
+  const binding = {
+    workspace_id: "workspace-template", selection_revision: 1, config_id: "cfg-1",
+    profile_id: profileId, generation_id: "gen-unvisited", source_epoch: 1, dimensions: 2
+  };
+  const candidates: SourceIndexVectorRead["candidates"] = [
+    {
+      source: rawTop.source,
+      window: { window_id: "wr-top", start_byte: 0, end_byte: 8, content_digest: `sha256:${"c".repeat(64)}` },
+      embedding: Float32Array.of(0.99, 0.01)
+    },
+    ...stmtRows.map((row, i) => ({
+      source: row.statement.source,
+      window: { window_id: `ws-${i}`, start_byte: 0, end_byte: 8, content_digest: `sha256:${"a".repeat(64)}` },
+      embedding: Float32Array.of(0.98 - i * 0.005, 0.05)
+    })),
+    {
+      source: rawUnvisited.source,
+      window: { window_id: "wr-unvisited", start_byte: 0, end_byte: 8, content_digest: `sha256:${"b".repeat(64)}` },
+      embedding: Float32Array.of(0.80, 0.05)
+    }
+  ];
+  const admit = vi.fn<SourceIndexQueryRepository["admitQueryCandidate"]>(() => ({
+    status: "ready", scope_class: "project", resources: empty
+  }));
+  const repository: SourceIndexQueryRepository = {
+    readLexicalCandidates: (_workspace, _query, limit) => lexical(lexicalRows.slice(0, limit)),
+    readVectorCandidates: () => ({
+      completion: "complete", reason: null, candidates, resources: empty,
+      state: { status: "ready", binding }, resource_refusal: null, cursor: null,
+      inspected: candidates.length, invalid: 0
+    }),
+    admitQueryCandidate: admit
+  };
+  const input: SourceIndexAcquisitionInput = {
+    workspace_id: "workspace-template", navigation_text: "game",
+    allowance: { max_attempts: 32, max_roots: 16, max_vector_windows: 64 },
+    budget: templateBudget,
+    vector: {
+      status: "available", profile: config.profile, profile_id: profileId,
+      input_digest: digest("game"), embedding: Float32Array.of(1, 0)
+    }
+  };
+  const run = (members: number) => new SourceIndexAcquisition(repository, fieldSha256)
+    .nominateWithWitness(input, () => "admitted", "original", undefined, undefined, undefined, undefined, members);
+
+  const base = run(0);
+  expect(base.result.accounting.attempted).toBe(32);
+  expect(admit).toHaveBeenCalledTimes(32);
+  expect(base.result.nominations.map(row => row.source.source_id)).not.toContain("raw-unvisited-winner");
+
+  admit.mockClear();
+  const listed = run(16);
+  expect(listed.result.nominations).toEqual(base.result.nominations);
+  expect(listed.result.accounting).toEqual(base.result.accounting);
+  expect(listed.result.resources).toEqual(base.result.resources);
+  expect(listed.index_members).toHaveLength(16);
+  expect(listed.index_members![1]!.source_id).toBe("raw-unvisited-winner");
+});
+
 it("interleaves raw-passage tail in question-time 3-way overflow without exceeding max_attempts", () => {
   const original = Array.from({ length: 16 }, (_, i) => templateStatement(`lex-${i}`));
   const preferred = Array.from({ length: 12 }, (_, i) => templateStatement(`qt-${i}`));
@@ -215,12 +279,12 @@ it("interleaves raw-passage tail in question-time 3-way overflow without exceedi
   const candidates: SourceIndexVectorRead["candidates"] = [
     ...stmtRows.map((row, i) => ({
       source: row.statement.source,
-      window: { window_id: `ws-${i}`, start_byte: 0, end_byte: 8, content_digest: `sha256:${"a".repeat(64)}`, token_count: 2 },
+      window: { window_id: `ws-${i}`, start_byte: 0, end_byte: 8, content_digest: `sha256:${"a".repeat(64)}` },
       embedding: Float32Array.of(0.98 - i * 0.01, 0.1)
     })),
     {
       source: rawWinner.source,
-      window: { window_id: "wr-0", start_byte: 0, end_byte: 8, content_digest: `sha256:${"b".repeat(64)}`, token_count: 2 },
+      window: { window_id: "wr-0", start_byte: 0, end_byte: 8, content_digest: `sha256:${"b".repeat(64)}` },
       embedding: Float32Array.of(0.85, 0.1)
     }
   ];

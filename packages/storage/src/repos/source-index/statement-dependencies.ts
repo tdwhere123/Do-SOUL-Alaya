@@ -5,10 +5,10 @@ import { StorageError } from "../../shared/errors.js";
 import { CURRENT_SOURCE_RECORD_ORDER } from "../field/source-representation-read.js";
 
 /** Reuse the raw-source owner's head ordering; replacement is not world-claim falsity. */
-function unavailableDependencySql(dependency: string): string {
+function dependencyCheckSql(dependency: string, bodyCondition: string): string {
   return `NOT EXISTS (SELECT 1 FROM source_records retained
     WHERE retained.workspace_id=${dependency}.workspace_id AND retained.record_id=${dependency}.record_id
-      AND retained.source_body IS NOT NULL AND retained.record_id=(
+      AND ${bodyCondition} AND retained.record_id=(
         SELECT source_records.record_id FROM source_records
         WHERE source_records.workspace_id=${dependency}.workspace_id AND source_records.source_id=${dependency}.source_id
         ORDER BY ${CURRENT_SOURCE_RECORD_ORDER} LIMIT 1))
@@ -16,8 +16,17 @@ function unavailableDependencySql(dependency: string): string {
       AND barrier.subject_kind='source_record' AND barrier.subject_id=${dependency}.record_id)`;
 }
 
+function unavailableDependencySql(dependency: string): string {
+  return dependencyCheckSql(dependency, "retained.source_body IS NOT NULL");
+}
+
+function staleDependencySql(dependency: string): string {
+  return dependencyCheckSql(dependency, "(retained.source_body IS NOT NULL OR retained.retained_content_bytes > 0)");
+}
+
 /** A shared eligibility projection for native keys and only explicitly bound derived memory. */
 const UNAVAILABLE_STATEMENT_DEPENDENCY_SQL = unavailableDependencySql("dependency");
+const STALE_STATEMENT_DEPENDENCY_SQL = staleDependencySql("dependency");
 export const UNAVAILABLE_BOUND_STATEMENT_SQL = `NOT EXISTS (SELECT 1 FROM evidence_capsules evidence
     WHERE evidence.workspace_id=binding.workspace_id AND evidence.object_id=binding.artifact_id AND evidence.lifecycle_state='active')
   OR NOT EXISTS (SELECT 1 FROM source_statement_dependencies dependency
@@ -76,8 +85,11 @@ export function readStatementDependencies(database: StorageDatabase, workspace: 
   const dependencyWork = 4 * n;
   if (n === 0) return { status: "partial" as const, resources };
   if (dependencyWork + 1 > budget.work) return { status: "resource_limited" as const, resources };
-  const stale = cachedReadStatement(database, `SELECT 1 FROM source_statement_dependencies dependency
-    WHERE workspace_id=? AND artifact_id=? AND (${UNAVAILABLE_STATEMENT_DEPENDENCY_SQL}) LIMIT 1`).get(workspace, artifactId) !== undefined;
+  const row = cachedReadStatement(database, `SELECT MAX(CASE WHEN (${STALE_STATEMENT_DEPENDENCY_SQL}) THEN 2 ELSE 1 END) AS bad
+    FROM source_statement_dependencies dependency
+    WHERE workspace_id=? AND artifact_id=? AND (${UNAVAILABLE_STATEMENT_DEPENDENCY_SQL})`)
+    .get(workspace, artifactId) as { bad: number | null } | undefined;
   resources.work += dependencyWork; resources.native_bytes += 8;
-  return { status: stale ? "stale" as const : "ready" as const, resources };
+  const status = row?.bad === 2 ? "stale" as const : row?.bad === 1 ? "partial" as const : "ready" as const;
+  return { status, resources };
 }

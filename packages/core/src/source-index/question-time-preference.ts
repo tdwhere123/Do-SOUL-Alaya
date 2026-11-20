@@ -127,6 +127,7 @@ export type QuestionTimeIndexMemberPrefix = Readonly<{
   unrestrictedLexical: readonly { source: SourceIndexTarget }[];
   unrestrictedVector: readonly { source: SourceIndexTarget }[];
   unrestrictedRawVector?: readonly { source: SourceIndexTarget }[];
+  unrestrictedStatementVector?: readonly { source: SourceIndexTarget }[];
   cursor: Readonly<{ lexicalIndex: number; vectorIndex: number; takeLexical: boolean }>;
   originalPrefix: readonly (readonly [string, SourceIndexTarget])[];
 }>;
@@ -148,7 +149,8 @@ type QuestionTimeIndexMemberInput = QuestionTimeIndexMemberPrefix & Readonly<{
 /** Use the saved native order and the final ranked set. Tail reads share the pinned snapshot
  * but only spend the listing allowance. */
 export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberInput): void {
-  const { unrestrictedLexical, unrestrictedVector, unrestrictedRawVector, indexMembers, targetCount, retainIndexMember } = input;
+  const { unrestrictedLexical, unrestrictedVector, unrestrictedRawVector, unrestrictedStatementVector,
+    indexMembers, targetCount, retainIndexMember } = input;
   const seen = new Set([...input.nominationKeys, ...input.indexMemberKeys]);
   for (const [key, source] of input.originalPrefix) {
     if (indexMembers.length >= targetCount) return;
@@ -158,8 +160,16 @@ export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberIn
   }
   if (indexMembers.length >= targetCount) return;
   const listingMeter = new SourceSemanticResourceLedger({ work_units: 524_288, memory_bytes: 8 * 1024 * 1024 });
-  if (unrestrictedRawVector !== undefined && unrestrictedRawVector.length > 0) {
-    collectThreeWayQuestionTimeIndexMembers(input, unrestrictedRawVector, seen, listingMeter);
+  if (unrestrictedRawVector !== undefined && unrestrictedRawVector.length > 0
+      && unrestrictedStatementVector !== undefined && unrestrictedStatementVector.length > 0) {
+    interleaveThreeWayIndexMembers({
+      lanes: [unrestrictedLexical, unrestrictedRawVector, unrestrictedStatementVector],
+      startLane: input.cursor.takeLexical ? 0 : 1,
+      targetCount, maxExtraAttempts: input.maxExtraAttempts, seen, indexMembers, retainIndexMember,
+      repository: input.repository, vectorBinding: input.vectorBinding,
+      unboundAdmissions: input.unboundAdmissions, boundAdmissions: input.boundAdmissions,
+      admitScope: input.admitScope, listingMeter
+    });
     return;
   }
   if (input.maxExtraAttempts === 0) return;
@@ -193,16 +203,32 @@ export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberIn
   }
 }
 
-function collectThreeWayQuestionTimeIndexMembers(
-  input: QuestionTimeIndexMemberInput,
-  unrestrictedRawVector: readonly { source: SourceIndexTarget }[],
-  seen: Set<string>,
-  listingMeter: SourceSemanticResourceLedger
-): void {
-  const lanes = [input.unrestrictedLexical, unrestrictedRawVector, input.unrestrictedVector] as const;
-  const cursors = [input.cursor.lexicalIndex, 0, input.cursor.vectorIndex];
+/** Interleave [lexical, rawVector, statementVector] off the acquisition ledger, reusing prior admissions. */
+export function interleaveThreeWayIndexMembers(input: Readonly<{
+  lanes: readonly [
+    readonly { source: SourceIndexTarget }[],
+    readonly { source: SourceIndexTarget }[],
+    readonly { source: SourceIndexTarget }[]
+  ];
+  startLane?: number;
+  targetCount: number;
+  maxExtraAttempts: number;
+  seen: Set<string>;
+  indexMembers: readonly SourceIndexTarget[];
+  retainIndexMember: (key: string, source: SourceIndexTarget) => void;
+  repository: SourceIndexQueryRepository;
+  vectorBinding: SourceIndexVectorBinding | null;
+  unboundAdmissions: ReadonlyMap<string, SourceIndexQueryAdmission>;
+  boundAdmissions: ReadonlyMap<string, SourceIndexQueryAdmission>;
+  admitScope: SourceIndexScopeAdmission;
+  listingMeter?: SourceSemanticResourceLedger;
+}>): void {
+  const listingMeter = input.listingMeter
+    ?? new SourceSemanticResourceLedger({ work_units: 524_288, memory_bytes: 8 * 1024 * 1024 });
+  const { lanes, seen } = input;
+  const cursors = [0, 0, 0];
   const blocked = [false, false, false];
-  let lane = input.cursor.takeLexical ? 0 : 1;
+  let lane = input.startLane ?? 0;
   let extraAttempts = 0;
   try {
     while (input.indexMembers.length < input.targetCount && lanes.some((rows, i) => !blocked[i] && cursors[i]! < rows.length)) {

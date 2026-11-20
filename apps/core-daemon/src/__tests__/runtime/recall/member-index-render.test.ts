@@ -46,3 +46,19 @@ it("places Soft neighbors after pool members and before overflow", () => {
     ["pool-a", true], ["graph-b", false], ["overflow-c", false]
   ]);
 });
+
+it("passes null vectors to readMemberListing when conditions are empty and preserves them when non-empty", () => {
+  const vectors = { generation_id: "gen-1", dimensions: 2 };
+  const seen: Array<{ generation_id: string; dimensions: number } | null> = [];
+  const repo = {
+    readMemberListing: (_source: ReturnType<typeof member>, listingVectors: { generation_id: string; dimensions: number } | null) => {
+      seen.push(listingVectors);
+      return ready("entry");
+    }
+  };
+  renderMemberIndex(repo, { pool: [member("root-0")], overflow: [], conditions: [], vectors }, new Set(), 0);
+  renderMemberIndex(repo, {
+    pool: [member("root-1")], overflow: [], conditions: [Float32Array.of(1, 0)], vectors
+  }, new Set(), 0);
+  expect(seen).toEqual([null, vectors]);
+});

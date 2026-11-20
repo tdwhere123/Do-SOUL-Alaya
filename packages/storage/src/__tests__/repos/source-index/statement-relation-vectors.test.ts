@@ -197,8 +197,15 @@ it("refuses overlay target lookup before transferring a root_key when work or na
 
 it("keeps a pending overlay row on partial source unavailability and seeds pre-047 statement targets", () => {
   const { environment, generation, source } = setupStatement();
-  environment.database.connection.prepare("UPDATE source_records SET source_body=NULL, retained_content_bytes=8 WHERE workspace_id=?")
+  environment.database.connection.prepare("UPDATE source_records SET source_body=NULL WHERE workspace_id=?")
     .run(WORKSPACE);
+  // Set retained_content_bytes after clearing source_body so the invalidation trigger does not reset it to NULL,
+  // and re-enqueue the pending row cleared by the source_records invalidation trigger.
+  environment.database.connection.prepare("UPDATE source_records SET retained_content_bytes=8 WHERE workspace_id=?")
+    .run(WORKSPACE);
+  environment.database.connection.prepare(
+    "INSERT OR IGNORE INTO source_statement_relation_pending (workspace_id, generation_id, root_key) VALUES (?, ?, ?)"
+  ).run(WORKSPACE, generation.generation_id, source.root_key);
   const partialRead = environment.index.readStatementRelationText(WORKSPACE, generation.generation_id, source.root_key, BUDGET);
   expect(partialRead).toMatchObject({ status: "unknown", reason: "native_source_unavailable" });
   expect(environment.database.connection.prepare(

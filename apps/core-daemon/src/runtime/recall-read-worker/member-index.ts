@@ -101,10 +101,11 @@ export function renderMemberIndex(repository: Pick<SqliteSourceIndexRepository, 
       seen.add(root); members.push({ source, pool });
     }
   }
+  const listingVectors = inputs.conditions.length > 0 ? inputs.vectors : null;
   const lines: RecallMemberIndexLine[] = [];
   for (const member of members) {
     if (shown + lines.length >= MEMBER_INDEX_ROOTS) break;
-    const listing = repository.readMemberListing(member.source, inputs.vectors,
+    const listing = repository.readMemberListing(member.source, listingVectors,
       { work_units: ledger.work, memory_bytes: ledger.bytes });
     try {
       ledger.charge(listing.resources.work, listing.resources.memory_bytes, "member index listing");

@@ -200,9 +200,10 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
   for (let i = 0; i < tail.length; i++) tailRows[i] = rootRow.get(tail[i]!) ?? -1;
   let exchanged = false;
 
-  const tryPlace = (incoming: string, column: number): boolean => {
+  const tryPlace = (incoming: string, column: number, vetoDominatedVictim = false): boolean => {
     const at = tail.indexOf(incoming);
     if (at < 0) return false;
+    const unprotected: SlotCandidate[] = [];
     for (let slot = head.length - 1; slot >= 1; slot--) {
       const occupant = head[slot]!;
       if (agreedSet.has(occupant) || marginalSet.has(occupant) || placed.has(occupant)) continue;
@@ -210,41 +211,24 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
       if (occRow === undefined) continue;
       const occCov = association.coverage[occRow]!;
       const occRel = relations[occRow]!;
-      let hasWitness = false;
-      for (let d = 0; d < n; d++) {
-        if (occCov[d] !== null) { hasWitness = true; break; }
+      if (!hasAnyWitness(occCov, n) || !passesPossibleGuard(occCov, n, column,
+        d => possible(occupant, d), coverage(incoming, column) !== null)) continue;
+      const dominated = isSlotDominated(occCov, occRel, association.coverage, relations, tailRows, n);
+      if (!vetoDominatedVictim) {
+        if (!dominated) continue;
+        swapHeadTail(head, tail, tailRows, rootRow, slot, at);
+        exchanged = true;
+        return true;
       }
-      if (!hasWitness) continue;
-      let possibleGuard = true;
-      for (let d = 0; d < n; d++) {
-        if (occCov[d] !== null || !possible(occupant, d) || d === column && coverage(incoming, column) !== null) continue;
-        possibleGuard = false; break;
-      }
-      if (!possibleGuard) continue;
-      let dominated = true;
-      for (let d = 0; d < n; d++) {
-        if (occCov[d] === null) continue;
-        let found = false;
-        for (let t = 0; t < tailRows.length; t++) {
-          const tRow = tailRows[t]!;
-          if (tRow < 0) continue;
-          const tCov = association.coverage[tRow]?.[d];
-          const tRel = relations[tRow]?.[d];
-          if (tCov != null && tCov > occCov[d]! && tRel != null && occRel[d] != null && tRel > occRel[d]!) {
-            found = true; break;
-          }
-        }
-        if (!found) { dominated = false; break; }
-      }
-      if (!dominated) continue;
-      const displaced = head[slot]!;
-      head[slot] = incoming;
-      tail[at] = displaced;
-      tailRows[at] = rootRow.get(displaced) ?? -1;
-      exchanged = true;
-      return true;
+      unprotected.push({ slot, occupant, occCov, dominated });
     }
-    return false;
+    if (!vetoDominatedVictim) return false;
+    const chosen = unprotected.find(s => s.dominated
+      && !unprotected.some(o => o.slot !== s.slot && vetoesVictim(o, s, n, possible)));
+    if (chosen === undefined) return false;
+    swapHeadTail(head, tail, tailRows, rootRow, chosen.slot, at);
+    exchanged = true;
+    return true;
   };
 
   if (match !== null) {
@@ -253,11 +237,95 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
     }
   }
   if (association.spans !== undefined) {
+    const secondPassColumns: number[] = [];
     for (const [column, ranked] of ranks.entries()) {
       const top = ranked[0], candidate = ranked[1];
-      if (top === undefined || candidate === undefined || !head.includes(top) || head.includes(candidate)) continue;
-      if (tryPlace(candidate, column)) placed.add(candidate);
+      if (top === undefined || candidate === undefined || !head.includes(top)) continue;
+      if (head.includes(candidate)) {
+        placed.add(candidate);
+        secondPassColumns.push(column);
+        continue;
+      }
+      if (tryPlace(candidate, column, true)) placed.add(candidate);
+    }
+    for (const column of secondPassColumns) {
+      const ranked = ranks[column]!;
+      let candidate: string | undefined;
+      for (let k = 2; k < ranked.length; k++) {
+        const id = ranked[k]!;
+        if (head.includes(id)) {
+          placed.add(id);
+          continue;
+        }
+        candidate = id;
+        break;
+      }
+      if (candidate !== undefined && tryPlace(candidate, column, true)) placed.add(candidate);
     }
   }
   return { executed: true, swapped: exchanged };
+}
+
+type SlotCandidate = Readonly<{
+  slot: number;
+  occupant: string;
+  occCov: readonly (number | null)[];
+  dominated: boolean;
+}>;
+
+function hasAnyWitness(occCov: readonly (number | null)[], n: number): boolean {
+  for (let d = 0; d < n; d++) if (occCov[d] !== null) return true;
+  return false;
+}
+
+function passesPossibleGuard(occCov: readonly (number | null)[], n: number, incomingColumn: number,
+  isPossible: (d: number) => boolean, incomingWitnessesColumn: boolean): boolean {
+  for (let d = 0; d < n; d++) {
+    if (occCov[d] !== null || !isPossible(d) || d === incomingColumn && incomingWitnessesColumn) continue;
+    return false;
+  }
+  return true;
+}
+
+function isSlotDominated(occCov: readonly (number | null)[], occRel: readonly (number | null)[],
+  coverage: StatementAssociation["coverage"], relations: NonNullable<StatementAssociation["relations"]>,
+  tailRows: Int32Array, n: number): boolean {
+  for (let d = 0; d < n; d++) {
+    if (occCov[d] === null) continue;
+    let found = false;
+    for (let t = 0; t < tailRows.length; t++) {
+      const tRow = tailRows[t]!;
+      if (tRow < 0) continue;
+      const tCov = coverage[tRow]?.[d];
+      const tRel = relations[tRow]?.[d];
+      if (tCov != null && tCov > occCov[d]! && tRel != null && occRel[d] != null && tRel > occRel[d]!) {
+        found = true; break;
+      }
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
+function vetoesVictim(other: SlotCandidate, victim: SlotCandidate, n: number,
+  possible: (id: string, column: number) => boolean): boolean {
+  let strictlyWeaker = false;
+  for (let d = 0; d < n; d++) {
+    const oVal = other.occCov[d]!, sVal = victim.occCov[d]!;
+    if ((oVal !== null) !== (sVal !== null)) return false;
+    if (possible(other.occupant, d) !== possible(victim.occupant, d)) return false;
+    if (sVal !== null) {
+      if (oVal! > sVal) return false;
+      if (oVal! < sVal) strictlyWeaker = true;
+    }
+  }
+  return strictlyWeaker;
+}
+
+function swapHeadTail(head: string[], tail: string[], tailRows: Int32Array, rootRow: ReadonlyMap<string, number>,
+  slot: number, at: number): void {
+  const displaced = head[slot]!;
+  head[slot] = tail[at]!;
+  tail[at] = displaced;
+  tailRows[at] = rootRow.get(displaced) ?? -1;
 }

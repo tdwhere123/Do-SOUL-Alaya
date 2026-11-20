@@ -40,7 +40,7 @@ import { sourceSemanticAcquisitionOutcome } from "./source-semantic-index-acquis
 import { taskInterpretationReader } from "./source-semantic-discovery.js";
 import type { SourceSemanticObserver } from "./source-semantic-observation.js";
 
-const readersByRuntime = new WeakMap<RecallReadWorkerRuntime, ObserverReaders>();
+const readersByRuntime = new WeakMap<RecallReadWorkerRuntime, Readonly<{ version: number; readers: ObserverReaders }>>();
 
 /** One nomination allowance for the field's source-index frontier. */
 export const NATIVE_SOURCE_NOMINATION_ALLOWANCE = Object.freeze({
@@ -192,14 +192,26 @@ export function runConditionalFieldWorkerRecall(
   };
 }
 
-/** A first page builds its own readers so its nomination can hand the member-index inputs to this call only. */
+/** Reuse compiled DB readers per runtime connection version, swapping only query-bound nomination. */
 function workerReaders(runtime: RecallReadWorkerRuntime, payload: ConditionalFieldRecallWorkerPayload,
   injected: ObserverReaders | undefined, observer: SourceSemanticObserver | undefined, firstPage: boolean) {
   let memberInputs: MemberIndexInputs | undefined;
-  const base: ObserverReaders = injected ?? (payload.prepared_query === undefined && observer === undefined && !firstPage
-    ? readersFor(runtime)
-    : createConditionalFieldObserverReaders(runtime.database, [], payload.prepared_query?.vector, observer,
-      "allowance", payload.prepared_query?.evidence, firstPage ? inputs => { memberInputs ??= inputs; } : undefined));
+  const shared = injected ?? readersFor(runtime);
+  const base: ObserverReaders = injected !== undefined
+    || (payload.prepared_query === undefined && observer === undefined && !firstPage)
+    ? shared
+    : {
+      ...shared,
+      nominateSources: input => nominateNativeSources(
+        runtime.database,
+        input,
+        payload.prepared_query?.vector ?? { status: "unavailable", reason: "embedding_preparation_unwired" },
+        observer,
+        "allowance",
+        payload.prepared_query?.evidence,
+        firstPage ? inputs => { memberInputs ??= inputs; } : undefined
+      )
+    };
   const readers: ObserverReaders = observer === undefined || base.nominateSources === undefined ? base : {
     ...base, nominateSources: input => {
       const nomination = base.nominateSources!(input);
@@ -521,10 +533,11 @@ export function createConditionalFieldObserverReaders(database: StorageDatabase,
 }
 
 function readersFor(runtime: RecallReadWorkerRuntime): ObserverReaders {
+  const version = runtime.database.getConnectionVersion();
   const existing = readersByRuntime.get(runtime);
-  if (existing !== undefined) return existing;
+  if (existing !== undefined && existing.version === version) return existing.readers;
   const created = createConditionalFieldObserverReaders(runtime.database);
-  readersByRuntime.set(runtime, created);
+  readersByRuntime.set(runtime, { version, readers: created });
   return created;
 }
 

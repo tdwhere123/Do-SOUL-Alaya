@@ -157,15 +157,16 @@ immediately after slot 5. When statement-relation overlay vectors are present,
 navigation then runs a fibered two-coordinate secondary exchange on the same
 un-varianted head and tail: an injective condition-to-root assignment when
 marginal tops collide (maximizing cardinality and within-column rank survival
-quantile, invariant under monotone per-column score transforms), then a derived
-rank-2 witness of a distinct physical source root, each
-unlocking only a later head slot whose necessary columns are strictly dominated
+quantile, invariant under monotone per-column score transforms), then breadth-first
+rank-2 derived witnesses (and first unplaced tail witnesses for columns whose
+rank-2 is already seated) guarded by unprotected-head coverage-order coherence,
+each unlocking only a later head slot whose necessary columns are strictly dominated
 in both key cosine and winning-key relation cosine by some current tail root.
 Missing overlay rows stay `null` (never coerced to `0`); an all-null overlay is
 a deterministic no-op and reproduces the prefix-only order. Membership filtering
 omits `relations` when every remaining cell is null. Unwitnessed original
 head roots, agreed prefix members, assigned marginal tops, and placed derived
-rank-2 witnesses are not evicted.
+witnesses are not evicted.
 Every root under active conditions
 opens at its witnessing host-message span (back-extended to the user prompt for
 assistant witnesses) or its first message/line unit (`payload_continuation`
@@ -202,8 +203,8 @@ via `BoundedIndexPayload` and `recall-page-encoding.ts`:
   after page fit and has its own work and memory allowance. With active
   `question_time`, the overflow lists displaced original roots before resuming
   the unrestricted candidate lanes. When statement vectors share the index,
-  `member_index` overflow interleaves lexical, raw-passage vector, and mixed
-  vector candidates without altering the 16-root nomination pool.
+  `member_index` overflow interleaves lexical, raw-passage vector, and
+  statement-key vector candidates without altering the 16-root nomination pool.
   Pass `member_index[i].source_target` directly to `soul.open_pointer`. For a
   ranked `source_evidence` result, build `source_target` from `root_kind`,
   `root_id`, `source_version`, `content_digest`, and `evidence_object_id`.
