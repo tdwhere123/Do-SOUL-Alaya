@@ -133,14 +133,17 @@ function copiedAssignment(posMap: ReadonlyMap<string, number>, n: number, size: 
 export function quoteStatementParetoExchange(roots: number, statements: number): SourceSemanticResourceBudget {
   if (roots < 1 || statements < 1 || statements > 5) return { work_units: 0, memory_bytes: 0 };
   const R = roots, n = statements, M = 1 << n;
-  const setupAndSort = R * (n + 6) + n * R * (2 * Math.ceil(Math.log2(R + 1)) + 2) + 4 * n;
+  const setupAndSort = R * (2 * n + 6) + 2 * n * R * Math.ceil(Math.log2(R + 1)) + 4 * n;
   const dpWork = n >= 2
-    ? 3 * R + R * M + R * n * (1 << (n - 1)) * (R <= PACKED_POOL_LIMIT ? 4 : 2 * n + 4) + M * (n + 2)
+    ? R * (n + M) + 2 * n * Math.ceil(Math.log2(R + 1))
+      + R * n * (1 << (n - 1)) * (R <= PACKED_POOL_LIMIT ? 3 : 2 * n + 4) + M * (n + 2)
     : 0;
   const maxH = Math.min(4, Math.max(0, R - 1));
-  const htPairs = R <= 9 ? Math.floor(((R - 1) * (R - 1)) / 4) : 4 * (R - 5);
+  let domPairs = 0;
+  for (let h = 1; h <= maxH; h++) domPairs += h * Math.max(0, R - 1 - h);
   const vetoPairs = maxH * Math.max(0, maxH - 1);
-  const dominance = 2 * n * (R * (2 * n + 5) + n * 2 * htPairs) + 4 * n * n * vetoPairs;
+  const dominance = 2 * n * (2 * R + maxH * (3 * n + 4) + 2)
+    + 3 * n * domPairs + n * maxH * (maxH + 1) + 4 * n * n * vetoPairs;
   return {
     work_units: setupAndSort + dpWork + dominance,
     memory_bytes: 2048 + R * (256 + 32 * n) + n * 384
@@ -186,6 +189,7 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
   const marginalSet = new Set(marginal.filter((id): id is string => id !== null));
   const tailRows = new Int32Array(tail.length);
   for (let i = 0; i < tail.length; i++) tailRows[i] = rootRow.get(tail[i]!) ?? -1;
+  const slotDominated = new Int8Array(head.length).fill(-1);
   let exchanged = false;
 
   const tryPlace = (incoming: string, column: number, vetoDominatedVictim = false): boolean => {
@@ -201,10 +205,15 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
       const occRel = relations[occRow]!;
       if (!hasAnyWitness(occCov, n) || !passesPossibleGuard(occCov, n, column,
         d => possible(occupant, d), coverage(incoming, column) !== null)) continue;
-      const dominated = isSlotDominated(occCov, occRel, association.coverage, relations, tailRows, n);
+      let cachedDom = slotDominated[slot]!;
+      if (cachedDom < 0) {
+        cachedDom = isSlotDominated(occCov, occRel, association.coverage, relations, tailRows, n) ? 1 : 0;
+        slotDominated[slot] = cachedDom;
+      }
+      const dominated = cachedDom === 1;
       if (!vetoDominatedVictim) {
         if (!dominated) continue;
-        swapHeadTail(head, tail, tailRows, rootRow, slot, at);
+        swapHeadTail(head, tail, tailRows, slotDominated, rootRow, slot, at);
         exchanged = true;
         return true;
       }
@@ -214,7 +223,7 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
     const chosen = unprotected.find(s => s.dominated
       && !unprotected.some(o => o.slot !== s.slot && vetoesVictim(o, s, n, possible)));
     if (chosen === undefined) return false;
-    swapHeadTail(head, tail, tailRows, rootRow, chosen.slot, at);
+    swapHeadTail(head, tail, tailRows, slotDominated, rootRow, chosen.slot, at);
     exchanged = true;
     return true;
   };
@@ -310,12 +319,13 @@ function vetoesVictim(other: SlotCandidate, victim: SlotCandidate, n: number,
   return strictlyWeaker;
 }
 
-function swapHeadTail(head: string[], tail: string[], tailRows: Int32Array, rootRow: ReadonlyMap<string, number>,
-  slot: number, at: number): void {
+function swapHeadTail(head: string[], tail: string[], tailRows: Int32Array, slotDominated: Int8Array,
+  rootRow: ReadonlyMap<string, number>, slot: number, at: number): void {
   const displaced = head[slot]!;
   head[slot] = tail[at]!;
   tail[at] = displaced;
   tailRows[at] = rootRow.get(displaced) ?? -1;
+  slotDominated.fill(-1);
 }
 
 function gcdBig(a: bigint, b: bigint): bigint {

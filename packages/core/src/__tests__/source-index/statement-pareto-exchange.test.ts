@@ -179,7 +179,7 @@ describe("injective condition assignment and secondary exchange", () => {
     };
     const head = identities.slice(0, 5), tail = identities.slice(5);
     const quote = quoteStatementParetoExchange(16, statements);
-    expect(quote.work_units).toBeLessThanOrEqual(9_000);
+    expect(quote.work_units).toBeLessThanOrEqual(6_000);
     expect(quote.memory_bytes).toBe(11_520);
     const packedBytes = 4 * 16 + 8 * 16 + 8 * 16 + 8 * statements;
     expect(packedBytes).toBeLessThan(quote.memory_bytes);
@@ -628,7 +628,10 @@ describe("injective condition assignment and secondary exchange", () => {
     expect(head).toEqual(["a", "b", "c", "d", "e", "f"]);
   });
 
-  it.each([5, 16, 128, 1025])("bounds elementary array reads at R=%i within quoteStatementParetoExchange(R, 1).work_units", R => {
+  it.each([
+    [5, 1], [16, 1], [128, 1], [1025, 1],
+    [5, 4], [16, 4], [128, 4], [1025, 4]
+  ])("bounds elementary array reads at R=%i, n=%i within quoteStatementParetoExchange(R, n).work_units", (R, n) => {
     const ids = Array.from({ length: R }, (_, index) => `r${index}`);
     let reads = 0;
     const watchRow = (row: (number | null)[]) => new Proxy(row, {
@@ -637,20 +640,20 @@ describe("injective condition assignment and secondary exchange", () => {
         return Reflect.get(target, prop, receiver);
       }
     });
-    const covRows = ids.map((_, index) => watchRow([
-      index === 0 ? 0.95 : index === 1 ? 0.10 : index <= 4 ? 0.20 + index * 0.05 : index === 5 ? 0.85 : 0.70
-    ]));
-    const relRows = ids.map((_, index) => watchRow([
+    const covRows = ids.map((_, index) => watchRow(Array.from({ length: n }, (_, d) =>
+      index === 0 ? 0.95 : index === 1 ? 0.10 : index <= 4 ? 0.20 + index * 0.05 - d * 0.01 : index === 5 + d ? 0.88 : 0.70
+    )));
+    const relRows = ids.map((_, index) => watchRow(Array.from({ length: n }, () =>
       index === 1 ? 0.99 : index <= 4 ? 0.10 : 0.80
-    ]));
+    )));
     const association: StatementAssociation = {
-      roots: ids, statements: 1,
+      roots: ids, statements: n,
       coverage: covRows,
       relations: relRows,
-      spans: ids.map((_, index) => [[index, index + 4] as const]),
+      spans: ids.map((_, index) => Array.from({ length: n }, (_, d) => [index + d, index + d + 4] as const)),
       decision: { refused: null, applied: false }
     };
-    const quote = quoteStatementParetoExchange(R, 1);
+    const quote = quoteStatementParetoExchange(R, n);
     const ledger = meter(quote.work_units, quote.memory_bytes);
     const head = ids.slice(0, 5), tail = ids.slice(5);
     expect(exchangeStatementParetoSecondary({ association, pool: ids, head, tail, agreed: [], meter: ledger }).executed).toBe(true);
