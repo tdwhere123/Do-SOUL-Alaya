@@ -146,9 +146,10 @@ export function renderPageMemberIndex(
   const poolRoots = input.memberInputs.pool.flatMap(source =>
     source.target.kind === "source_evidence" ? [source.target.root_id] : []);
   const exclude = new Set([...input.delivered, ...poolRoots]);
-  return renderMemberIndex(repository, {
-    ...input.memberInputs,
-    neighbors: collectSoftStructuralNeighbors(database, { ...input, anchors: [...exclude], exclude }),
-    database
-  }, input.delivered, input.shown);
+  const inReadSnapshot = <T>(fn: () => T): T =>
+    database.connection.inTransaction ? fn() : database.connection.transaction(fn)();
+  return inReadSnapshot(() => {
+    const neighbors = collectSoftStructuralNeighbors(database, { ...input, anchors: [...exclude], exclude });
+    return renderMemberIndex(repository, { ...input.memberInputs, neighbors, database }, input.delivered, input.shown);
+  });
 }

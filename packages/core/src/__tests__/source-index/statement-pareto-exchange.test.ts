@@ -4,7 +4,8 @@ import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger, type Evi
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import { StatementKeyRetention, selectEvidenceWitnesses, quoteStatementAssociation, type EvidenceDemands, type StatementAssociation,
   type StatementWitnessReader } from "../../source-index/statement-association.js";
-import { exchangeStatementParetoSecondary, injectiveConditionWitnessAssignment, quoteStatementParetoExchange } from "../../source-index/statement-pareto-exchange.js";
+import { exchangeStatementParetoSecondary, injectiveConditionWitnessAssignment,
+  quoteStatementParetoExchange } from "../../source-index/statement-pareto-exchange.js";
 import { orderNativeFieldAccess, type NativeRouteLane } from "../../recall/runtime/native-route-opportunity.js";
 
 const roots = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -83,6 +84,25 @@ describe("injective condition assignment and secondary exchange", () => {
       id === "a" && column === 0 || id === "b" && column === 1 ? 1 : null)).toBeUndefined();
   });
 
+  it("breaks equal-weight ties by earlier column-0 pool position", () => {
+    const value = (id: string, column: number) => ({ a: [3, 4], b: [1, 0], c: [0, 2] }[id]?.[column] ?? null);
+    const ranksFor = (ids: readonly string[]) => [0, 1].map(column => ids.filter(id => value(id, column) !== null)
+      .sort((left, right) => value(right, column)! - value(left, column)! || ids.indexOf(left) - ids.indexOf(right)));
+    const packedPool = ["a", "b", "c"];
+    expect(injectiveConditionWitnessAssignment(packedPool, ranksFor(packedPool), value)?.roots).toEqual(["a", "c"]);
+    const copiedPool = ["a", "b", "c", ...Array.from({ length: 1022 }, (_, index) => `z${index}`)];
+    expect(injectiveConditionWitnessAssignment(copiedPool, ranksFor(copiedPool), value)?.roots).toEqual(["a", "c"]);
+  });
+
+  it("assigns a duplicated pool id to at most one condition", () => {
+    const pool = ["r0", "r0", "r1"];
+    const value = (id: string) => id === "r0" ? 1 : 0.1;
+    const ranks = [0, 1].map(() => pool.filter(id => value(id) !== null)
+      .sort((left, right) => value(right) - value(left) || pool.indexOf(left) - pool.indexOf(right)));
+    const assigned = injectiveConditionWitnessAssignment(pool, ranks, (id) => value(id))?.roots ?? [];
+    expect(assigned.filter(id => id === "r0")).toHaveLength(1);
+  });
+
   it("is a no-op when every relation cell is null and never evicts an unwitnessed original head", () => {
     const association = coverage(2, { g: [0.9, 0.1], f: [0.2, 0.8] }, {
       relations: roots.map(() => [null, null]) });
@@ -141,8 +161,37 @@ describe("injective condition assignment and secondary exchange", () => {
     expect(ledger.spentWork).toBe(oneD + pareto.work_units);
   });
 
-  it("quotes at least the elementary steps of a 16-root 4-condition exchange", () => {
+  it("quotes a packed 16-root 4-condition exchange under 9,000 work units", () => {
     const identities = Array.from({ length: 16 }, (_, index) => `r${index}`);
+    const statements = 4, value = () => 0.5;
+    const ranks = Array.from({ length: statements }, () => identities);
+    expect(injectiveConditionWitnessAssignment(identities, ranks, value)?.roots).toEqual(["r0", "r1", "r2", "r3"]);
+    const copiedPool = [...identities, ...Array.from({ length: 1009 }, (_, index) => `z${index}`)];
+    const copiedValue = (id: string) => id.startsWith("r") ? 0.5 : null;
+    const copiedRanks = Array.from({ length: statements }, () => copiedPool.filter(id => copiedValue(id) !== null));
+    expect(injectiveConditionWitnessAssignment(copiedPool, copiedRanks, copiedValue)?.roots)
+      .toEqual(["r0", "r1", "r2", "r3"]);
+    const association: StatementAssociation = {
+      roots: identities, statements,
+      coverage: identities.map(() => Array<number>(statements).fill(0.5)),
+      relations: identities.map(() => Array<number>(statements).fill(0.5)),
+      decision: { refused: null, applied: false }
+    };
+    const head = identities.slice(0, 5), tail = identities.slice(5);
+    const quote = quoteStatementParetoExchange(16, statements);
+    expect(quote.work_units).toBeLessThanOrEqual(9_000);
+    expect(quote.memory_bytes).toBe(11_520);
+    const packedBytes = 4 * 16 + 8 * 16 + 8 * 16 + 8 * statements;
+    expect(packedBytes).toBeLessThan(quote.memory_bytes);
+    const ledger = meter(quote.work_units, quote.memory_bytes);
+    expect(exchangeStatementParetoSecondary({
+      association, pool: identities, head, tail, agreed: [], meter: ledger }).executed).toBe(true);
+    expect(ledger.spentWork).toBe(quote.work_units);
+    expect(ledger.spentBytes).toBe(quote.memory_bytes);
+  });
+
+  it("funds a copied 1025-root 4-condition exchange from its quote", () => {
+    const identities = Array.from({ length: 1025 }, (_, index) => `r${index}`);
     const statements = 4;
     const association: StatementAssociation = {
       roots: identities, statements,
@@ -151,17 +200,48 @@ describe("injective condition assignment and secondary exchange", () => {
       decision: { refused: null, applied: false }
     };
     const head = identities.slice(0, 5), tail = identities.slice(5);
-    const ledger = meter();
-    exchangeStatementParetoSecondary({
-      association, pool: identities, head, tail, agreed: [], meter: ledger });
-    const quote = quoteStatementParetoExchange(16, statements);
-    const n = statements, roots = 16, masks = 1 << n;
-    // Rank sort comparisons, DP transitions with n-step sourceEarlier plus n-slot copies,
-    // and tryPlace tail dominance scans.
-    const elementary = roots * n * roots + masks * n * roots * (2 * n) + 4 * n * n * roots;
-    expect(quote.work_units).toBeGreaterThanOrEqual(elementary);
+    const quote = quoteStatementParetoExchange(1025, statements);
+    const ledger = meter(quote.work_units, quote.memory_bytes);
+    expect(exchangeStatementParetoSecondary({
+      association, pool: identities, head, tail, agreed: [], meter: ledger }).executed).toBe(true);
     expect(ledger.spentWork).toBe(quote.work_units);
-    expect(quote.memory_bytes).toBeGreaterThanOrEqual(masks * n * roots * n);
+    expect(ledger.spentBytes).toBe(quote.memory_bytes);
+  });
+
+  it("quotes a base container for one root and one condition", () => {
+    const quote = quoteStatementParetoExchange(1, 1);
+    expect(quote.memory_bytes).toBeGreaterThanOrEqual(512);
+    expect(quote.work_units).toBeGreaterThan(0);
+    const association: StatementAssociation = {
+      roots: ["a"], statements: 1, coverage: [[0.5]], relations: [[0.5]],
+      decision: { refused: null, applied: false }
+    };
+    const head = ["a"], tail: string[] = [];
+    const ledger = meter();
+    expect(exchangeStatementParetoSecondary({
+      association, pool: ["a"], head, tail, agreed: [], meter: ledger }).executed).toBe(true);
+  });
+
+  it("abstains without quoting when more than five conditions are present", () => {
+    const identities = Array.from({ length: 16 }, (_, index) => `r${index}`);
+    let allocated = false;
+    const roots = new Proxy(identities, {
+      get(target, prop, receiver) {
+        if (prop === "map") allocated = true;
+        return Reflect.get(target, prop, receiver);
+      }
+    });
+    const association: StatementAssociation = {
+      roots, statements: 1000,
+      coverage: identities.map(() => Array<number>(1000).fill(0.5)),
+      relations: identities.map(() => Array<number>(1000).fill(0.5)),
+      decision: { refused: null, applied: false }
+    };
+    expect(quoteStatementParetoExchange(16, 1000)).toEqual({ work_units: 0, memory_bytes: 0 });
+    expect(exchangeStatementParetoSecondary({
+      association, pool: identities, head: identities.slice(0, 5), tail: identities.slice(5),
+      agreed: [], meter: meter(0) })).toEqual({ executed: false, swapped: false });
+    expect(allocated).toBe(false);
   });
 
   it("matches no-overlay promotion on a 60-work-unit all-null overlay", () => {

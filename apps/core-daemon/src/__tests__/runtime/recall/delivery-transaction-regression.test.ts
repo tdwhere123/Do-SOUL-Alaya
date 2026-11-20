@@ -251,6 +251,66 @@ it("rejects unissued targets, forged source epochs, and changed scope or snapsho
   ]) expect(runConditionalFieldRecallWithReceipt(candidate).index.completeness.logical_index).toBe("invalidated");
 });
 
+function spentBudgetWork(page: ReturnType<typeof runConditionalFieldRecallWithReceipt>): number {
+  const phases = page.execution_receipt.actual?.phases ?? {};
+  return (Object.values(phases) as readonly { budget_work?: number }[])
+    .reduce((sum, phase) => sum + (phase.budget_work ?? 0), 0);
+}
+
+it("keeps payload_continuation inside a 20-unit work cap", async () => {
+  const { slice, input: base } = await fixture(true);
+  const record = hashedRecord(WS, "needle body for tight work", "tight-work");
+  new SqliteFieldSourceRecordRepo(slice.database, fieldSha256).insert(record);
+  const input = nominated(base, [record]);
+  const first = runConditionalFieldRecallWithReceipt(input).index;
+  const target = first.entries[0]!.target;
+  const tight = { ...input, continuation: first.continuation,
+    budget: defaultBudget({ work_units: 20, finalization_reserve: 5, min_envelope: 1, page_budget: 1 }),
+    requested_budget: defaultBudget({ work_units: 20, finalization_reserve: 5, min_envelope: 1, page_budget: 1 }),
+    payload_continuation: { schema_version: 1 as const, purpose: "payload_expansion" as const,
+      target, start_offset: 0, byte_budget: 8 } };
+  const expanded = runConditionalFieldRecallWithReceipt(tight);
+  expect(spentBudgetWork(expanded)).toBeLessThanOrEqual(20);
+});
+
+it("advances payload_continuation across 35 calls after four membership pages", async () => {
+  const { slice, input: base } = await fixture(true);
+  const repo = new SqliteFieldSourceRecordRepo(slice.database, fieldSha256);
+  const body = `needle ${"x".repeat(400)}`;
+  const records = [0, 1, 2, 3].map(i => hashedRecord(WS, `${body} ${i}`, `page-${i}`));
+  for (const record of records) repo.insert(record);
+  const input = nominated(base, records);
+  const pages = [];
+  let live = input;
+  for (let i = 0; i < 4; i++) {
+    const page = runConditionalFieldRecallWithReceipt(live).index;
+    pages.push(page);
+    expect(page.continuation, `membership ${i}`).not.toBeNull();
+    live = { ...input, continuation: page.continuation };
+  }
+  const target = pages[0]!.entries[0]!.target;
+  expect(target.kind).toBe("source_evidence");
+  if (target.kind !== "source_evidence") return;
+  let offset = 0;
+  for (let i = 0; i < 35; i++) {
+    const expanded = runConditionalFieldRecallWithReceipt({
+      ...input, continuation: pages[3]!.continuation,
+      payload_continuation: {
+        schema_version: 1, purpose: "payload_expansion", target, start_offset: offset, byte_budget: 4
+      }
+    }).index;
+    expect(expanded.completeness.logical_index, `payload ${i}`).not.toBe("invalidated");
+    const got = expanded.entries[0]?.target;
+    expect(got?.kind, `payload ${i}`).toBe("source_evidence");
+    if (got?.kind !== "source_evidence") return;
+    expect(got.span, `payload ${i} omitted span`).toBeDefined();
+    expect(got.span!.content_end, `payload ${i}`).toBeGreaterThan(offset);
+    offset = got.span!.content_end;
+    if (got.span!.content_complete) break;
+  }
+  expect(offset).toBeGreaterThan(0);
+});
+
 it("does not repeat membership when a source payload remains incomplete", async () => {
   const { slice, input: base } = await fixture(true);
   const record = hashedRecord(WS, `needle ${"x".repeat(9000)}`, "large");

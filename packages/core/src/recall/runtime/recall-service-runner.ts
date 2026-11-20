@@ -418,7 +418,8 @@ function runCompiledConditionalFieldRecall(
     ...(input.access_hint === undefined ? {} : { access_hint: input.access_hint }),
     ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
     ...(restored === undefined ? {} : { resume_field: restored }),
-    ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision })
+    ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision }),
+    ...(input.payload_continuation === undefined ? {} : { payload_expansion: true })
   }));
   // Max-min bind runs inside observe; lifetime solver_completed_work is not this request's solve work.
   const observedWork = thisRequestObservedWork(reusedCostOwner, field, input.budget.memory_bytes);

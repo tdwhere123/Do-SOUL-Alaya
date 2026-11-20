@@ -58,6 +58,42 @@ describe("observation setup and atomic work admission", () => {
     expect(larger.blocks.some(row => row.phase === "native_source_setup")).toBe(false);
   });
 
+  it("payload expansion refuses a 45k request on a 55k retained field", () => {
+    const interpretation = query();
+    const readers: ObserverReaders = { nominateSources: () => ({ result: null, witness: frozenWitnesses(),
+      navigation_digests: { original: digest } }) };
+    const first = run(interpretation, readers, 1_000);
+    expect(first.state.binding.kind).toBe("bound");
+    const oversized: FieldEngineState = {
+      ...first.state,
+      accounted_retained_bytes: 55_328,
+      native_source_retained_bytes: 55_328,
+      remaining_memory_bytes: 0
+    };
+    const state = observeField(interpretation, {
+      workspace_id: "ws", query_text: "needle", as_of: INTERPRETATION_CLOCK, authorized_scopes: null, readers,
+      budget: defaultBudget({ work_units: 100, finalization_reserve: 0, min_envelope: 0, memory_bytes: 45_000 }),
+      resume_field: oversized, payload_expansion: true
+    });
+    expect(state.memory_exhausted).toBe(true);
+    expect(state.remaining_memory_bytes).toBe(0);
+  });
+
+  it("payload expansion preserves an interrupted bound field", () => {
+    const interpretation = query();
+    const readers: ObserverReaders = { nominateSources: () => ({ result: null, witness: frozenWitnesses(),
+      navigation_digests: { original: digest } }) };
+    const first = run(interpretation, readers, 1_000);
+    expect(first.state.binding.kind).toBe("bound");
+    const interrupted: FieldEngineState = { ...first.state, last_observer_status: "interrupted" };
+    const state = observeField(interpretation, {
+      workspace_id: "ws", query_text: "needle", as_of: INTERPRETATION_CLOCK, authorized_scopes: null, readers,
+      budget: defaultBudget({ work_units: 100, finalization_reserve: 0, min_envelope: 0, memory_bytes: 1_000_000 }),
+      resume_field: interrupted, payload_expansion: true
+    });
+    expect(state.last_observer_status).toBe("interrupted");
+  });
+
   it("keeps native-witness memory refusal separate from a work requirement", () => {
     const witness = frozenWitnesses();
     const result = run(query(), { nominateSources: () => ({ result: null, witness,

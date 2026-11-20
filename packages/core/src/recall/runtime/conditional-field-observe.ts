@@ -81,6 +81,8 @@ export type ObserveFieldInput = Readonly<{
   }>) => void;
   /** Work that every retry must pay again before its next retained operation. */
   readonly repeated_setup_work?: number;
+  /** Payload expansion owes the restored frontier, not a new observation round. */
+  readonly payload_expansion?: boolean;
 }>;
 
 const MAX_FINALIZATION_MEMORY_BYTES = 65_536;
@@ -219,6 +221,9 @@ function acquireNativeSources(initial: FieldEngineState, input: ObserveFieldInpu
 }
 
 function retainedProjectionHasPriority(state: FieldEngineState, input: ObserveFieldInput): boolean {
+  if (input.payload_expansion === true && input.resume_field !== undefined && state.binding.kind === "bound") {
+    return true;
+  }
   return input.resume_field !== undefined && input.budget.page_budget > 0
     && state.binding.kind === "bound" && state.projection_progress !== undefined
     && state.projection_progress.offset < state.binding.snapshot.values.length
@@ -387,12 +392,15 @@ function startObservedField(
       remaining_memory_bytes: restoredFieldRemainingMemory(resumed, input.budget.memory_bytes),
       binding_contexts: resumed.binding_contexts?.snapshot(),
       memory_exhausted: false,
-      last_observer_status: resumed.last_observer_status === "interrupted" ? "open" : resumed.last_observer_status,
+      last_observer_status: input.payload_expansion === true && resumed.binding.kind === "bound"
+        ? resumed.last_observer_status
+        : (resumed.last_observer_status === "interrupted" ? "open" : resumed.last_observer_status),
       retention_rejected: undefined
     };
     if (restoredFieldFootprint(resumed) > input.budget.memory_bytes) {
       return { ...interruptObservedField(restored), memory_exhausted: true };
     }
+    if (input.payload_expansion === true) return restored;
     if (restored.binding.kind !== "bound" || restored.binding.solver_complete && restored.identity_spool.length === 0) return restored;
     const { binding, ...pending } = restored;
     return bindEngineState({ ...pending, proven_binding: binding });

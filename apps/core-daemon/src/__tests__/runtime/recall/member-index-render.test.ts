@@ -26,6 +26,17 @@ it("omits an unknown member but ends the list at the first budget refusal", () =
   expect(read).toEqual(["root-a", "root-b", "root-c", "root-d"]);
 });
 
+it("keeps 32 renderable members after one empty listing", () => {
+  const roots = ["empty", ...Array.from({ length: 32 }, (_, index) => `root-${index}`)];
+  const lines = renderMemberIndex({ readMemberListing: source => source.target.root_id === "empty"
+    ? { status: "ready" as const, statements: [], event_time: null, first_message: null, resources }
+    : ready(source.target.root_id) }, { pool: roots.map(member), overflow: [], conditions: [], vectors: null },
+  new Set(), 0);
+  expect(lines).toHaveLength(32);
+  expect(lines[0]?.root_id).toBe("root-0");
+  expect(lines[31]?.root_id).toBe("root-31");
+});
+
 it("places Soft neighbors after pool members and before overflow", () => {
   const lines = renderMemberIndex({ readMemberListing: source => ready(source.target.root_id) }, {
     pool: ["pool-a"].map(member), neighbors: ["graph-b"].map(member), overflow: ["overflow-c"].map(member),

@@ -112,7 +112,7 @@ it("uses current unreachable values after a same-cardinality navigation projecti
     const selectedState = { ...baseState, native_sources: { ...baseState.native_sources, association: covered(5) } };
     const funded = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 1_000_000 });
     expect(nativeNavigationProjection(selectedState, values, funded()).status).toBe("ordered");
-    expect(selectedState.native_sources.association.decision).toEqual({ refused: null, applied: true });
+    expect(selectedState.native_sources.association.decision).toEqual({ refused: null, applied: true, pareto: "not_run" });
     const laterRefusal = nativeNavigationProjection(selectedState, values, new SourceSemanticResourceLedger({
       work_units: generous.spentWork, memory_bytes: 1_000_000 }));
     expect(laterRefusal.status).toBe("resource_refused");

@@ -1,5 +1,6 @@
 import { RelationFormationSourceObservationSchema, RelationValiditySchema, type RelationValidity } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
+import { cachedReadStatement } from "../../../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../../../shared/errors.js";
 import { CURRENT_STATEMENT_MEMORY_FILTER_SQL, UNAVAILABLE_BOUND_STATEMENT_SQL } from "../../../source-index/statement-dependencies.js";
 
@@ -207,7 +208,7 @@ export class SqliteRelationRecallReader {
     );
     const tail = [...cursor.params, fetchLimit];
     const parameters = subject === null ? [workspaceId, predicate, ...tail] : [workspaceId, subject.toLowerCase(), predicate, ...tail];
-    const directFetched = this.db.connection.prepare(boundedSql).all(...(asOf === undefined ? parameters : [{ asOf }, ...parameters])) as readonly Record<string, unknown>[];
+    const directFetched = cachedReadStatement(this.db, boundedSql).all(...(asOf === undefined ? parameters : [{ asOf }, ...parameters])) as readonly Record<string, unknown>[];
     const fetched = subject === null || !this.hasBoundStatements(workspaceId, subject)
       ? directFetched
       : mergeRelationPages(
@@ -264,11 +265,9 @@ export class SqliteRelationRecallReader {
   }
 
   private hasBoundStatements(workspaceId: string, subject: string): boolean {
-    return this.db.connection.prepare(`
-      SELECT 1 FROM source_statement_artifacts
+    return cachedReadStatement(this.db, `SELECT 1 FROM source_statement_artifacts
       WHERE workspace_id = ? AND lower(record_id) = ?
-      LIMIT 1
-    `).get(workspaceId, subject.toLowerCase()) !== undefined;
+      LIMIT 1`).get(workspaceId, subject.toLowerCase()) !== undefined;
   }
 
   private readBridged(
@@ -284,7 +283,7 @@ export class SqliteRelationRecallReader {
       asOf
     );
     const params = [subject, subject.toLowerCase(), workspaceId, predicate, ...cursor.params, fetchLimit];
-    return this.db.connection.prepare(bridgedSql).all(...(asOf === undefined ? params : [{ asOf }, ...params])) as readonly Record<string, unknown>[];
+    return cachedReadStatement(this.db, bridgedSql).all(...(asOf === undefined ? params : [{ asOf }, ...params])) as readonly Record<string, unknown>[];
   }
 }
 
