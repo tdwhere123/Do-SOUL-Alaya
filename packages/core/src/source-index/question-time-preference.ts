@@ -126,13 +126,12 @@ export function preferQuestionTime<N extends { source: SourceIndexTarget }>(inpu
 export type QuestionTimeIndexMemberPrefix = Readonly<{
   unrestrictedLexical: readonly { source: SourceIndexTarget }[];
   unrestrictedVector: readonly { source: SourceIndexTarget }[];
+  unrestrictedRawVector?: readonly { source: SourceIndexTarget }[];
   cursor: Readonly<{ lexicalIndex: number; vectorIndex: number; takeLexical: boolean }>;
   originalPrefix: readonly (readonly [string, SourceIndexTarget])[];
 }>;
 
-/** Use the saved native order and the final ranked set. Tail reads share the pinned snapshot
- * but only spend the listing allowance. */
-export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberPrefix & Readonly<{
+type QuestionTimeIndexMemberInput = QuestionTimeIndexMemberPrefix & Readonly<{
   targetCount: number;
   maxExtraAttempts: number;
   nominationKeys: Iterable<string>;
@@ -144,8 +143,12 @@ export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberPr
   unboundAdmissions: ReadonlyMap<string, SourceIndexQueryAdmission>;
   boundAdmissions: ReadonlyMap<string, SourceIndexQueryAdmission>;
   admitScope: SourceIndexScopeAdmission;
-}>): void {
-  const { unrestrictedLexical, unrestrictedVector, indexMembers, targetCount, retainIndexMember } = input;
+}>;
+
+/** Use the saved native order and the final ranked set. Tail reads share the pinned snapshot
+ * but only spend the listing allowance. */
+export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberInput): void {
+  const { unrestrictedLexical, unrestrictedVector, unrestrictedRawVector, indexMembers, targetCount, retainIndexMember } = input;
   const seen = new Set([...input.nominationKeys, ...input.indexMemberKeys]);
   for (const [key, source] of input.originalPrefix) {
     if (indexMembers.length >= targetCount) return;
@@ -153,8 +156,13 @@ export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberPr
     seen.add(key);
     retainIndexMember(key, source);
   }
-  if (indexMembers.length >= targetCount || input.maxExtraAttempts === 0) return;
+  if (indexMembers.length >= targetCount) return;
   const listingMeter = new SourceSemanticResourceLedger({ work_units: 524_288, memory_bytes: 8 * 1024 * 1024 });
+  if (unrestrictedRawVector !== undefined && unrestrictedRawVector.length > 0) {
+    collectThreeWayQuestionTimeIndexMembers(input, unrestrictedRawVector, seen, listingMeter);
+    return;
+  }
+  if (input.maxExtraAttempts === 0) return;
   let { lexicalIndex, vectorIndex, takeLexical } = input.cursor;
   try {
     for (let extraAttempts = 0; extraAttempts < input.maxExtraAttempts && indexMembers.length < targetCount
@@ -179,6 +187,56 @@ export function collectQuestionTimeIndexMembers(input: QuestionTimeIndexMemberPr
       if (input.admitScope(admission.scope_class, source) !== "admitted") continue;
       seen.add(key);
       retainIndexMember(key, source);
+    }
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+  }
+}
+
+function collectThreeWayQuestionTimeIndexMembers(
+  input: QuestionTimeIndexMemberInput,
+  unrestrictedRawVector: readonly { source: SourceIndexTarget }[],
+  seen: Set<string>,
+  listingMeter: SourceSemanticResourceLedger
+): void {
+  const lanes = [input.unrestrictedLexical, unrestrictedRawVector, input.unrestrictedVector] as const;
+  const cursors = [input.cursor.lexicalIndex, 0, input.cursor.vectorIndex];
+  const blocked = [false, false, false];
+  let lane = input.cursor.takeLexical ? 0 : 1;
+  let extraAttempts = 0;
+  try {
+    while (input.indexMembers.length < input.targetCount && lanes.some((rows, i) => !blocked[i] && cursors[i]! < rows.length)) {
+      const rows = lanes[lane]!;
+      while (!blocked[lane] && cursors[lane]! < rows.length) {
+        const { source } = rows[cursors[lane]!]!;
+        const key = sourceIndexNativeRootKey(source);
+        if (seen.has(key)) { cursors[lane]!++; continue; }
+        const lexicalTurn = lane === 0;
+        const admissions = lexicalTurn ? input.unboundAdmissions : input.boundAdmissions;
+        let admission = admissions.get(source.root_key);
+        if (admission !== undefined) {
+          cursors[lane]!++;
+          listingMeter.charge(1, 0, "index member tail attempt");
+          listingMeter.charge(1, 0, "index member admission reuse");
+        } else if (extraAttempts < input.maxExtraAttempts) {
+          cursors[lane]!++;
+          extraAttempts++;
+          listingMeter.charge(1, 0, "index member tail attempt");
+          admission = input.repository.admitQueryCandidate(source, lexicalTurn ? null : input.vectorBinding, listingMeter.remaining());
+          listingMeter.charge(admission.resources.work, admission.resources.memory_bytes, "index member candidate admission");
+        } else {
+          blocked[lane] = true;
+          break;
+        }
+        if (admission.status === "resource_limited") return;
+        if (admission.status !== "ready") continue;
+        listingMeter.charge(1 + (admission.scope_class?.length ?? 0), 0, "index member scope admission");
+        if (input.admitScope(admission.scope_class, source) !== "admitted") continue;
+        seen.add(key);
+        input.retainIndexMember(key, source);
+        break;
+      }
+      lane = (lane + 1) % 3;
     }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;

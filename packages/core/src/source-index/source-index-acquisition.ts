@@ -143,6 +143,12 @@ class AcquisitionQuery {
   private vectorBinding: SourceIndexVectorBinding | null = null;
   private lexicalCandidates: readonly SourceIndexLexicalCandidate[] = [];
   private vectorCandidates: readonly ScoredRoot[] = [];
+  private rawVectorCandidates: readonly ScoredRoot[] = [];
+  private readonly admittedOverflowByKey = new Map<string, SourceIndexTarget>();
+  private readonly lexicalOverflowKeys: string[] = [];
+  private readonly mixedVectorOverflowKeys: string[] = [];
+  private readonly lexicalOverflowSeen = new Set<string>();
+  private readonly mixedVectorOverflowSeen = new Set<string>();
   private readonly nominations = new Map<string, RetainedNomination>();
   private readonly unboundAdmissions = new Map<string, SourceIndexQueryAdmission>();
   private readonly boundAdmissions = new Map<string, SourceIndexQueryAdmission>();
@@ -216,6 +222,9 @@ class AcquisitionQuery {
       }
       this.limited = true;
     }
+    if (!this.timeRoute && this.rawVectorCandidates.length > 0 && targetCount > 0) {
+      this.populateThreeWayIndexMembers(targetCount);
+    }
     if (this.timeRoute && listing !== undefined) collectQuestionTimeIndexMembers({
       ...listing, targetCount,
       maxExtraAttempts: Math.max(0, this.input.allowance.max_attempts - this.counts.attempted),
@@ -269,7 +278,8 @@ class AcquisitionQuery {
     if (!active) return undefined;
     const originalEntries = [...this.nominations.entries()];
     const listing = targetCount > 0 ? {
-      unrestrictedLexical: this.lexicalCandidates, unrestrictedVector: this.vectorCandidates, cursor: { ...cursor },
+      unrestrictedLexical: this.lexicalCandidates, unrestrictedVector: this.vectorCandidates,
+      unrestrictedRawVector: this.rawVectorCandidates, cursor: { ...cursor },
       originalPrefix: originalEntries.map(([key, row]) => [key, row.source] as const)
     } : undefined;
     // Mid-scan unavailable lanes may still hold partial candidates; those are not a joint unrestricted prefix.
@@ -452,6 +462,8 @@ class AcquisitionQuery {
   private scanVectors(): void {
     if (this.queryVector === null) return;
     const best = new Map<string, ScoredRoot>();
+    const bestRaw = (this.capture?.indexMembers ?? 0) > 0 ? new Map<string, ScoredRoot>() : undefined;
+    let sawAuxiliaryVector = false;
     let cursor: SourceIndexVectorCursor | null = null, remaining = this.input.allowance.max_vector_windows;
     if (remaining === 0) { this.vector = { ...this.vector, completion: "partial", reason: "window_limit" }; return; }
     try {
@@ -482,7 +494,9 @@ class AcquisitionQuery {
           this.vector = { ...this.vector, completion: "unavailable", reason: "selected_profile_mismatch" }; best.clear(); return;
         }
         this.vectorBinding = binding;
-        for (const candidate of page.candidates) this.considerVector(best, candidate);
+        for (const candidate of page.candidates) {
+          if (this.considerVector(best, candidate, bestRaw)) sawAuxiliaryVector = true;
+        }
         remaining -= page.inspected;
         if (page.completion === "complete" || page.completion === "unavailable" || page.reason === "read_budget") break;
         if (page.inspected === 0 || page.cursor === null || page.cursor.after_window_id === cursor?.after_window_id) {
@@ -510,6 +524,13 @@ class AcquisitionQuery {
       });
       // Publish only after the whole ranked set is retained. A later meter refusal discards this map.
       this.vectorCandidates = retained;
+      if (bestRaw !== undefined && sawAuxiliaryVector && bestRaw.size > 0) {
+        const rawRanked = [...bestRaw.values()];
+        rawRanked.sort((left, right) => right.vector.cosine - left.vector.cosine
+          || compareKey(left.source.root_key, right.source.root_key)
+          || compareKey(left.vector.window.window_id, right.vector.window.window_id));
+        this.rawVectorCandidates = rawRanked;
+      }
       for (const rankedCandidate of retained) {
         this.observe("vector_ranked", () => ({ kind: "vector_ranked", target: structuredClone(rankedCandidate.source.target),
           window: structuredClone(rankedCandidate.vector.window), cosine: rankedCandidate.vector.cosine,
@@ -525,31 +546,42 @@ class AcquisitionQuery {
       this.limited = true;
       // An unfinished sort is not an exact ranked subset. Lexical candidates remain independently usable.
       this.vectorCandidates = [];
+      this.rawVectorCandidates = [];
     }
   }
 
-  private considerVector(best: Map<string, ScoredRoot>, candidate: SourceIndexVectorCandidate): void {
+  private considerVector(best: Map<string, ScoredRoot>, candidate: SourceIndexVectorCandidate,
+    bestRaw?: Map<string, ScoredRoot>): boolean {
     const dimensions = this.queryVector!.length;
     this.meter.charge(VECTOR_COST.validation_per_dimension * dimensions, 0, "source vector validation and cosine");
     const cosine = this.scoreVector!(candidate.embedding);
     if (cosine === null) {
       this.vector = { ...this.vector, completion: "partial", reason: "invalid_vectors",
-        invalid_windows: this.vector.invalid_windows + 1 }; return;
+        invalid_windows: this.vector.invalid_windows + 1 }; return false;
     }
-    if (!Number.isFinite(cosine)) return;
-    if (candidate.source.auxiliary !== undefined) this.statements?.consider(sourceIndexNativeRootKey(candidate.source), cosine, candidate.embedding, candidate.source);
+    if (!Number.isFinite(cosine)) return false;
+    const isAuxiliary = candidate.source.auxiliary !== undefined;
+    if (isAuxiliary) this.statements?.consider(sourceIndexNativeRootKey(candidate.source), cosine, candidate.embedding, candidate.source);
     this.observe("vector_inspected", () => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
       window: structuredClone(candidate.window), cosine }));
     const key = this.capture?.grouped === true ? candidate.window.window_id : sourceIndexNativeRootKey(candidate.source);
+    if (bestRaw !== undefined && !isAuxiliary) {
+      const previousRaw = bestRaw.get(key);
+      if (previousRaw === undefined || !(previousRaw.vector.cosine > cosine || previousRaw.vector.cosine === cosine &&
+          compareKey(previousRaw.vector.window.window_id, candidate.window.window_id) <= 0)) {
+        bestRaw.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
+      }
+    }
     // Both keys are captured by the native reader. Reuse their identities rather
     // than reconstructing the same canonical root for every vector window.
     this.meter.charge(VECTOR_COST.lookup_work, 0, "source vector root lookup");
     const previous = best.get(key);
     if (previous !== undefined && (previous.vector.cosine > cosine || previous.vector.cosine === cosine &&
-        compareKey(previous.vector.window.window_id, candidate.window.window_id) <= 0)) return;
+        compareKey(previous.vector.window.window_id, candidate.window.window_id) <= 0)) return isAuxiliary;
     this.meter.charge(VECTOR_COST.replacement_work, VECTOR_COST.replacement_bytes
       + VECTOR_COST.key_bytes_per_character * key.length, "source vector best-window retention");
     best.set(key, { source: candidate.source, vector: { rank: 0, cosine, window: candidate.window } });
+    return isAuxiliary;
   }
 
   private nominatePrefix(stopAtRootLimit = false,
@@ -664,7 +696,17 @@ class AcquisitionQuery {
     if (this.nominations.size >= this.input.allowance.max_roots) {
       this.counts.rejected++; this.counts.nomination_limit++; this.limited = true;
       this.observeNomination(channel, source, "nomination_limit");
-      this.retainIndexMember(key, source); return;
+      if (this.rawVectorCandidates.length === 0) {
+        this.retainIndexMember(key, source);
+      } else if ((this.capture?.indexMembers ?? 0) > 0) {
+        if (!this.admittedOverflowByKey.has(key)) this.admittedOverflowByKey.set(key, source);
+        const seen = channel === "lexical" ? this.lexicalOverflowSeen : this.mixedVectorOverflowSeen;
+        if (!seen.has(key)) {
+          seen.add(key);
+          (channel === "lexical" ? this.lexicalOverflowKeys : this.mixedVectorOverflowKeys).push(key);
+        }
+      }
+      return;
     }
     const priorOriginal = this.priorOriginalNominations?.get(key);
     if (priorOriginal !== undefined) {
@@ -687,6 +729,28 @@ class AcquisitionQuery {
   private retainIndexMember(key: string, source: SourceIndexTarget): void {
     if (this.indexMembers.length >= (this.capture?.indexMembers ?? 0) || this.indexMemberKeys.has(key)) return;
     this.indexMemberKeys.add(key); this.indexMembers.push(source);
+  }
+
+  private populateThreeWayIndexMembers(targetCount: number): void {
+    const rawOverflowKeys: string[] = [];
+    for (const candidate of this.rawVectorCandidates) {
+      const key = sourceIndexNativeRootKey(candidate.source);
+      if (this.admittedOverflowByKey.has(key) && !this.nominations.has(key)) rawOverflowKeys.push(key);
+    }
+    const lanes = [this.lexicalOverflowKeys, rawOverflowKeys, this.mixedVectorOverflowKeys] as const;
+    const cursors = [0, 0, 0];
+    let lane = 0;
+    while (this.indexMembers.length < targetCount && cursors.some((cursor, i) => cursor < lanes[i]!.length)) {
+      const rows = lanes[lane]!;
+      while (cursors[lane]! < rows.length) {
+        const key = rows[cursors[lane]!]!;
+        cursors[lane]!++;
+        if (this.indexMemberKeys.has(key) || this.nominations.has(key)) continue;
+        this.retainIndexMember(key, this.admittedOverflowByKey.get(key)!);
+        break;
+      }
+      lane = (lane + 1) % 3;
+    }
   }
 
   private retainOccurrence(source: SourceIndexTarget, lexical: SourceIndexLexicalRank | null,

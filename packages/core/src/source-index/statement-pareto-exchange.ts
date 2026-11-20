@@ -171,11 +171,28 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
   const ranks = Array.from({ length: n }, (_, column) => pool.filter(id => coverage(id, column) !== null)
     .sort((left, right) => coverage(right, column)! - coverage(left, column)! || posMap.get(left)! - posMap.get(right)!));
   const marginal = ranks.map(row => row[0] ?? null);
-  const match = n >= 2 ? injectiveConditionWitnessAssignment(pool, ranks, coverage) ?? {
-    roots: marginal, count: marginal.filter(Boolean).length,
-    weight: marginal.reduce((sum, id, column) => sum + (id === null ? 0 : coverage(id, column)!), 0),
-    marginal, identity: "root" as const
-  } : null;
+  let match: ReturnType<typeof injectiveConditionWitnessAssignment> | null = null;
+  if (n >= 2) {
+    const rankTable = new Int32Array(pool.length * n).fill(-1);
+    for (let column = 0; column < n; column++) {
+      const ranked = ranks[column]!;
+      for (let rank = 0; rank < ranked.length; rank++) {
+        const cell = posMap.get(ranked[rank]!)! * n + column;
+        if (rankTable[cell]! < 0) rankTable[cell] = rank;
+      }
+    }
+    const quantile = (id: string, column: number): number | null => {
+      const pos = posMap.get(id);
+      if (pos === undefined) return null;
+      const rank = rankTable[pos * n + column]!;
+      return rank < 0 ? null : (ranks[column]!.length - rank) / ranks[column]!.length;
+    };
+    match = injectiveConditionWitnessAssignment(pool, ranks, quantile) ?? {
+      roots: marginal, count: marginal.filter(Boolean).length,
+      weight: marginal.reduce((sum, id, column) => sum + (id === null ? 0 : quantile(id, column)!), 0),
+      marginal, identity: "root" as const
+    };
+  }
   const placed = new Set((match?.roots ?? []).filter((id): id is string => id !== null && head.includes(id)));
   const agreedSet = new Set(agreed);
   const marginalSet = new Set(marginal.filter((id): id is string => id !== null));
@@ -239,7 +256,7 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
     for (const [column, ranked] of ranks.entries()) {
       const top = ranked[0], candidate = ranked[1];
       if (top === undefined || candidate === undefined || !head.includes(top) || head.includes(candidate)) continue;
-      tryPlace(candidate, column);
+      if (tryPlace(candidate, column)) placed.add(candidate);
     }
   }
   return { executed: true, swapped: exchanged };

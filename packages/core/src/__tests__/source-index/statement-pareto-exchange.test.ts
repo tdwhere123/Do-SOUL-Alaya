@@ -394,4 +394,80 @@ describe("injective condition assignment and secondary exchange", () => {
       association, pool: ["a", "b"], head: ["a", "b"], tail: [], agreed: [], meter: ledger });
     expect(ledger.spentWork).toBe(quote.work_units);
   });
+
+  it("preserves identical head and tail under strictly increasing per-column score transforms", () => {
+    const rawValues: Record<string, (number | null)[]> = {
+      a: [0.90, 0.50, null, null],
+      b: [0.20, null, null, null],
+      c: [null, null, 0.80, null],
+      d: [null, null, null, 0.85],
+      e: [0.10, 0.10, null, null],
+      f: [0.15, 0.45, null, null],
+      g: [0.89, 0.15, null, null],
+      h: [null, null, null, null]
+    };
+    const transforms = [
+      (s: number) => Math.exp(5 * s),
+      (r: number) => Math.exp(3 * r + 0.5),
+      (x: number) => 10 * x + 1,
+      (y: number) => y ** 3
+    ];
+    const scaledValues = Object.fromEntries(Object.entries(rawValues).map(([root, row]) => [
+      root, row.map((value, column) => value === null ? null : transforms[column]!(value))
+    ]));
+    const ranksFor = (values: Record<string, (number | null)[]>) => [0, 1, 2, 3].map(column =>
+      roots.filter(root => values[root]![column] !== null)
+        .sort((left, right) => values[right]![column]! - values[left]![column]! || roots.indexOf(left) - roots.indexOf(right))
+    );
+    // Confirm raw-cosine summing would flip the assignment under the monotone transforms.
+    expect(injectiveConditionWitnessAssignment(roots, ranksFor(rawValues), (id, col) => rawValues[id]![col]!)?.roots)
+      .toEqual(["g", "a", "c", "d"]);
+    expect(injectiveConditionWitnessAssignment(roots, ranksFor(scaledValues), (id, col) => scaledValues[id]![col]!)?.roots)
+      .toEqual(["a", "f", "c", "d"]);
+
+    const relations = roots.map(root => {
+      if (root === "e") return [0.1, 0.1, null, null];
+      if (root === "f") return [0.8, 0.9, null, null];
+      if (root === "g") return [0.9, 0.8, null, null];
+      return [0.5, 0.5, 0.5, 0.5];
+    });
+    const baseHead = ["a", "b", "c", "d", "e"], baseTail = ["f", "g", "h"];
+    const scaledHead = ["a", "b", "c", "d", "e"], scaledTail = ["f", "g", "h"];
+    expect(exchangeStatementParetoSecondary({
+      association: coverage(4, rawValues, { relations }),
+      pool: roots, head: baseHead, tail: baseTail, agreed: [], meter: meter()
+    })).toEqual({ executed: true, swapped: true });
+    expect(exchangeStatementParetoSecondary({
+      association: coverage(4, scaledValues, { relations }),
+      pool: roots, head: scaledHead, tail: scaledTail, agreed: [], meter: meter()
+    })).toEqual({ executed: true, swapped: true });
+    expect(scaledHead).toEqual(baseHead);
+    expect(scaledTail).toEqual(baseTail);
+    expect(baseHead).toContain("g");
+    expect(baseHead).not.toContain("f");
+  });
+
+  it("protects a placed derived rank-2 witness from eviction by a later derived column", () => {
+    const association = coverage(2, {
+      a: [0.95, null],
+      b: [null, 0.95],
+      e: [0.10, 0.10],
+      f: [0.90, null],
+      g: [0.80, null],
+      h: [null, 0.80]
+    }, {
+      spans: roots.map((_, i) => [[i, i + 5] as const, [i + 10, i + 15] as const]),
+      relations: roots.map(root => root === "e" ? [0.1, 0.1]
+        : root === "g" ? [0.5, null]
+        : root === "f" ? [0.95, null]
+        : root === "h" ? [null, 0.95]
+        : [0.5, 0.5])
+    });
+    const pool = ["a", "b", "c", "d", "e", "g", "h"];
+    const head = ["a", "b", "c", "d", "e"], tail = ["f", "g", "h"];
+    expect(exchangeStatementParetoSecondary({ association, pool, head, tail, agreed: [], meter: meter() }))
+      .toEqual({ executed: true, swapped: true });
+    expect(head).toEqual(["a", "b", "c", "d", "g"]);
+    expect(tail).toContain("h");
+  });
 });

@@ -5,10 +5,15 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => isolation.restore());
-import type { SourceIndexAcquisitionInput, SourceIndexLexicalRead, SourceIndexQueryRepository } from "@do-soul/alaya-protocol";
+import { prepareSourceIndexDocument, sourceIndexProfileId, type SourceIndexAcquisitionInput, type SourceIndexLexicalRead,
+  type SourceIndexQueryRepository, type SourceIndexVectorRead } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import type { SourceIndexAcquisitionFact } from "../../source-index/acquisition-observation.js";
-import { fieldSha256 } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { SqliteSourceIndexRepository } from "../../../../storage/src/repos/source-index/source-index-repo.js";
+import { WORKSPACE, configuration, fieldSha256, fixture as sqliteFixture, publishSource } from
+  "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { publishMessages, publishStatement } from "../../../../storage/src/__tests__/repos/source-index/source-template-fixture.js";
+import { digest } from "./source-index-acquisition-fixture.js";
 import { template, templateBudget, templateStatement } from "./source-template-fixture.js";
 
 const empty = { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown" as const };
@@ -105,3 +110,160 @@ it.each([
     expect(admit.mock.calls.slice(27).map(([source]) => source)).toEqual(tailOverBudget
       ? [original[16]!.source] : original.slice(16, 16 + extraTail).map(row => row.source));
   });
+
+it("surfaces a raw passage winner diluted by statement vectors via 3-way SQLite overflow without altering R01..R16", () => {
+  const environment = sqliteFixture();
+  const { database, index } = environment;
+  try {
+    for (let i = 0; i < 20; i++) {
+      publishSource(environment, `needle lexical passage ${i}`, `lex-${i.toString().padStart(2, "0")}`);
+    }
+    for (let i = 0; i < 18; i++) {
+      const published = publishMessages(environment, [{ role: "user", text: `statement host ${i}` }],
+        `stmt-${i.toString().padStart(2, "0")}`);
+      publishStatement(environment, published, `stmt-art-${i}`);
+    }
+    publishSource(environment, "raw top passage", "raw-top");
+    publishSource(environment, "raw diluted passage", "raw-winner");
+
+    const config = configuration({ dimensions: 3, window_bytes: 512 });
+    const selection = index.select(WORKSPACE, config), generation = index.begin(selection);
+    const writeBudget = { work: 100_000, native_bytes: 16 * 1024 * 1024 };
+    expect(index.capturePage(WORKSPACE, generation.generation_id, 128, writeBudget).generation.enumeration_complete).toBe(true);
+    const documents = index.listTargets(WORKSPACE, generation.generation_id, null, 128).map(source => {
+      const read = index.readDocument(WORKSPACE, generation.generation_id, source.root_key, 4 * 1024 * 1024, writeBudget);
+      expect(read.status).toBe("ready");
+      if (read.status !== "ready") throw new Error(read.reason);
+      const document = prepareSourceIndexDocument({ source, body: read.body, profile: config.profile }, fieldSha256);
+      expect(index.writeDocument(WORKSPACE, generation.generation_id, document, writeBudget).status).toBe("accepted");
+      return document;
+    });
+    const unit = (cos: number) => new Float32Array([cos, Math.sqrt(Math.max(0, 1 - cos * cos)), 0]);
+    database.connection.transaction(() => {
+      for (const document of documents) {
+        const id = document.source.source_id!;
+        let cos = 0;
+        if (id === "raw-top") cos = 0.99;
+        else if (id === "raw-winner") cos = 0.80;
+        else if (id.startsWith("stmt-")) {
+          const rank = Number(id.slice(5));
+          cos = document.source.auxiliary === undefined ? 0.10 : 0.98 - rank * 0.008;
+        }
+        const embedding = unit(cos);
+        for (const window of document.windows) {
+          expect(index.writeVector(WORKSPACE, generation.generation_id, {
+            window_id: window.window_id, input_digest: window.content_digest,
+            embedding, token_count: 2, truncated: false
+          })).toEqual({ status: "accepted" });
+        }
+      }
+    })();
+    expect(index.activate(WORKSPACE, generation.generation_id)).toEqual({ status: "accepted" });
+
+    const repo = new SqliteSourceIndexRepository(database, fieldSha256);
+    const admit = vi.spyOn(repo, "admitQueryCandidate");
+    const input: SourceIndexAcquisitionInput = {
+      workspace_id: WORKSPACE, navigation_text: "needle",
+      allowance: { max_attempts: 128, max_roots: 16, max_vector_windows: 256 },
+      budget: { work_units: 5_000_000, memory_bytes: 32 * 1024 * 1024 },
+      vector: {
+        status: "available", profile: config.profile, profile_id: selection.profile_id,
+        input_digest: digest("needle"), embedding: new Float32Array([1, 0, 0])
+      }
+    };
+    const run = (members: number) => {
+      const observed: SourceIndexAcquisitionFact[] = [];
+      const capture = database.connection.transaction(() => new SourceIndexAcquisition(repo, fieldSha256)
+        .nominateWithWitness(input, () => "admitted", "original", fact => { observed.push(fact()); },
+          undefined, undefined, undefined, members))();
+      return { capture, observed };
+    };
+
+    const base = run(0);
+    const baseAdmits = admit.mock.calls.length;
+    admit.mockClear();
+    const listed = run(16);
+    expect(admit).toHaveBeenCalledTimes(baseAdmits);
+    expect(admit.mock.calls.length).toBeLessThanOrEqual(input.allowance.max_attempts);
+
+    const { index_members, ...ranked } = listed.capture;
+    expect(ranked.result.nominations).toEqual(base.capture.result.nominations);
+    expect(ranked.result.accounting).toEqual(base.capture.result.accounting);
+    expect(ranked.result.resources).toEqual(base.capture.result.resources);
+    expect(ranked.witness).toEqual(base.capture.witness);
+    expect(listed.observed).toEqual(base.observed);
+    expect(ranked.result.nominations.map(row => row.source.source_id)).toContain("raw-top");
+    expect(ranked.result.nominations.map(row => row.source.source_id)).not.toContain("raw-winner");
+    expect(index_members).toHaveLength(16);
+    expect(index_members![1]!.source_id).toBe("raw-winner");
+  } finally {
+    database.close({ optimize: false });
+  }
+}, 60_000);
+
+it("interleaves raw-passage tail in question-time 3-way overflow without exceeding max_attempts", () => {
+  const original = Array.from({ length: 16 }, (_, i) => templateStatement(`lex-${i}`));
+  const preferred = Array.from({ length: 12 }, (_, i) => templateStatement(`qt-${i}`));
+  const rawWinner = templateStatement("raw-winner");
+  const stmtRows = Array.from({ length: 18 }, (_, i) => templateStatement(`stmt-${i}`));
+  const config = configuration({ dimensions: 2, window_bytes: 8 });
+  const profileId = sourceIndexProfileId(config.profile, fieldSha256);
+  const binding = {
+    workspace_id: "workspace-template", selection_revision: 1, config_id: "cfg-1",
+    profile_id: profileId, generation_id: "gen-1", source_epoch: 1, dimensions: 2
+  };
+  const candidates: SourceIndexVectorRead["candidates"] = [
+    ...stmtRows.map((row, i) => ({
+      source: row.statement.source,
+      window: { window_id: `ws-${i}`, start_byte: 0, end_byte: 8, content_digest: `sha256:${"a".repeat(64)}`, token_count: 2 },
+      embedding: Float32Array.of(0.98 - i * 0.01, 0.1)
+    })),
+    {
+      source: rawWinner.source,
+      window: { window_id: "wr-0", start_byte: 0, end_byte: 8, content_digest: `sha256:${"b".repeat(64)}`, token_count: 2 },
+      embedding: Float32Array.of(0.85, 0.1)
+    }
+  ];
+  const admit = vi.fn<SourceIndexQueryRepository["admitQueryCandidate"]>(() => ({
+    status: "ready", scope_class: "project", resources: empty
+  }));
+  const repository: SourceIndexQueryRepository = {
+    readLexicalCandidates: (_workspace, _query, limit, _budget, time) => lexical((time ? preferred : original).slice(0, limit)),
+    readVectorCandidates: () => ({
+      completion: "complete", reason: null, candidates, resources: empty,
+      state: { status: "ready", binding }, resource_refusal: null, cursor: null,
+      inspected: candidates.length, invalid: 0
+    }),
+    readQuestionTimeDomain: () => ({ status: "ready", exists: true, matched_root_keys: [], resources: empty }),
+    admitQueryCandidate: admit
+  };
+  const inputFor = (maxAttempts: number): SourceIndexAcquisitionInput => ({
+    workspace_id: "workspace-template", navigation_text: "game",
+    allowance: { max_attempts: maxAttempts, max_roots: 16, max_vector_windows: 64 },
+    budget: templateBudget,
+    vector: {
+      status: "available", profile: config.profile, profile_id: profileId,
+      input_digest: digest("game"), embedding: Float32Array.of(1, 0)
+    },
+    question_time: { interpretation_clock: template.interpretation_clock, intervals: [{ start: "2026-09-01", end: "2026-09-06" }] }
+  });
+  const run = (maxAttempts: number, members: number) => new SourceIndexAcquisition(repository, fieldSha256)
+    .nominateWithWitness(inputFor(maxAttempts), () => "admitted", "original", undefined, undefined, undefined, undefined, members);
+
+  admit.mockClear();
+  const base = run(64, 0);
+  const baseCalls = admit.mock.calls.length;
+  admit.mockClear();
+  const listed = run(64, 16);
+  expect(admit.mock.calls.length).toBeLessThanOrEqual(64);
+  expect(listed.result.nominations).toEqual(base.result.nominations);
+  expect(listed.result.accounting).toEqual(base.result.accounting);
+  expect(listed.result.resources).toEqual(base.result.resources);
+  expect(listed.index_members!.map(row => row.source_id)).toContain("raw-winner");
+
+  // With max_attempts === baseCalls (maxExtraAttempts === 0), no uncached tail calls are made.
+  admit.mockClear();
+  const capped = run(baseCalls, 16);
+  expect(admit).toHaveBeenCalledTimes(baseCalls);
+  expect(capped.result.nominations).toEqual(base.result.nominations);
+});
