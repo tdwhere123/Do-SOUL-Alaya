@@ -350,7 +350,8 @@ export class Janitor {
           : `[DEFERRED] tombstone_gc: ${this.tombstoneGcDeferredReason}`
       );
       const result = this.tombstoneGcDeferredReason !== undefined
-        ? this.createSuccessResult(task, completedAt, tombstonedNow, auditEntries, disposition.outcome)
+        ? this.createSuccessResult(task, completedAt, tombstonedNow, auditEntries,
+          tombstonedNow.length > 0 ? "completed" : "skipped")
         : { ...this.createFailureResult(task, completedAt, new AlayaError("UNAVAILABLE", "tombstone GC port is not configured")),
           objects_affected: [...tombstonedNow], audit_entries: auditEntries };
       await this.scheduler.reportCompletion(result);
@@ -412,10 +413,9 @@ export class Janitor {
   // because it is neither compressed into a live capsule nor judged useless.
   private async runDispositionSweep(
     task: GardenTaskDescriptor
-  ): Promise<JanitorSweepResult & { readonly outcome: "completed" | "skipped" }> {
+  ): Promise<JanitorSweepResult> {
     if (this.dispositionSweepPort === undefined) {
       return {
-        outcome: "skipped",
         affectedIds: [],
         auditEntries: ["[SKIPPED] tombstone_gc: disposition sweep port not wired"]
       };
@@ -454,7 +454,7 @@ export class Janitor {
     auditEntries.push(
       `disposition_sweep: ${tombstoned.length} dormant memories autonomously tombstoned (${skipped} retained, no disposition or strong ref)`
     );
-    return { outcome: "completed", affectedIds: tombstoned, auditEntries };
+    return { affectedIds: tombstoned, auditEntries };
   }
 
   private createSuccessResult(

@@ -269,7 +269,7 @@ export interface HistoryEntryQuery {
 }
 
 /** Shared cohort predicate for history readers and offline report regeneration. */
-function matchesHistoryQuery(entry: KpiPayload, query: HistoryEntryQuery): boolean {
+export function matchesHistoryQuery(entry: KpiPayload, query: HistoryEntryQuery): boolean {
   return (
     (query.split === undefined || entry.split === query.split) &&
     (query.policyShape === undefined ||

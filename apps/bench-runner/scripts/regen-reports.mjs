@@ -20,7 +20,7 @@ import {
   resolveDefaultBenchHistoryRoot
 } from "@do-soul/alaya-eval";
 
-import { matchesHistoryQuery } from "../../../packages/eval/dist/history/history.js";
+import { matchesHistoryQuery } from "@do-soul/alaya-eval/internal";
 import { isRecallEvalArchive, sameRecallEvalBaselineIdentity } from
   "../dist/runs/lifecycle/recall-eval/recall-eval-archive-impl.js";
 import { renderRecallEvalReport } from "../dist/runs/kpi/recall-eval-report.js";

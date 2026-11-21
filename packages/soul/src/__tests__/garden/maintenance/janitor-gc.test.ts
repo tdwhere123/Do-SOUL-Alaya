@@ -153,8 +153,10 @@ describe("Janitor GC task kinds", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  it.each([false, true])("completes disposition with GC deferred (has candidate: %s)", async (hasCandidate) => {
-    const memoryIds = hasCandidate ? ["memory-1"] : [];
+  it.each([
+    { outcome: "skipped", memoryIds: [] },
+    { outcome: "completed", memoryIds: ["memory-1"] }
+  ])("reports $outcome for deferred GC with disposition tombstones $memoryIds", async ({ outcome, memoryIds }) => {
     const scheduler = { reportCompletion: vi.fn(async () => undefined) };
     const janitor = new Janitor({
       cleanupPort: { findExpiredObjects: vi.fn(async () => []), removeExpiredObjects: vi.fn(() => undefined) },
@@ -168,7 +170,7 @@ describe("Janitor GC task kinds", () => {
       tombstoneGcDeferredReason: "temporal_assertion_provenance_required", scheduler
     } as ConstructorParameters<typeof Janitor>[0]);
     const result = await janitor.run(createTask(GardenTaskKind.TOMBSTONE_GC));
-    expect(result).toMatchObject({ success: true, outcome: "completed", objects_affected: memoryIds });
+    expect(result).toMatchObject({ success: true, outcome, objects_affected: memoryIds });
     expect(result.audit_entries).toContain("[DEFERRED] tombstone_gc: temporal_assertion_provenance_required");
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });

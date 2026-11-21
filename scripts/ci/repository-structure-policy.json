@@ -1157,8 +1157,8 @@
     {
       "specifier": "@do-soul/alaya-eval/internal",
       "path": "packages/eval/src/internal.ts",
-      "expected_count": 52,
-      "expected_sha256": "1b91f9257e1a5e528dcc4ce8d39e9bfa7fd8d725e6f01b09e3d0271dec237ad5"
+      "expected_count": 53,
+      "expected_sha256": "a986b0f3add8a3a86fcc4d480e76cd1152c1edb4fe4276c55262b736e12d5ddc"
     },
     {
       "specifier": "@do-soul/alaya-soul",

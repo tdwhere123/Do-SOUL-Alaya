@@ -137,6 +137,14 @@ export function cascadeDeleteWorkspace(connection: SqliteConnection, workspaceId
       // Claim election lease keys encode [workspaceId, targetObjectId] as JSON.
       const claimLeasePrefix = `claim-election:[${JSON.stringify(workspaceId)},`;
       connection.prepare("DELETE FROM claim_election_leases WHERE instr(lease_key, ?) = 1").run(claimLeasePrefix);
+      // Retire whole generations before assertion cascades remove their workspace rows.
+      if (connection.prepare("SELECT 1 FROM relation_assertions WHERE workspace_id = ? LIMIT 1").get(workspaceId) !== undefined) {
+        connection.prepare(`
+          DELETE FROM temporal_projection_generations
+          WHERE generation IN (SELECT DISTINCT generation FROM relation_path_projections WHERE workspace_id = ?)
+        `).run(workspaceId);
+        connection.prepare("UPDATE temporal_schema_state SET projection_refresh_required = 1 WHERE state_id = 1").run();
+      }
       for (const table of WORKSPACE_OWNED_ROWS) {
         connection.prepare(`DELETE FROM ${table} WHERE workspace_id = ?`).run(workspaceId);
       }

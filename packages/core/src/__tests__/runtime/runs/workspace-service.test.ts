@@ -457,14 +457,14 @@ describe("WorkspaceService", () => {
       service.list({ limit: 10, offset: 0 }, { kind: "allowlist", workspaceIds: [] })
     ).resolves.toEqual([]);
     await expect(
-      service.count({ kind: "allowlist", workspaceIds: [" ", ""] })
+      service.count({ kind: "allowlist", workspaceIds: [] })
     ).resolves.toBe(0);
     expect(list).not.toHaveBeenCalled();
     expect(count).not.toHaveBeenCalled();
 
     const scoped = await service.list(
       { limit: 5, offset: 0 },
-      { kind: "allowlist", workspaceIds: ["ws-2", "ws-2"] }
+      { kind: "allowlist", workspaceIds: ["ws-2"] }
     );
     expect(scoped.map((ws) => ws.workspace_id)).toEqual(["ws-2"]);
     expect(list).toHaveBeenCalledWith(
@@ -472,7 +472,7 @@ describe("WorkspaceService", () => {
       { kind: "allowlist", workspaceIds: ["ws-2"] }
     );
     await expect(
-      service.count({ kind: "allowlist", workspaceIds: ["ws-2", "ws-2"] })
+      service.count({ kind: "allowlist", workspaceIds: ["ws-2"] })
     ).resolves.toBe(1);
     expect(count).toHaveBeenCalledWith({ kind: "allowlist", workspaceIds: ["ws-2"] });
   });

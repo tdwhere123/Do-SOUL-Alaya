@@ -7,7 +7,6 @@
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/__tests__/**"],
   "references": [
-    { "path": "../core" },
     { "path": "../protocol" }
   ]
 }
