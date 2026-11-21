@@ -118,7 +118,7 @@ commit durable projection repair intent atomically with their state, and seriali
 generation activation, audit and request acknowledgement. EventPublisher rejects asynchronous transaction callbacks,
 including apply callbacks. Receipt-first native source audit remains distinct from
 atomic generation/usage audit; notification failure does not undo committed state.
-See `docs/handbook/runtime-transactions.md` for retry and recovery ownership.
+See `docs/handbook/architecture.md#runtime-write-model` for retry and recovery ownership.
 
 Inspector `soul.open_pointer` copy uses strict `object_id`. MCP bridge executes
 published `garden.*` catalog tools through the soul handler. Both are adapter

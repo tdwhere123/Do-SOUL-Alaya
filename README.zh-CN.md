@@ -20,7 +20,6 @@
 | [`docs/handbook/invariants.md`](docs/handbook/invariants.md) | 始终优先的规则 |
 | [`docs/handbook/architecture.md`](docs/handbook/architecture.md) | 包边界、对外面、写入模型、治理路径 |
 | [`docs/handbook/recall.md`](docs/handbook/recall.md) | Recall 契约、live 路径、就绪用语 |
-| [`docs/handbook/glossary.md`](docs/handbook/glossary.md) | 稳定词汇 |
 
 Agent 工作副本：[`AGENTS.md`](AGENTS.md)。
 
