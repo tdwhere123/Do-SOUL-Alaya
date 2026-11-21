@@ -1162,7 +1162,7 @@ it("handles 24-level diamond DAG metadata in O(V+E) without exponential expansio
   const t0 = performance.now();
   const distinctOut = projectSingleCopyToolResult(distinctEnvelope);
   const distinctMs = performance.now() - t0;
-  expect(distinctOut).toBe(distinctEnvelope);
+  expect(Object.is(distinctOut, distinctEnvelope)).toBe(true);
   expect(distinctMs).toBeLessThan(50);
 
   const t1 = performance.now();
@@ -1171,10 +1171,10 @@ it("handles 24-level diamond DAG metadata in O(V+E) without exponential expansio
     _meta: { a: unknown; b: unknown };
   };
   const matchedMs = performance.now() - t1;
-  expect(matchedOut).not.toBe(matchingEnvelope);
+  expect(Object.is(matchedOut, matchingEnvelope)).toBe(false);
   expect(Object.hasOwn(matchedOut, "content")).toBe(false);
   expect(matchedOut.structuredContent).toEqual({ ok: 1 });
-  expect(matchedOut._meta).not.toBe(dag);
-  expect(matchedOut._meta.a).toBe(matchedOut._meta.b);
+  expect(Object.is(matchedOut._meta, dag)).toBe(false);
+  expect(Object.is(matchedOut._meta.a, matchedOut._meta.b)).toBe(true);
   expect(matchedMs).toBeLessThan(50);
 });

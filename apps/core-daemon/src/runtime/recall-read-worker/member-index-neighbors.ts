@@ -8,7 +8,6 @@ import { SqliteFieldSourceRecordRepo, SqliteRelationRecallReader, type StorageDa
 const ANCHOR_CAP = 16;
 const NEIGHBOR_CAP = 6;
 const RELATION_PAGE = 16;
-const SESSION_GRADES = Object.entries(RecallService.sessionStructuralGrades);
 const NO_TIMELESS_POLICIES = new Set<string>();
 
 export type StructuralMemberScope = Readonly<{
@@ -26,6 +25,8 @@ type NeighborInput = StructuralMemberScope & Readonly<{
 /** The optional member listing reads one bounded relation page per admitted anchor and predicate. */
 export function collectSoftStructuralNeighbors(database: StorageDatabase, input: NeighborInput): readonly SourceIndexTarget[] {
   if (input.authorizedScopes === undefined || input.authorizedScopes?.length === 0 || input.anchors.length === 0) return [];
+  const sessionGrades = Object.entries(RecallService.sessionStructuralGrades ?? {});
+  if (sessionGrades.length === 0) return [];
   const relations = new SqliteRelationRecallReader(database);
   const records = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
   const ledger = new SourceSemanticResourceLedger({ work_units: 2048, memory_bytes: 2 * 1024 * 1024 });
@@ -35,7 +36,7 @@ export function collectSoftStructuralNeighbors(database: StorageDatabase, input:
     for (const anchor of [...new Set(input.anchors)].slice(0, ANCHOR_CAP)) {
       ledger.charge(1, 0, "member structural anchor currentness");
       if (records.readTargetAvailability(input.workspaceId, anchor) !== "ok") continue;
-      for (const [kind, grade] of SESSION_GRADES) {
+      for (const [kind, grade] of sessionGrades) {
         const page = relations.read(input.workspaceId, anchor, kind, RELATION_PAGE, RELATION_PAGE, null, input.asOf);
         ledger.charge(1 + page.nativeVisits, page.nativeBytes, "member structural adjacency");
         for (const row of page.observations) {

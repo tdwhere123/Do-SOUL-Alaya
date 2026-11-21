@@ -334,7 +334,7 @@ it("preserves the ordinary error when the observation callback also throws", asy
 });
 
 it("replays multiple native membership windows and keeps the final page past ten slots", async () => {
-  const texts = Array.from({ length: 16 }, (_, index) => `Project item ${index}: ${"evidence ".repeat(38)}`);
+  const texts = Array.from({ length: 16 }, (_, index) => `Project item ${index}: ${"evidence ".repeat(48)}`);
   const fixture = await ordinaryIndexedSnapshot(texts); roots.push(fixture.root);
   const query = fixture.queries[0]!;
   const input = { config: fixture.config, queries: [{ query_key: query.query_key, original_query: query.original_query }] };
