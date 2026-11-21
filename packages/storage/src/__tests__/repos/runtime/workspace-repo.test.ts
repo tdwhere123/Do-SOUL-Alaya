@@ -131,6 +131,13 @@ describe("SqliteWorkspaceRepo", () => {
       workspaceRepo.count({ kind: "allowlist", workspaceIds: [] })
     ).resolves.toBe(0);
     expect(prepareSpy).not.toHaveBeenCalled();
+
+    await expect(
+      workspaceRepo.list({ limit: 10, offset: 0 }, { kind: "allowlist", workspaceIds: [" ws_4 "] })
+    ).resolves.toEqual([]);
+    await expect(
+      workspaceRepo.count({ kind: "allowlist", workspaceIds: [" ws_4 "] })
+    ).resolves.toBe(0);
   });
 
   it("delete removes an existing workspace", async () => {

@@ -1,4 +1,4 @@
-import { bindEventPublisher, CoreError, type EventPublisher } from "@do-soul/alaya-core";
+import { CoreError, type EventPublisher } from "@do-soul/alaya-core";
 import {
   FileApprovalEventType,
   parseFileApprovalEventPayload,
@@ -21,41 +21,28 @@ export interface SoulApprovalResolution {
 }
 
 interface SoulApprovalServiceDependencies {
-  readonly eventLogRepo: Pick<
-    EventLogRepo,
-    "queryByEntityInCurrentTransaction" | "append" | "transactional"
-  >;
-  readonly eventPublisher?: EventPublisher;
+  readonly eventLogRepo: Pick<EventLogRepo, "queryByEntityInCurrentTransaction">;
+  readonly eventPublisher: EventPublisher;
   readonly runLookup: (runId: string) => Promise<{
     readonly run_id: string;
     readonly workspace_id: string;
   }>;
-  readonly runtimeNotifier?: {
-    notifyEntry(entry: EventLogEntry): void | Promise<void>;
-  };
   readonly now?: () => string;
 }
 
 export function createSoulApprovalService(dependencies: SoulApprovalServiceDependencies) {
   const now = dependencies.now ?? (() => new Date().toISOString());
-  const eventPublisher = bindEventPublisher({
-    eventPublisher: dependencies.eventPublisher,
-    eventLogRepo: dependencies.eventLogRepo,
-    runtimeNotifier: dependencies.runtimeNotifier,
-    purpose: "SoulApprovalService"
-  });
 
   return {
     approve: async (input: SoulApprovalActionInput): Promise<SoulApprovalResolution> =>
-      await resolveSoulApproval(dependencies, eventPublisher, now, input, "approved"),
+      await resolveSoulApproval(dependencies, now, input, "approved"),
     reject: async (input: SoulApprovalActionInput): Promise<SoulApprovalResolution> =>
-      await resolveSoulApproval(dependencies, eventPublisher, now, input, "rejected")
+      await resolveSoulApproval(dependencies, now, input, "rejected")
   };
 }
 
 async function resolveSoulApproval(
   dependencies: SoulApprovalServiceDependencies,
-  eventPublisher: EventPublisher,
   now: () => string,
   input: SoulApprovalActionInput,
   result: "approved" | "rejected"
@@ -67,12 +54,12 @@ async function resolveSoulApproval(
     throw new CoreError("NOT_FOUND", "Pending approval not found for run");
   }
 
-  const { result: resolution } = await eventPublisher.mutateThenAppendMany(() => {
+  const { result: resolution } = await dependencies.eventPublisher.mutateThenAppendMany(() => {
     const approvalEvents = dependencies.eventLogRepo.queryByEntityInCurrentTransaction(
       "approval",
       input.approvalId
     );
-    const approvalState = getApprovalState(approvalEvents, {
+    const { approvalRequest } = getApprovalState(approvalEvents, {
       approvalId: input.approvalId,
       runId: run.run_id,
       workspaceId: run.workspace_id
@@ -85,35 +72,43 @@ async function resolveSoulApproval(
     };
 
     return {
-      events: [
-        {
-          event_type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
-          entity_type: "approval",
-          entity_id: input.approvalId,
-          workspace_id: run.workspace_id,
-          run_id: run.run_id,
-          caused_by: input.causedBy,
-          payload_json: {
-            message_id: approvalState.approvalRequest.message_id,
-            approval_id: input.approvalId,
-            result,
-            description: approvalState.approvalRequest.description,
-            resolved_at: resolvedAt,
-            ...(approvalState.approvalRequest.risk_level === undefined
-              ? {}
-              : { risk_level: approvalState.approvalRequest.risk_level }),
-            ...(approvalState.approvalRequest.source_kind === undefined
-              ? {}
-              : { source_kind: approvalState.approvalRequest.source_kind }),
-            run_id: run.run_id
-          }
-        }
-      ],
+      events: [buildResolvedApprovalEvent(input, run, approvalRequest, resolvedAt, result)],
       result: resolved
     };
   });
 
   return resolution;
+}
+
+function buildResolvedApprovalEvent(
+  input: SoulApprovalActionInput,
+  run: { readonly run_id: string; readonly workspace_id: string },
+  approvalRequest: SoulApprovalRequestedPayload,
+  resolvedAt: string,
+  result: "approved" | "rejected"
+) {
+  return {
+    event_type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
+    entity_type: "approval" as const,
+    entity_id: input.approvalId,
+    workspace_id: run.workspace_id,
+    run_id: run.run_id,
+    caused_by: input.causedBy,
+    payload_json: {
+      message_id: approvalRequest.message_id,
+      approval_id: input.approvalId,
+      result,
+      description: approvalRequest.description,
+      resolved_at: resolvedAt,
+      ...(approvalRequest.risk_level === undefined
+        ? {}
+        : { risk_level: approvalRequest.risk_level }),
+      ...(approvalRequest.source_kind === undefined
+        ? {}
+        : { source_kind: approvalRequest.source_kind }),
+      run_id: run.run_id
+    }
+  };
 }
 
 function getApprovalState(

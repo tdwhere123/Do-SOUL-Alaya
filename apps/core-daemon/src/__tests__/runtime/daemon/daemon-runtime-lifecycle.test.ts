@@ -179,9 +179,15 @@ describe("createDaemonLifecycleControls", () => {
   it("fails closed for ephemeral request tokens unless explicitly allowed", async () => {
     const { controls } = createControls("ephemeral");
 
-    await expect(controls.startHttpServer({ port: 0 })).rejects.toThrow(
-      "ALAYA_REQUEST_TOKEN must be set before starting the daemon HTTP server"
-    );
+    let message = "";
+    try {
+      await controls.startHttpServer({ port: 0 });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("ALAYA_REQUEST_TOKEN must be set before starting the daemon HTTP server");
+    expect(message).toContain("ALAYA_REQUEST_TOKEN");
+    expect(message).not.toContain("alaya inspect");
   });
 
   it("starts a persistent HTTP listener with an explicit operator-owned token", async () => {
@@ -222,6 +228,33 @@ describe("createDaemonLifecycleControls", () => {
       controls.startHttpServer({ port: 0, hostname: "192.168.1.50" })
     ).rejects.toThrow(/Plaintext remote HTTP is unsupported/);
     expect(serverFactory).not.toHaveBeenCalled();
+  });
+
+  it("rejects switching listen policy kind via options.hostname before binding a socket", async () => {
+    const serverFactory = vi.fn();
+    const unixSocketServe = vi.fn();
+    const { controls } = createControls("env", { serverFactory, unixSocketServe });
+
+    await expect(
+      controls.startHttpServer({ port: 0, hostname: "/tmp/unexpected.sock" })
+    ).rejects.toThrow(/Cannot switch listen policy from "loopback" to "unix"/);
+    expect(serverFactory).not.toHaveBeenCalled();
+    expect(unixSocketServe).not.toHaveBeenCalled();
+  });
+
+  it("closes and rejects non-loopback bound TCP sockets before starting background services", async () => {
+    const close = vi.fn((callback?: (error?: Error) => void) => callback?.());
+    const serverFactory = vi.fn(() => ({
+      address: () => ({ address: "0.0.0.0", family: "IPv4", port: 4321 }),
+      close
+    }));
+    const { controls, runBackgroundPass } = createControls("env", { serverFactory });
+
+    await expect(
+      controls.startHttpServer({ port: 0 })
+    ).rejects.toThrow(/Refusing non-loopback bound TCP address "0\.0\.0\.0"/);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(runBackgroundPass).not.toHaveBeenCalled();
   });
 
   it("binds the unix socket when ALAYA_DAEMON_SOCKET is set", async () => {

@@ -159,9 +159,9 @@ export class ZeroDaySecurityLayer {
   }
 
   private async readActivePolicyEvaluation(): Promise<ActivePolicyEvaluation> {
-    const clock = readClockSnapshot(this.deps.now);
-    const parsedNow = parseNow(clock.iso);
-    const policies = await this.readLoadedPolicies(clock.epochMs);
+    const initialClock = readClockSnapshot(this.deps.now);
+    const { policies, evaluationClock } = await this.readLoadedPolicies(initialClock);
+    const parsedNow = parseNow(evaluationClock.iso);
 
     return {
       now: parsedNow,
@@ -169,19 +169,25 @@ export class ZeroDaySecurityLayer {
     };
   }
 
-  private async readLoadedPolicies(nowMs: number): Promise<readonly ZeroDayPolicy[]> {
+  private async readLoadedPolicies(
+    initialClock: ReturnType<typeof readClockSnapshot>
+  ): Promise<{
+    readonly policies: readonly ZeroDayPolicy[];
+    readonly evaluationClock: ReturnType<typeof readClockSnapshot>;
+  }> {
     const cached = this.cachedLoadedPolicies;
-    if (cached !== null && cached.expiresAtMs > nowMs) {
-      return cached.policies;
+    if (cached !== null && cached.expiresAtMs > initialClock.epochMs) {
+      return { policies: cached.policies, evaluationClock: initialClock };
     }
 
     const loadedPolicies = parsePolicies(await this.deps.loadPolicies());
+    const postLoadClock = readClockSnapshot(this.deps.now);
     this.cachedLoadedPolicies = {
       policies: loadedPolicies,
-      expiresAtMs: nowMs + this.readPolicyEvaluationCacheTtlMs()
+      expiresAtMs: postLoadClock.epochMs + this.readPolicyEvaluationCacheTtlMs()
     };
 
-    return loadedPolicies;
+    return { policies: loadedPolicies, evaluationClock: postLoadClock };
   }
 
   private readPolicyEvaluationCacheTtlMs(): number {

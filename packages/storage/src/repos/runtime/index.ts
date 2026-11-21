@@ -26,7 +26,5 @@ export {
 export {
   SqliteWorkspaceRepo,
   type WorkspaceCreateInput,
-  type WorkspaceListPageOptions,
-  type WorkspaceListScope,
   type WorkspaceRepo
 } from "./workspace-repo.js";

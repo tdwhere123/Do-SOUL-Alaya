@@ -34,13 +34,17 @@ function stripBrackets(host: string): string {
 
 export function isLoopbackHost(host: string): boolean {
   const normalized = stripBrackets(host);
-  if (normalized === "localhost" || normalized === "::1") {
+  if (normalized.toLowerCase() === "localhost" || normalized === "::1") {
     return true;
   }
   if (normalized.startsWith("::ffff:")) {
     return isLoopbackHost(normalized.slice("::ffff:".length));
   }
   return /^127(?:\.\d{1,3}){3}$/.test(normalized);
+}
+
+function normalizeLoopbackTcpHost(host: string): string {
+  return stripBrackets(host).toLowerCase() === "localhost" ? DEFAULT_DAEMON_HOST : host;
 }
 
 /**
@@ -128,11 +132,11 @@ export function resolveDaemonListenPolicy(
         `Plaintext remote HTTP is unsupported for DAEMON_HOST / listen hostname "${unixTcpHost}". Bind loopback (${DEFAULT_DAEMON_HOST}) or set ALAYA_DAEMON_SOCKET to a unix socket path.`
       );
     }
-    return { kind: "unix", path: socketPath, tcpHost: unixTcpHost };
+    return { kind: "unix", path: socketPath, tcpHost: normalizeLoopbackTcpHost(unixTcpHost) };
   }
 
   if (isLoopbackHost(tcpHostCandidate)) {
-    return { kind: "loopback", host: tcpHostCandidate };
+    return { kind: "loopback", host: normalizeLoopbackTcpHost(tcpHostCandidate) };
   }
 
   throw new Error(

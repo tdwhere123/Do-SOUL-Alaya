@@ -5,14 +5,11 @@ import type {
   PathRelation,
   Workspace,
   WorkspaceCreateInput,
-  WorkspaceEngineConfig
+  WorkspaceEngineConfig,
+  WorkspaceListScope
 } from "@do-soul/alaya-protocol";
 
 import type { EventPublisher } from "../event-publisher.js";
-
-export type WorkspaceListScope =
-  | { readonly kind: "all" }
-  | { readonly kind: "allowlist"; readonly workspaceIds: readonly string[] };
 
 export interface WorkspaceRepoPort {
   create(data: {

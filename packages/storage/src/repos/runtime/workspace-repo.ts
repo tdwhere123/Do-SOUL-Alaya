@@ -1,4 +1,4 @@
-import { WorkspaceSchema, type Workspace } from "@do-soul/alaya-protocol";
+import { WorkspaceSchema, type Workspace, type WorkspaceListScope } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
@@ -13,10 +13,6 @@ import { parseRows, readRecord, type RowParser } from "../shared/parse-row.js";
 export type WorkspaceCreateInput = Omit<Workspace, "created_at" | "archived_at" | "repo_path"> & {
   readonly repo_path?: Workspace["repo_path"];
 };
-
-export type WorkspaceListScope =
-  | { readonly kind: "all" }
-  | { readonly kind: "allowlist"; readonly workspaceIds: readonly string[] };
 
 export interface WorkspaceRepo {
   create(data: WorkspaceCreateInput): Workspace;
@@ -116,11 +112,10 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     scope: WorkspaceListScope = { kind: "all" }
   ): Promise<readonly Workspace[]> {
     if (scope.kind === "allowlist") {
-      const allowedIds = normalizeAllowedWorkspaceIds(scope.workspaceIds);
-      if (allowedIds.length === 0) {
+      if (scope.workspaceIds.length === 0) {
         return [];
       }
-      return this.listAllowedWorkspaces(allowedIds, page);
+      return this.listAllowedWorkspaces(scope.workspaceIds, page);
     }
 
     try {
@@ -139,12 +134,11 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
 
   public async count(scope: WorkspaceListScope = { kind: "all" }): Promise<number> {
     if (scope.kind === "allowlist") {
-      const allowedIds = normalizeAllowedWorkspaceIds(scope.workspaceIds);
-      if (allowedIds.length === 0) {
+      if (scope.workspaceIds.length === 0) {
         return 0;
       }
       try {
-        const row = this.active().countByIdsStatement.get(JSON.stringify(allowedIds)) as CountRow | undefined;
+        const row = this.active().countByIdsStatement.get(JSON.stringify(scope.workspaceIds)) as CountRow | undefined;
         return row === undefined ? 0 : Number(row.total);
       } catch (error) {
         throw new StorageError("QUERY_FAILED", "Failed to count workspaces.", error);
@@ -256,12 +250,6 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
       throw new StorageError("QUERY_FAILED", `Failed to update default engine class for workspace ${id}.`, error);
     }
   }
-}
-
-function normalizeAllowedWorkspaceIds(workspaceIds: readonly string[]): readonly string[] {
-  return Array.from(
-    new Set(workspaceIds.map((id) => id.trim()).filter((id) => id.length > 0))
-  );
 }
 
 const WorkspaceRowParser: RowParser<Workspace> = {

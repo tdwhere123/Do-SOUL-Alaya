@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Context } from "hono";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, type WorkspaceListScope } from "@do-soul/alaya-protocol";
 import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import {
   isLoopbackHost,
@@ -81,20 +81,19 @@ export function isProcessSecretPatchRequest(method: string, path: string): boole
 
 export const WORKSPACE_TOKEN_DENIED_MESSAGE = "Workspace is not authorized for this token";
 
-export type WorkspaceGrantScope =
-  | { readonly kind: "all" }
-  | { readonly kind: "allowlist"; readonly workspaceIds: readonly string[] };
-
 export function resolveWorkspaceGrantScope(
   grant: RequestTokenGrant | undefined
-): WorkspaceGrantScope {
-  if (grant === undefined || grant.workspaceIds === "*") {
+): WorkspaceListScope {
+  if (grant === undefined) {
+    return { kind: "allowlist", workspaceIds: [] };
+  }
+  if (grant.workspaceIds === "*") {
     return { kind: "all" };
   }
   return { kind: "allowlist", workspaceIds: grant.workspaceIds };
 }
 
-export function resolveRequestWorkspaceGrantScope(context: Context): WorkspaceGrantScope {
+export function resolveRequestWorkspaceGrantScope(context: Context): WorkspaceListScope {
   const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
   return resolveWorkspaceGrantScope(grant);
 }

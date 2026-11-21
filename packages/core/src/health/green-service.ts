@@ -147,9 +147,15 @@ export class GreenService {
           occurred_at: timestamp
         })
       };
-      return { eventInputs: [eventInput], apply: () => this.dependencies.greenStatusRepo.upsert(status) };
+      return {
+        eventInputs: [eventInput],
+        apply: () => {
+          const persisted = this.dependencies.greenStatusRepo.upsert(status);
+          this.consecutiveNoGo.delete(targetObjectId);
+          return persisted;
+        }
+      };
     });
-    this.consecutiveNoGo.delete(targetObjectId);
     return granted;
   }
 
@@ -167,8 +173,14 @@ export class GreenService {
       const existing = this.dependencies.greenStatusRepo.findByTargetObjectIdSync(targetObjectId);
       this.assertStatusWorkspace(existing, workspaceId);
       if (existing === null || held) return { eventInputs: [], apply: () => existing };
-      const memory = this.guard.getMemoryOrThrowSync(targetObjectId, workspaceId);
       const timestamp = this.now();
+      if (
+        params.reason === RevokeReason.REVIEW_OVERDUE &&
+        (existing.green_state !== GreenState.GRACE || !isExpired(existing.valid_until, timestamp))
+      ) {
+        return { eventInputs: [], apply: () => existing };
+      }
+      const memory = this.guard.getMemoryOrThrowSync(targetObjectId, workspaceId);
       const next = GreenStatusSchema.parse({
         ...existing,
         updated_at: timestamp,

@@ -101,6 +101,10 @@ export const WorkspaceGitBindingUpdateSchema = z
   .strict()
   .readonly();
 
+export type WorkspaceListScope =
+  | { readonly kind: "all" }
+  | { readonly kind: "allowlist"; readonly workspaceIds: readonly string[] };
+
 export type WorkspaceKind = z.infer<typeof WorkspaceKindSchema>;
 export type WorkspaceState = z.infer<typeof WorkspaceStateSchema>;
 export type Workspace = z.infer<typeof WorkspaceSchema>;

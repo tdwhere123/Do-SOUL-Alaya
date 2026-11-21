@@ -388,4 +388,31 @@ describe("ZeroDaySecurityLayer", () => {
       code: "VALIDATION"
     });
   });
+
+  it("evaluates active policies using the live clock read after loadPolicies completes", async () => {
+    let now = "2026-04-14T11:59:59.900Z";
+    const layer = new ZeroDaySecurityLayer({
+      loadPolicies: async () => {
+        now = "2026-04-14T12:00:00.000Z";
+        return [
+          createPolicy({
+            policy_id: "policy-boundary-cross",
+            kind: "deny_tool",
+            target: "tools.exec_shell",
+            effective_at: "2026-04-14T12:00:00.000Z",
+            expires_at: "2026-04-14T13:00:00.000Z"
+          })
+        ];
+      },
+      now: () => now
+    });
+
+    const status = await layer.getSecurityStatus("workspace-1");
+    expect(status.zero_day_active).toBe(true);
+    expect(status.posture).toBe("elevated");
+    expect(status.last_assessment_at).toBe("2026-04-14T12:00:00.000Z");
+    await expect(layer.enforceToolAccess("workspace-1", "tools.exec_shell")).rejects.toMatchObject({
+      code: "VALIDATION"
+    });
+  });
 });

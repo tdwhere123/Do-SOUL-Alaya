@@ -189,4 +189,25 @@ describe("core daemon server listen options", () => {
     expect(isRemoteDaemonBind({ ALAYA_DAEMON_SOCKET: "/tmp/alaya.sock" })).toBe(false);
     expect(isRemoteDaemonBind({})).toBe(false);
   });
+
+  it("normalizes localhost to 127.0.0.1 in TCP listen policy", () => {
+    expect(resolveDaemonListenPolicy({ DAEMON_HOST: "localhost" })).toEqual({
+      kind: "loopback",
+      host: "127.0.0.1"
+    });
+    expect(resolveDaemonListenPolicy({}, { hostname: "localhost" })).toEqual({
+      kind: "loopback",
+      host: "127.0.0.1"
+    });
+    expect(
+      resolveDaemonListenPolicy(
+        { ALAYA_DAEMON_SOCKET: "/tmp/alaya.sock" },
+        { hostname: "localhost" }
+      )
+    ).toEqual({
+      kind: "unix",
+      path: "/tmp/alaya.sock",
+      tcpHost: "127.0.0.1"
+    });
+  });
 });

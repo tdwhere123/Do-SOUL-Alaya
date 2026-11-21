@@ -245,8 +245,7 @@ function createDaemonCoreSupportServices(
     soulApprovalService: createSoulApprovalService({
       eventLogRepo: input.eventLogRepo,
       eventPublisher: input.eventPublisher,
-      runLookup: async (runId) => await runService.getById(runId),
-      runtimeNotifier: input.runtimeNotifier
+      runLookup: async (runId) => await runService.getById(runId)
     }),
     topologyAuditService: new SoulTopologyAuditService({
       eventLogRepo: input.eventLogRepo,

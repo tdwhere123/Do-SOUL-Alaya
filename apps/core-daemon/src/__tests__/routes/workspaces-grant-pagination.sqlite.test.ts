@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Hono } from "hono";
 import {
   EventPublisher,
   WorkspaceService
@@ -10,7 +11,7 @@ import {
   SqliteRunRepo,
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
-import type { WorkspaceRouteServices } from "../../routes/workspace/workspaces.js";
+import { registerWorkspaceRoutes, type WorkspaceRouteServices } from "../../routes/workspace/workspaces.js";
 import { createApp } from "../../runtime/app.js";
 import { routeServices } from "../support/route-service-stubs.js";
 
@@ -18,6 +19,7 @@ const PROCESS_TOKEN = "process-all-token";
 const MULTI_WS_TOKEN = "multi-ws-token";
 const SINGLE_WS_TOKEN = "single-ws-token";
 const EMPTY_WS_TOKEN = "empty-ws-token";
+const WHITESPACE_WS_TOKEN = "whitespace-ws-token";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -74,7 +76,8 @@ function createWorkspaceListApp() {
       workspaceTokens: [
         { token: MULTI_WS_TOKEN, workspaceIds: ["ws-1", "ws-3", "ws-4", "ws-5"] },
         { token: SINGLE_WS_TOKEN, workspaceIds: ["ws-3"] },
-        { token: EMPTY_WS_TOKEN, workspaceIds: [] }
+        { token: EMPTY_WS_TOKEN, workspaceIds: [] },
+        { token: WHITESPACE_WS_TOKEN, workspaceIds: [" ws-3 "] }
       ]
     },
     routes: {
@@ -86,7 +89,7 @@ function createWorkspaceListApp() {
     }
   });
 
-  return { app, database };
+  return { app, database, workspaceService };
 }
 
 describe("GET /workspaces SQL-level RequestTokenGrant filtering", () => {
@@ -162,5 +165,36 @@ describe("GET /workspaces SQL-level RequestTokenGrant filtering", () => {
       "ws-3",
       "ws-4"
     ]);
+  });
+
+  it("matches workspaceIds strictly without trimming so list and getById stay aligned", async () => {
+    const { app } = createWorkspaceListApp();
+
+    const listResponse = await app.request("/workspaces?limit=10&offset=0", {
+      headers: headersFor(WHITESPACE_WS_TOKEN)
+    });
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.headers.get("x-total-count")).toBe("0");
+    await expect(listResponse.json()).resolves.toEqual({ success: true, data: [] });
+
+    const getResponse = await app.request("/workspaces/ws-3", {
+      headers: headersFor(WHITESPACE_WS_TOKEN)
+    });
+    expect(getResponse.status).toBe(403);
+  });
+
+  it("fails closed when GET /workspaces executes without a requestTokenGrant in context", async () => {
+    const { workspaceService } = createWorkspaceListApp();
+    const unauthenticatedApp = new Hono();
+    registerWorkspaceRoutes(unauthenticatedApp, {
+      workspaceService,
+      engineBindingService: routeServices<WorkspaceRouteServices["engineBindingService"]>({}),
+      codingEngineAvailable: false
+    });
+
+    const response = await unauthenticatedApp.request("/workspaces?limit=10&offset=0");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-total-count")).toBe("0");
+    await expect(response.json()).resolves.toEqual({ success: true, data: [] });
   });
 });
