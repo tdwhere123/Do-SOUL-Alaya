@@ -102,23 +102,24 @@ describe("Alaya MCP stdio pipe", () => {
       const names = listed.tools.map((tool) => tool.name);
       expect(names).toContain("soul.recall");
       expect(names).toContain("soul.list_pending_proposals");
+      expect(names).not.toContain("soul.interpretation");
       for (const published of listed.tools) {
         const definition = listAlayaMemoryTools().find(tool => tool.name === published.name)!;
         expect(published.inputSchema).toEqual({ ...definition.inputSchema, type: "object" });
       }
-      const interpretation = listed.tools.find(tool => tool.name === "soul.interpretation")!;
       const update = listed.tools.find(tool => tool.name === "soul.propose_memory_update")!;
-      expect(interpretation.inputSchema.oneOf).toEqual(expect.any(Array));
       expect(update.inputSchema.anyOf).toEqual(expect.any(Array));
-      expect(interpretation.description).toContain("external embedding attempts are reported separately");
-      expect(interpretation.description).not.toMatch(/provider-free|no operation calls a provider/iu);
       expect(listed.tools.find(tool => tool.name === "soul.recall")?.description)
-        .toContain("ordinary recall does not enqueue Garden work or call a missing embedding provider");
+        .toContain("`recent_turn` is ignored for extraction");
 
       const invalid = await client.callTool({
         name: "soul.interpretation", arguments: { operation: "not-an-operation" }
       });
       expect(invalid.isError).toBe(true);
+      expect(invalid.structuredContent).toMatchObject({
+        ok: false,
+        error: { code: "VALIDATION" }
+      });
 
       const called = await client.callTool({
         name: "soul.list_pending_proposals",
@@ -165,12 +166,86 @@ describe("Alaya MCP stdio pipe", () => {
       const listed = await client.listTools();
       const expectedByName = expectedEffectiveDescriptionByName();
       expect(listed.tools.map((tool) => tool.name)).toEqual([...ALAYA_MEMORY_TOOL_NAMES]);
+      const interpretation = listed.tools.find(tool => tool.name === "soul.interpretation")!;
+      expect(interpretation.inputSchema.oneOf).toEqual(expect.any(Array));
+      expect(interpretation.description).toContain("external embedding attempts are reported separately");
+      expect(interpretation.description).not.toMatch(/provider-free|no operation calls a provider/iu);
       for (const published of listed.tools) {
         expect(published.description).toBe(expectedByName.get(published.name as AlayaMemoryToolName));
       }
     } finally {
       await client.close();
       await server.close();
+    }
+  });
+
+  it("omits soul.interpretation from codex stdio list_tools while dispatching it and listing it on host-interpretation", async () => {
+    const unused = async (): Promise<never> => {
+      throw new Error("unused stdio catalog tool");
+    };
+    const dispatcher = createMcpMemoryToolDispatcher({
+      gardenTasks: {
+        listPendingGardenTasks: unused,
+        claimGardenTask: unused,
+        completeGardenTask: unused
+      } as unknown as GardenTaskOperations,
+      recall: unused,
+      reportContextUsage: unused,
+      captureHostSession: unused,
+      interpretation: unused,
+      operations: {} as unknown as McpMemoryToolOperations
+    });
+    const handler: McpMemoryToolHandler = {
+      call: async (input) =>
+        dispatcher.dispatchToolCall({
+          toolName: input.toolName as AlayaMemoryToolName,
+          rawArguments: input.arguments,
+          context: input.context
+        })
+    };
+
+    for (const [agentTarget, expectAdvertised] of [["codex", false], ["host-interpretation", true]] as const) {
+      const clientToServer = new PassThrough();
+      const serverToClient = new PassThrough();
+      const server = await runAlayaMcpStdioServer({
+        memoryToolHandler: handler,
+        contextProvider: () => ({
+          workspaceId: "workspace-1",
+          runId: null,
+          agentTarget,
+          sessionId: `stdio-pipe-${agentTarget}`
+        }),
+        stdin: clientToServer,
+        stdout: serverToClient
+      });
+      const client = new Client({ name: `stdio-pipe-${agentTarget}`, version: "test" }, { capabilities: {} });
+      try {
+        await client.connect(new PipeClientTransport(serverToClient, clientToServer));
+        const listed = await client.listTools();
+        const names = listed.tools.map((tool) => tool.name);
+        expect(names).not.toContain("soul.review_memory_proposal");
+        expect(names).not.toContain("soul.batch_review_edge_proposals");
+        if (expectAdvertised) {
+          expect(names).toContain("soul.interpretation");
+          const interpretation = listed.tools.find((tool) => tool.name === "soul.interpretation")!;
+          expect(interpretation.inputSchema.oneOf).toEqual(expect.any(Array));
+          expect(interpretation.description).toContain("external embedding attempts are reported separately");
+        } else {
+          expect(names).not.toContain("soul.interpretation");
+        }
+        const invalid = await client.callTool({
+          name: "soul.interpretation",
+          arguments: { operation: "not-an-operation" }
+        });
+        expect(invalid.isError).toBe(true);
+        expect(invalid.structuredContent).toMatchObject({
+          ok: false,
+          error: { code: "VALIDATION" }
+        });
+      } finally {
+        await client.close();
+        await server.close();
+      }
     }
   });
 });

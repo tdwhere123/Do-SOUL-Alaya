@@ -13,6 +13,7 @@ import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import type { ProfileMutationAuditRow, ProfileMutationAuditWriter } from "../attach/index.js";
 import type { AlayaDaemonRuntime } from "../index.js";
 import { stripReviewerCredentialsFromAgentMcpEnv } from "../attach/attached-agent-mcp-child-env.js";
+import { HOST_INTERPRETATION_AGENT_TARGET } from "../mcp-memory/proposal/reviewer-surfaces.js";
 import { createAttachClaudeCommandSpec, createAttachCodexCommandSpec, createDetachCommandSpec } from "./attach/index.js";
 import { runAlayaMcpStdioServer } from "../mcp/server/mcp-server.js";
 import { parseEnvBoolean } from "@do-soul/alaya-protocol";
@@ -137,12 +138,15 @@ function resolveMcpAgentTarget(
     requestedAgentTarget === "codex" ||
     requestedAgentTarget === "claude-code" ||
     requestedAgentTarget === "garden-worker" ||
+    requestedAgentTarget === HOST_INTERPRETATION_AGENT_TARGET ||
     requestedAgentTarget === "mcp"
   ) {
     return requestedAgentTarget;
   }
 
-  warn(`Ignoring unsupported ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio supports codex, claude-code, garden-worker, or mcp.`);
+  warn(
+    `Ignoring unsupported ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio supports codex, claude-code, garden-worker, ${HOST_INTERPRETATION_AGENT_TARGET}, or mcp.`
+  );
   return "mcp";
 }
 

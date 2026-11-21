@@ -443,6 +443,79 @@ describe("cli registration", () => {
     });
   });
 
+  it("permits host-interpretation as an MCP agent target and warns on unsupported targets", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const baseRuntime = createRuntime();
+    const runtime = createRuntime({
+      services: {
+        ...baseRuntime.services,
+        runService: {
+          ...baseRuntime.services.runService,
+          getById: vi.fn(async () => createRun({ run_id: "run-1", workspace_id: "workspace-1" }))
+        }
+      }
+    });
+    const bridge = createAlayaCliBridge(runtime, {
+      env: {
+        ALAYA_WORKSPACE_ID: "workspace-1",
+        ALAYA_RUN_ID: "run-1",
+        ALAYA_AGENT_TARGET: "host-interpretation"
+      },
+      stdin,
+      stdout,
+      stderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(bridge, runtime);
+    hoisted.runAlayaMcpStdioServer.mockImplementationOnce(async () => {
+      setImmediate(() => stdin.destroy());
+      return { close: hoisted.serverClose };
+    });
+
+    const result = await bridge.dispatch(["mcp", "stdio"]);
+
+    expect(result.exitCode).toBe(0);
+    const [serverOptions] = hoisted.runAlayaMcpStdioServer.mock.calls[0] ?? [];
+    expect(serverOptions.contextProvider()).toEqual({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      agentTarget: "host-interpretation",
+      sessionId: expect.stringMatching(/^mcp-session-[0-9a-f-]+$/)
+    });
+
+    const badStdin = new PassThrough();
+    const badStderr = new PassThrough();
+    const stderrChunks: string[] = [];
+    badStderr.on("data", (chunk) => stderrChunks.push(chunk.toString("utf8")));
+    const badBridge = createAlayaCliBridge(runtime, {
+      env: {
+        ALAYA_WORKSPACE_ID: "workspace-1",
+        ALAYA_RUN_ID: "run-1",
+        ALAYA_AGENT_TARGET: "unknown-target"
+      },
+      stdin: badStdin,
+      stdout: new PassThrough(),
+      stderr: badStderr,
+      isTTY: false
+    });
+    registerAlayaCliCommands(badBridge, runtime);
+    hoisted.runAlayaMcpStdioServer.mockImplementationOnce(async () => {
+      setImmediate(() => badStdin.destroy());
+      return { close: hoisted.serverClose };
+    });
+
+    const badResult = await badBridge.dispatch(["mcp", "stdio"]);
+
+    expect(badResult.exitCode).toBe(0);
+    const [badServerOptions] = hoisted.runAlayaMcpStdioServer.mock.calls[1] ?? [];
+    expect(badServerOptions.contextProvider().agentTarget).toBe("mcp");
+    expect(stderrChunks.join("")).toContain(
+      "Ignoring unsupported ALAYA_AGENT_TARGET=unknown-target: MCP stdio supports codex, claude-code, garden-worker, host-interpretation, or mcp."
+    );
+  });
+
   it("passes ALAYA_MCP_TOOL_TIMEOUT_MS into the stdio MCP server", async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();

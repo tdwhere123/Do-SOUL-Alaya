@@ -35,13 +35,21 @@ export function textMcpPromptOptions(value: TextMcpPromptOptions): TextMcpPrompt
 export function projectLiveSurfaceForCaller(
   surface: TextMcpLiveSurface, profile: TextMcpCallerCapabilityProfile | undefined
 ): TextMcpLiveSurface {
-  if (profile !== "plain_query") return surface;
+  const hasHostInterpretation = surface.tools.some(isHostInterpretationTool);
+  if (profile !== "plain_query" && !hasHostInterpretation) return surface;
   const projected = structuredClone(surface) as TextMcpLiveSurface & { tools: unknown[] };
-  if (typeof projected.instructions === "string") {
-    projected.instructions = stripCallerCoordinateGuidance(projected.instructions);
+  projected.tools = projected.tools.filter((tool) => !isHostInterpretationTool(tool));
+  if (profile === "plain_query") {
+    if (typeof projected.instructions === "string") {
+      projected.instructions = stripCallerCoordinateGuidance(projected.instructions);
+    }
+    projected.tools = projected.tools.map(projectRecallTool);
   }
-  projected.tools = projected.tools.map(projectRecallTool);
   return projected;
+}
+
+function isHostInterpretationTool(tool: unknown): boolean {
+  return isPlainObject(tool) && tool.name === "soul.interpretation";
 }
 
 function stripCallerCoordinateGuidance(text: string): string {

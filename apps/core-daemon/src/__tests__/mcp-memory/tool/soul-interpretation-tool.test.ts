@@ -23,6 +23,7 @@ import {
   callAlayaMcpMemoryTool,
   createAlayaMcpServer
 } from "../../../mcp/server/mcp-server.js";
+import { HOST_INTERPRETATION_AGENT_TARGET } from "../../../mcp-memory/proposal/reviewer-surfaces.js";
 import { listAlayaMemoryTools } from "../../../mcp-memory/tool/tool-catalog.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import type {
@@ -173,26 +174,57 @@ function expectNoExternalOrGenerationAttempts(output: unknown) {
 }
 
 describe("soul.interpretation MCP/CLI surface", () => {
-  it("lists soul.interpretation beside ordinary Recall and hides it from a legacy catalog", async () => {
+  it("advertises soul.interpretation on host catalogs while omitting it from consumer tools/list and preserving host dispatch", async () => {
     const names = listAlayaMemoryTools().map((tool) => tool.name);
     expect(names).toContain("soul.interpretation");
     expect(names).toContain("soul.recall");
-    const server = createAlayaMcpServer({
+
+    const hostServer = createAlayaMcpServer({
       memoryToolHandler: createHandler(),
-      contextProvider: () => context
+      contextProvider: () => ({ ...context, agentTarget: HOST_INTERPRETATION_AGENT_TARGET })
     });
-    const client = new Client({ name: "interpretation-list", version: "test" }, { capabilities: {} });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const hostClient = new Client({ name: "interpretation-host-list", version: "test" }, { capabilities: {} });
+    const [hostClientTransport, hostServerTransport] = InMemoryTransport.createLinkedPair();
     try {
-      await server.connect(serverTransport);
-      await client.connect(clientTransport);
-      const listed = await client.listTools();
+      await hostServer.connect(hostServerTransport);
+      await hostClient.connect(hostClientTransport);
+      const listed = await hostClient.listTools();
       expect(listed.tools.map((tool) => tool.name)).toContain("soul.interpretation");
       expect(listed.tools.map((tool) => tool.name)).toContain("soul.recall");
     } finally {
-      await client.close();
-      await server.close();
+      await hostClient.close();
+      await hostServer.close();
     }
+
+    const consumerServer = createAlayaMcpServer({
+      memoryToolHandler: createHandler(),
+      contextProvider: () => context
+    });
+    const consumerClient = new Client({ name: "interpretation-consumer-list", version: "test" }, { capabilities: {} });
+    const [consumerClientTransport, consumerServerTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await consumerServer.connect(consumerServerTransport);
+      await consumerClient.connect(consumerClientTransport);
+      const listed = await consumerClient.listTools();
+      expect(listed.tools.map((tool) => tool.name)).not.toContain("soul.interpretation");
+      expect(listed.tools.map((tool) => tool.name)).toContain("soul.recall");
+    } finally {
+      await consumerClient.close();
+      await consumerServer.close();
+    }
+
+    const consumerDispatch = await callAlayaMcpMemoryTool(
+      {
+        memoryToolHandler: createHandler(),
+        contextProvider: () => context
+      },
+      "soul.interpretation",
+      { operation: "prepare_source", source_id: "artifact-1", budget: BUDGET }
+    );
+    expect(consumerDispatch.structuredContent).toMatchObject({
+      ok: false,
+      error: { code: "UNAVAILABLE" }
+    });
 
     const legacy = await callAlayaMcpMemoryTool(
       {

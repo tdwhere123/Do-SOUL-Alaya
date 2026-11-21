@@ -5,7 +5,11 @@ import { soulToolDefs } from "@do-soul/alaya-engine-gateway";
 import { describe, expect, it } from "vitest";
 import type { AlayaCliContext } from "../../../cli/bridge.js";
 import { createToolsCommand } from "../../../cli/tools.js";
-import { HUMAN_REVIEW_ONLY_MEMORY_TOOL_NAMES } from "../../../mcp-memory/proposal/reviewer-surfaces.js";
+import {
+  HOST_INTERPRETATION_AGENT_TARGET,
+  HUMAN_REVIEW_ONLY_MEMORY_TOOL_NAMES
+} from "../../../mcp-memory/proposal/reviewer-surfaces.js";
+import { HOST_INTERPRETATION_ONLY_MEMORY_TOOL_NAMES } from "../../../mcp-memory/tool/attach-profile-tool-allowlist.js";
 import {
   ALAYA_MEMORY_TOOL_NAMES,
   type AlayaMemoryToolName
@@ -43,16 +47,29 @@ describe("MCP client-visible memory tool descriptions", () => {
   it("keeps attached-agent in-process list_tools descriptions identical for the visible subset", async () => {
     const expectedByName = expectedEffectiveDescriptionByName();
     const listed = await listToolsForAgentTarget("codex");
-    const hidden = new Set<string>(HUMAN_REVIEW_ONLY_MEMORY_TOOL_NAMES);
+    const hidden = new Set<string>([
+      ...HUMAN_REVIEW_ONLY_MEMORY_TOOL_NAMES,
+      ...HOST_INTERPRETATION_ONLY_MEMORY_TOOL_NAMES
+    ]);
 
     expect(listed.map((tool) => tool.name)).toEqual(
       ALAYA_MEMORY_TOOL_NAMES.filter((name) => !hidden.has(name))
     );
     expect(listed.map((tool) => tool.name)).not.toContain("soul.review_memory_proposal");
     expect(listed.map((tool) => tool.name)).not.toContain("soul.batch_review_edge_proposals");
+    expect(listed.map((tool) => tool.name)).not.toContain("soul.interpretation");
     for (const published of listed) {
       expect(published.description).toBe(expectedByName.get(published.name as AlayaMemoryToolName));
     }
+
+    const hostListed = await listToolsForAgentTarget(HOST_INTERPRETATION_AGENT_TARGET);
+    expect(hostListed.find((tool) => tool.name === "soul.interpretation")?.description).toBe(
+      expectedByName.get("soul.interpretation")
+    );
+    const inspectorListed = await listToolsForAgentTarget("inspector");
+    expect(inspectorListed.find((tool) => tool.name === "soul.interpretation")?.description).toBe(
+      expectedByName.get("soul.interpretation")
+    );
   });
 
   it("lists an empty in-process catalog as no tools and still rejects unknown calls", async () => {

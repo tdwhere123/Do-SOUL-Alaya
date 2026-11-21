@@ -123,8 +123,13 @@ describe("profile mutation", () => {
     expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain("attached agents cannot review");
     expect(ALAYA_OPERATOR_INSTRUCTIONS).not.toContain("soul.review_memory_proposal");
     expect(ALAYA_OPERATOR_INSTRUCTIONS).not.toContain("soul.batch_review_edge_proposals");
+    expect(ALAYA_OPERATOR_INSTRUCTIONS).not.toContain("soul.interpretation");
     for (const toolName of PUBLIC_SOUL_TOOL_NAMES) {
-      if (toolName === "soul.review_memory_proposal" || toolName === "soul.batch_review_edge_proposals") {
+      if (
+        toolName === "soul.review_memory_proposal" ||
+        toolName === "soul.batch_review_edge_proposals" ||
+        toolName === "soul.interpretation"
+      ) {
         continue;
       }
       expect(ALAYA_OPERATOR_INSTRUCTIONS).toContain(toolName);

@@ -21,7 +21,8 @@ import {
 } from "@do-soul/alaya-engine-gateway";
 import {
   isMemoryToolAllowedForAgentTarget,
-  listAlayaMemoryToolsForAgentTarget
+  listAlayaMemoryToolsForAgentTarget,
+  type McpToolCatalogProfile
 } from "../../mcp-memory/tool/attach-profile-tool-allowlist.js";
 import {
   listAlayaMemoryTools,
@@ -40,6 +41,7 @@ export interface AlayaMcpServerOptions {
   readonly contextProvider: () => McpMemoryToolCallContext;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly tools?: readonly AlayaMemoryToolDefinition[];
+  readonly toolCatalogProfile?: McpToolCatalogProfile;
   readonly version?: string;
   readonly toolTimeoutMs?: number;
   readonly toolTimeoutEnv?: string;
@@ -88,7 +90,11 @@ export function createAlayaMcpServer(options: AlayaMcpServerOptions): Server {
 
   server.setRequestHandler(ListToolsRequestSchema, () =>
     createAlayaMcpToolsResult(
-      listAlayaMemoryToolsForAgentTarget(options.contextProvider().agentTarget, tools)
+      listAlayaMemoryToolsForAgentTarget(
+        options.contextProvider().agentTarget,
+        tools,
+        options.toolCatalogProfile
+      )
     )
   );
 

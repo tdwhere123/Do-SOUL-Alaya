@@ -206,6 +206,59 @@ it("strips evidence_conditions and query_coordinates for plain_query while retai
   expect(plainRecall.description).toContain("For conversation passages");
 });
 
+it("strips soul.interpretation from caller_coordinates and plain_query surfaces while leaving consumer tools untouched", () => {
+  const recallTool = {
+    name: "soul.recall",
+    description: "Optional caller coordinates on soul.recall ...\nKeep consumer tool.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" }, query_coordinates: { type: "object" } },
+      required: ["query"]
+    }
+  };
+  const openPointerTool = {
+    name: "soul.open_pointer",
+    description: "Open pointer",
+    inputSchema: { type: "object", properties: { object_id: { type: "string" } }, required: ["object_id"] }
+  };
+  const interpretationTool = {
+    name: "soul.interpretation",
+    description: "Host interpretation tool",
+    inputSchema: { type: "object", properties: { operation: { type: "string" } } }
+  };
+  const hostSurface = {
+    ...surface,
+    instructions: "Keep instructions.",
+    tools: [recallTool, interpretationTool, openPointerTool]
+  };
+
+  const callerCoordinates = projectLiveSurfaceForCaller(hostSurface, "caller_coordinates");
+  expect(callerCoordinates.tools.map((tool) => (tool as { name: string }).name)).toEqual([
+    "soul.recall",
+    "soul.open_pointer"
+  ]);
+  expect((callerCoordinates.tools[0] as { inputSchema: { properties: Record<string, unknown> } }).inputSchema.properties)
+    .toHaveProperty("query_coordinates");
+  expect(callerCoordinates.tools[1]).toEqual(openPointerTool);
+
+  const plainQuery = projectLiveSurfaceForCaller(hostSurface, "plain_query");
+  expect(plainQuery.tools.map((tool) => (tool as { name: string }).name)).toEqual([
+    "soul.recall",
+    "soul.open_pointer"
+  ]);
+  expect((plainQuery.tools[0] as { inputSchema: { properties: Record<string, unknown> } }).inputSchema.properties)
+    .not.toHaveProperty("query_coordinates");
+  expect(plainQuery.tools[1]).toEqual(openPointerTool);
+
+  const consumerSurface = {
+    ...surface,
+    instructions: "Keep instructions.",
+    tools: [recallTool, openPointerTool]
+  };
+  expect(projectLiveSurfaceForCaller(consumerSurface, "caller_coordinates")).toBe(consumerSurface);
+  expect(projectLiveSurfaceForCaller(consumerSurface, undefined)).toBe(consumerSurface);
+});
+
 it("projects duplicate CallToolResult text envelopes to a single structuredContent copy without mutating the audit envelope", () => {
   const payload = { ok: true, tool_name: "soul.recall", output: { results: [{ id: "r1", text: "Aster" }] } };
   const envelope = {
