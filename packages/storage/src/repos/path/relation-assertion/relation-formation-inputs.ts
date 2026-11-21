@@ -20,6 +20,7 @@ import {
   verifyEvidenceReceipt
 } from "../mappers/relation-assertion/row-mappers.js";
 import { digestRelationFormationEventSource } from "./source-digest.js";
+import { erasedFormationEvidenceSql } from "./erased-formation-evidence.js";
 
 export type RelationFormationInputs = Readonly<{
   workspaceId: string;
@@ -91,36 +92,39 @@ export class SqliteRelationFormationInputs {
       LIMIT 1
     `);
     this.findErasedFormationReceiptsStatement = db.connection.prepare(`
-      SELECT barrier.subject_id AS record_id
-      FROM json_each(?) AS receipt
-      JOIN projection_erase_barriers AS barrier
-        ON barrier.workspace_id = ?
-       AND barrier.subject_kind = 'source_record'
-       AND barrier.subject_id = json_extract(receipt.value, '$.evidence_id')
-      WHERE json_extract(receipt.value, '$.source_event_anchor.event_type') = 'soul.field.source_record.admitted'
-    `);
+      WITH receipts AS (
+        SELECT json_extract(value, '$.evidence_id') AS evidence_id,
+               json_extract(value, '$.source_event_anchor.event_type') AS event_type
+        FROM json_each(?)
+      )
+      SELECT evidence_id FROM receipts
+      WHERE ${erasedFormationEvidenceSql("@workspaceId", "receipts.evidence_id", "receipts.event_type")}
+    `).pluck();
   }
 
   public hasErasedSource(workspaceId: string, evidenceReceipts: readonly RelationAssertionEvidenceReceipt[]): boolean {
     return this.findErasedFormationReceiptsStatement.get(
-      JSON.stringify(evidenceReceipts), workspaceId
+      { workspaceId }, JSON.stringify(evidenceReceipts)
     ) !== undefined;
   }
 
   public verify(input: RelationFormationInputs): void {
-    if (input.allowErasedSourceReceipts !== true && this.hasErasedSource(input.workspaceId, input.evidenceReceipts)) {
-      throw new StorageError("CONFLICT", "Relation formation uses an erased source record.");
+    const { workspaceId, evidenceReceipts, formationReceipt } = input;
+    const erased = new Set(this.findErasedFormationReceiptsStatement.all(
+      { workspaceId }, JSON.stringify(evidenceReceipts)
+    ) as string[]);
+    if (input.allowErasedSourceReceipts !== true && erased.size > 0) {
+      throw new StorageError("CONFLICT", "Relation formation uses erased evidence.");
     }
-    // Erasure retains source metadata and EventLog envelopes for historical verification.
-    this.verifyEvidenceReceipts(input.workspaceId, input.evidenceReceipts);
-    this.verifyFormationSources(input.workspaceId, input.evidenceReceipts, input.formationReceipt);
+    requireUniqueRelationAssertionEvidenceIds(evidenceReceipts.map((receipt) => receipt.evidence_id));
+    this.verifyEvidenceReceipts(workspaceId, evidenceReceipts.filter(receipt => !erased.has(receipt.evidence_id)));
+    this.verifyFormationSources(workspaceId, evidenceReceipts, formationReceipt, erased);
   }
 
   private verifyEvidenceReceipts(
     workspaceId: string,
     evidenceReceipts: readonly RelationAssertionEvidenceReceipt[]
   ): void {
-    requireUniqueRelationAssertionEvidenceIds(evidenceReceipts.map((receipt) => receipt.evidence_id));
     try {
       const rows = parseRows(
         this.assertEvidenceReceiptsStatement.all(JSON.stringify(evidenceReceipts), workspaceId),
@@ -140,14 +144,15 @@ export class SqliteRelationFormationInputs {
   private verifyFormationSources(
     workspaceId: string,
     evidenceReceipts: readonly RelationAssertionEvidenceReceipt[],
-    formationReceipt: RelationFormationReceipt
+    formationReceipt: RelationFormationReceipt,
+    erased: ReadonlySet<string>
   ): void {
     const receiptByEvidenceId = new Map(evidenceReceipts.map((receipt) => [receipt.evidence_id, receipt]));
     for (const source of formationReceipt.source_observations) {
       if (source.source_kind === RelationFormationSourceKind.EVENT_LOG_ENTRY) {
         this.verifyEventFormationSource(workspaceId, source);
       } else {
-        this.verifyHqFormationSource(workspaceId, source, receiptByEvidenceId);
+        this.verifyHqFormationSource(workspaceId, source, receiptByEvidenceId, erased);
       }
     }
   }
@@ -173,7 +178,8 @@ export class SqliteRelationFormationInputs {
   private verifyHqFormationSource(
     workspaceId: string,
     source: RelationFormationSourceObservation,
-    receiptByEvidenceId: ReadonlyMap<string, RelationAssertionEvidenceReceipt>
+    receiptByEvidenceId: ReadonlyMap<string, RelationAssertionEvidenceReceipt>,
+    erased: ReadonlySet<string>
   ): void {
     const row = parseOptionalRow(
       this.findHqFormationSourceStatement.get(source.source_id),
@@ -183,14 +189,15 @@ export class SqliteRelationFormationInputs {
     if (row === null || row.workspace_id !== workspaceId) {
       throw new StorageError("NOT_FOUND", `Formation HQ source ${source.source_id} is unavailable.`);
     }
+    const receipt = receiptByEvidenceId.get(row.evidence_id);
+    if (receipt === undefined || !matchesHqSourceReceipt(row, receipt)) {
+      throw new StorageError("CONFLICT", `Formation HQ source ${source.source_id} is not bound to admitted Evidence.`);
+    }
+    if (erased.has(row.evidence_id)) return;
     requirePrivacyObjectAvailable(this.db, workspaceId, "memory_entry", row.object_id);
     requirePrivacyObjectAvailable(this.db, workspaceId, "memory_hq_observation", row.observation_id);
     if (row.observation_sha256 !== source.source_sha256) {
       throw new StorageError("CONFLICT", `Formation HQ source ${source.source_id} digest does not match.`);
-    }
-    const receipt = receiptByEvidenceId.get(row.evidence_id);
-    if (receipt === undefined || !matchesHqSourceReceipt(row, receipt)) {
-      throw new StorageError("CONFLICT", `Formation HQ source ${source.source_id} is not bound to admitted Evidence.`);
     }
   }
 

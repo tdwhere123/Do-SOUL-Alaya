@@ -14,7 +14,7 @@ import { createGardenRelationNominationPort } from "./recall-materialization-gar
 import {
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   PathRelationProposalService,
-  RelationAssertionService,
+  type RelationAssertionService,
   type RelationAssertionAdmissionPort,
   scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
@@ -54,18 +54,13 @@ type PathRelationRuntimeInput = Pick<
   | "softAssociationPathRepo"
   | "proposalRepo"
   | "relationProjectionAdmissionMode"
-  | "relationAssertionRepo"
   | "evidenceCapsuleRepo"
   | "runtimeNotifier"
   | "warn"
 >;
 
 export function createPathRelationRuntime(input: PathRelationRuntimeInput,
-  relationAssertionService = new RelationAssertionService({
-    repo: input.relationAssertionRepo,
-    eventPublisher: input.eventPublisher,
-    eventHistory: input.eventLogRepo
-  })
+  relationAssertionService: RelationAssertionService
 ): Readonly<{
   readonly pathRelationProposalService: PathRelationProposalService;
   readonly relationAssertionService: RelationAssertionService;

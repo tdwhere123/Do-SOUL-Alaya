@@ -20,11 +20,22 @@ import {
 afterEach(closeTestDatabases);
 
 describe("source-grounding defer transitions", () => {
+  it("rejects a stale raw payload before appending an audit or taking the claim", async () => {
+    const harness = await createHarness(SignalState.DEFERRED, true);
+    expect(harness.transitions.claimRedrive({ workspace_id: "workspace-1", signal_id: "signal-1",
+      claim_token: "stale", claim_expires_at: "2026-07-15T01:00:00.000Z",
+      expected_raw_payload: { full_turn_content: "stale" }, audit_event: normalizedEvent({ patch: true })
+    })).toBeNull();
+    expect(harness.queueRepo.get("workspace-1", "signal-1")?.claim_token_fingerprint).toBeNull();
+    expect(await signalEvents(harness)).toEqual([]);
+  });
+
   it("claims once, persists the patch, and commits only redacted audit metadata", async () => {
     const harness = await createHarness(SignalState.DEFERRED, true);
     const rawPayload = { full_turn_content: "I moved to Berlin." };
 
     const claim = harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "claim-1",
@@ -38,6 +49,7 @@ describe("source-grounding defer transitions", () => {
       })
     });
     const second = harness.transitions.claimRedrive({
+      expected_raw_payload: rawPayload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "claim-2",
@@ -60,6 +72,7 @@ describe("source-grounding defer transitions", () => {
     const harness = await createHarness(SignalState.MATERIALIZED, true);
 
     expect(harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "claim-1",
@@ -122,6 +135,7 @@ describe("source-grounding defer transitions", () => {
   it("preserves active claims and the new defer obligation when the workspace cap is full", async () => {
     const harness = await createHarness(SignalState.DEFERRED, true, 1);
     expect(harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "active-claim",
@@ -150,6 +164,7 @@ describe("source-grounding defer transitions", () => {
       "signal-2"
     ]);
     expect(harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-2",
       claim_token: "blocked-overflow-claim",
@@ -163,6 +178,7 @@ describe("source-grounding defer transitions", () => {
       event: materializedEvent("signal-1")
     });
     expect(harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-2",
       claim_token: "recovered-overflow-claim",
@@ -173,6 +189,7 @@ describe("source-grounding defer transitions", () => {
   it("rolls back completion when claimed queue removal fails", async () => {
     const harness = await createHarness(SignalState.DEFERRED, true);
     const claim = harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "claim-1",
@@ -204,6 +221,7 @@ describe("source-grounding defer transitions", () => {
   it("records redrive failure while retaining the claim and blocking concurrent retry", async () => {
     const harness = await createHarness(SignalState.DEFERRED, true);
     expect(harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "uncertain-claim",
@@ -221,6 +239,7 @@ describe("source-grounding defer transitions", () => {
       fingerprint("uncertain-claim")
     );
     expect(harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "concurrent-claim",
@@ -237,12 +256,14 @@ describe("source-grounding defer transitions", () => {
   it("keeps an expired unfinished claim and reconciles only a witnessed completed attempt", async () => {
     const harness = await createHarness(SignalState.DEFERRED, true);
     expect(harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "crashed-claim",
       claim_expires_at: "2000-01-01T00:00:00.000Z"
     })).not.toBeNull();
     expect(harness.transitions.claimRedrive({
+      expected_raw_payload: createSignal().raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "stolen-claim",
@@ -287,6 +308,7 @@ describe("source-grounding defer transitions", () => {
     const harness = await createFileCompetitionHarness();
     try {
       expect(harness.first.transitions.claimRedrive({
+        expected_raw_payload: createSignal().raw_payload,
         workspace_id: "workspace-1",
         signal_id: "signal-1",
         claim_token: "first-claim",
@@ -297,6 +319,7 @@ describe("source-grounding defer transitions", () => {
         claim_token: "first-claim", event: failedMaterializationEvent() });
       reconcile(harness.first.transitions, staleView, "first-claim-cleared");
       expect(harness.first.transitions.claimRedrive({
+        expected_raw_payload: createSignal().raw_payload,
         workspace_id: "workspace-1",
         signal_id: "signal-1",
         claim_token: "replacement-claim",

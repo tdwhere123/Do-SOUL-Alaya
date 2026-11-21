@@ -5,7 +5,7 @@ import { parseRows } from "../../../shared/parse-row.js";
 import { StorageError } from "../../../../shared/errors.js";
 
 /** Bump when closure discovery or scrubbing gains a new historical obligation. */
-const CLOSURE_RULE_VERSION = 2;
+const CLOSURE_RULE_VERSION = 3;
 const BARRIERS_PER_BATCH = 32;
 
 /** One SQLite writer transaction owns the scrub and its checkpoint. Readers are not opened by startup

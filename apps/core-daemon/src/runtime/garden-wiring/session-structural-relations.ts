@@ -1,4 +1,5 @@
 import {
+  CoreError,
   SessionStructuralRelationService,
   type RelationAssertionService,
   type RoundStructuralNode,
@@ -63,6 +64,20 @@ export type MaterializeWorkspaceStructuralRelationsInput = Readonly<{
   readonly useSourceRecordedTime?: boolean;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }>;
+
+export async function admitStatementSessionStructuralRelations(input: MaterializeWorkspaceStructuralRelationsInput & {
+  assertionService: Pick<RelationAssertionService,
+    "admitDeferredProjection" | "refreshProjection" | "readActiveProjectionGeneration" | "verifyAndRebuild">;
+}): Promise<void> {
+  const result = await materializeWorkspaceSessionStructuralRelations(input);
+  if (result.assertionsFailed > 0) {
+    throw new CoreError("CONFLICT", "Statement-session structural relation admission was incomplete.");
+  }
+  if (!result.projectionRefreshed && result.assertionsAlreadyPresent > 0 &&
+      input.assertionService.readActiveProjectionGeneration() === null) {
+    await input.assertionService.verifyAndRebuild();
+  }
+}
 
 /**
  * Single daemon-side owner for deterministic intra-session and statement

@@ -78,7 +78,7 @@ describe("statement session routing over captured host sessions", () => {
     expect(officialExtract).not.toHaveBeenCalled();
     expect(localExtract).toHaveBeenCalledTimes(1);
     const [session] = harness.sessionTasks();
-    expect(session).toMatchObject({ status: "completed", claimed_by: "in-process" });
+    expect(session).toMatchObject({ status: "completed", claimed_by: expect.stringMatching(/^in-process:/) });
     await expect(harness.signalRepo.getById(gardenTaskSignalId(session!.id, 0))).resolves.toMatchObject({
       workspace_id: "workspace-1"
     });
@@ -93,7 +93,7 @@ describe("statement session routing over captured host sessions", () => {
 
     expect(localExtract).toHaveBeenCalledTimes(1);
     const [session] = harness.sessionTasks();
-    expect(session).toMatchObject({ status: "completed", claimed_by: "in-process" });
+    expect(session).toMatchObject({ status: "completed", claimed_by: expect.stringMatching(/^in-process:/) });
     await expect(harness.signalRepo.getById(gardenTaskSignalId(session!.id, 1))).resolves.toMatchObject({
       signal_id: gardenTaskSignalId(session!.id, 1)
     });

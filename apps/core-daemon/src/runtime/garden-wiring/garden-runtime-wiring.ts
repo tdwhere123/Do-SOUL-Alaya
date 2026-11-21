@@ -1,6 +1,5 @@
 import { type MemoryEntry, type TransitionCausedBy } from "@do-soul/alaya-protocol";
 import {
-  CoreError,
   createGardenProposalWriter,
   type AnswersWithEdgeProducerService,
   GardenBacklogTelemetryService,
@@ -29,7 +28,7 @@ import {
   createGardenEdgeProposalReconcileDeferralPort,
   deferGardenBootstrapPathReconciliation
 } from "./garden-legacy-path-admission.js";
-import { materializeWorkspaceSessionStructuralRelations } from "./session-structural-relations.js";
+import { admitStatementSessionStructuralRelations } from "./session-structural-relations.js";
 import { createGardenSignalRefReplayPort } from "./garden-signal-ref-replay.js";
 import type { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
 import type { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
@@ -221,22 +220,9 @@ function createGardenSchedulerRuntime(
     hostSessionCaptureFor: gardenTaskRepo => createDaemonHostSessionCapture({ stores: input.fieldStores,
       eventLogRepo: input.eventLogRepo, runtimeNotifier: input.runtimeNotifier, gardenTaskRepo,
       relationAssertionService, now: () => new Date().toISOString(), warn: input.warnLogger.warn }),
-    onStatementSessionSettled: async (evt) => {
-      const result = await materializeWorkspaceSessionStructuralRelations({
-        database: input.database,
-        assertionService: relationAssertionService,
-        workspaceId: evt.workspaceId,
-        runId: evt.runId,
-        warn: input.warnLogger.warn
-      });
-      if (result.assertionsFailed > 0) {
-        throw new CoreError("CONFLICT", "Statement-session structural relation admission was incomplete.");
-      }
-      if (!result.projectionRefreshed && result.assertionsAlreadyPresent > 0 &&
-          relationAssertionService.readActiveProjectionGeneration() === null) {
-        await input.ensureTemporalProjection();
-      }
-    },
+    onStatementSessionSettled: evt => admitStatementSessionStructuralRelations({
+      database: input.database, assertionService: relationAssertionService, ...evt, warn: input.warnLogger.warn
+    }),
     strongRefService: input.strongRefService,
     workspaceRepo: input.workspaceRepo,
     tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort(

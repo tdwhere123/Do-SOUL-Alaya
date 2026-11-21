@@ -29,7 +29,9 @@ import {
 } from "./garden-task-handler-support.js";
 import { createGardenTaskCompletionHandler } from "./garden-task-completion.js";
 import type { PostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
-import { StatementSessionSourceUnavailableError } from "../../garden/statement-session/statement-session-task.js";
+import { parseStatementSessionTaskPayload, StatementSessionSourceUnavailableError } from "../../garden/statement-session/statement-session-task.js";
+import type { StatementSessionExtractionReceipts } from "../../garden/statement-session/statement-session-extraction-receipts.js";
+import { requireStatementSessionCompletion } from "./statement-session-completion.js";
 import { gardenTaskSourceAvailable, quarantineUnavailableSourceTasks,
   type GardenTaskSourceGuardPort } from "../../garden/post-turn-extract/source-provenance.js";
 
@@ -84,10 +86,10 @@ export interface GardenTaskHandlerDependencies {
     }>>;
   };
   readonly postTurnSignalReceiver?: PostTurnSignalReceiver;
-  readonly onStatementSessionSettled?: (input: Readonly<{
-    readonly workspaceId: string;
-    readonly runId: string | null;
-  }>) => Promise<void>;
+  readonly statementSessionCompletion?: Readonly<{
+    receipts: StatementSessionExtractionReceipts;
+    admitRelations(input: Readonly<{ workspaceId: string; runId: string }>): Promise<void>;
+  }>;
   readonly edgeVerdictApplier?: {
     applyVerdict(input: {
       readonly workspaceId: string;
@@ -193,12 +195,31 @@ function createClaimGardenTaskHandler(params: Readonly<{
     if (row === null || row.status !== "claimed" || !gardenTaskSourceAvailable(repo, row)) {
       return toSilentAlreadyClaimed(request.task_id);
     }
-    if (claimResult !== "claimed" && row.claimed_by !== context.agentTarget) {
+    if (row.claimed_by !== context.agentTarget) {
       return toSilentAlreadyClaimed(request.task_id);
+    }
+    if (row.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION) {
+      if (await releaseExtractedStatementClaim(params.deps, repo, row, context.agentTarget)) {
+        // The daemon can finish structural admission from the receipt without asking the host to extract again.
+        return toSilentAlreadyClaimed(request.task_id);
+      }
     }
     return GardenClaimTaskResponseSchema.parse({
       status: claimResult === "claimed" ? "claimed" : "already_claimed",
       ...toGardenClaimTaskPayload(row, repo.statementSessions)
     });
   };
+}
+
+async function releaseExtractedStatementClaim(deps: GardenTaskHandlerDependencies,
+  repo: NonNullable<GardenTaskHandlerDependencies["gardenTaskRepo"]>, row: GardenTaskRow, claimant: string): Promise<boolean> {
+  try {
+    const payload = parseStatementSessionTaskPayload(row.payload);
+    if (requireStatementSessionCompletion(deps).receipts.read(row, payload.run_id) === null) return false;
+  } catch (error) {
+    await repo.releaseClaim(row.id, claimant);
+    throw error;
+  }
+  await repo.releaseClaim(row.id, claimant);
+  return true;
 }

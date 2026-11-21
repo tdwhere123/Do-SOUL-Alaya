@@ -44,6 +44,7 @@ export interface DaemonMcpMemoryToolHandlerInput {
   readonly synthesisMemberResolver?: McpMemoryProposalWorkflowDependencies["synthesisMemberResolver"];
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
   readonly postTurnSignalReceiver?: McpMemoryToolHandlerDependencies["postTurnSignalReceiver"];
+  readonly statementSessionCompletion?: McpMemoryToolHandlerDependencies["statementSessionCompletion"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
   readonly edgeProposalService?: McpMemoryToolHandlerDependencies["edgeProposalService"];
   readonly sessionOverrideService: McpMemoryToolHandlerDependencies["sessionOverrideService"];
@@ -198,6 +199,7 @@ export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandl
     ...(input.postTurnSignalReceiver === undefined
       ? {}
       : { postTurnSignalReceiver: input.postTurnSignalReceiver }),
+    ...(input.statementSessionCompletion === undefined ? {} : { statementSessionCompletion: input.statementSessionCompletion }),
     graphExploreService: input.graphExploreService,
     ...(input.edgeProposalService === undefined ? {} : { edgeProposalService: input.edgeProposalService }),
     ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding }),

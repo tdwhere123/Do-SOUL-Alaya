@@ -49,6 +49,7 @@ it("discovers an evicted proven deferral after reopen and explicitly recovers th
     await owner.service.receiveSignal(candidate("active"));
     await owner.service.receiveSignal(candidate("evicted"));
     expect(owner.transitions.claimRedrive({ workspace_id: "workspace-1", signal_id: "active", claim_token: "held",
+      expected_raw_payload: candidate("active").raw_payload,
       claim_expires_at: "2099-01-01T00:00:00.000Z" })).not.toBeNull();
     await owner.service.receiveSignal(candidate("later"));
     expect(owner.queue.get("workspace-1", "evicted")).toBeNull();
@@ -121,6 +122,7 @@ it("rolls back saturated re-admission and its audit, then preserves unfinished r
     const o = h.owner;
     await o.service.receiveSignal(candidate("recover")); await o.service.receiveSignal(candidate("held"));
     o.transitions.claimRedrive({ workspace_id: "workspace-1", signal_id: "held", claim_token: "owner",
+      expected_raw_payload: candidate("held").raw_payload,
       claim_expires_at: "2099-01-01T00:00:00.000Z" });
     const before = await o.events.queryByEntityAll("candidate_memory_signal", "recover");
     o.materialize.mockClear();

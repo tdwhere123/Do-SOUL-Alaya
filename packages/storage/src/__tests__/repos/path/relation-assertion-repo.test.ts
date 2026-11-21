@@ -331,7 +331,7 @@ describe("SqliteRelationAssertionRepo", () => {
       workspaceId: "workspace-1",
       evidenceReceipts: [validReceipt],
       formationReceipt: formationReceipt([admissionEvent])
-    })).toThrow(/is not available in the assertion workspace\./);
+    })).toThrow(/Relation formation uses erased evidence/);
   });
 
 });

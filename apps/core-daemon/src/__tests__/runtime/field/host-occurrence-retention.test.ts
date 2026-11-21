@@ -10,6 +10,7 @@ import { initDatabase, closeCachedDatabase, SqliteEventLogRepo, SqliteSourceInde
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { issueSemanticLease, readSemanticLease, sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
 import { createDaemonFieldComposition } from "../../../runtime/field/field-composition.js";
+import { createSourceReplacementAdmissionIntents } from "../../../runtime/field/admission-checkpoint.js";
 import { seedWorkspaces } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import { buildReady } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 
@@ -33,7 +34,8 @@ function open(filename: string) {
   const eventLogRepo = new SqliteEventLogRepo(database);
   const field = createDaemonFieldComposition({ database, eventLogRepo, fieldProjectionAdmissionMode: "explicit_checkpoint" });
   const input = { stores: field.stores, sha256: fieldContractSha256, eventLogRepo,
-    auditHistory: eventLogRepo, runtimeNotifier: { notifyEntry: () => undefined } };
+    auditHistory: eventLogRepo, admissionIntents: createSourceReplacementAdmissionIntents(database),
+    runtimeNotifier: { notifyEntry: () => undefined } };
   return { database, field, input, admission: createAuditedSourceAdmission(input) };
 }
 function fixture() {

@@ -11,8 +11,6 @@ import {
 import type { GardenTaskRow, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import type { SignalOutcomeCounts } from "../post-turn-extract/signal-receiver.js";
 
-export const IN_PROCESS_CLAIMANT = "in-process";
-
 /**
  * Appends `soul.garden.task_dispatched` after an in-process claim already committed.
  * This is not the scheduler's claim+dispatch EventLog-first transaction.
@@ -42,12 +40,13 @@ export async function publishInProcessTaskDispatch(
   });
 }
 
-export async function refreshInProcessClaim(
+export function refreshInProcessClaim(
   gardenTaskRepo: SqliteGardenTaskRepo,
   taskId: string,
+  claimToken: string,
   now: () => string
-): Promise<void> {
-  if (gardenTaskRepo.refreshClaim(taskId, IN_PROCESS_CLAIMANT, now())) {
+): void {
+  if (gardenTaskRepo.refreshClaim(taskId, claimToken, now())) {
     return;
   }
   throw new AlayaError("CONFLICT", `Garden task ${taskId} claim changed before candidate signal emission.`);
@@ -62,6 +61,7 @@ export async function settleInProcessTask(
     signalCounts?: SignalOutcomeCounts;
   }>,
   gardenTaskRepo: SqliteGardenTaskRepo,
+  claimToken: string,
   now: () => string
 ): Promise<void> {
   const completedAt = now();
@@ -95,7 +95,7 @@ export async function settleInProcessTask(
         })
       }
     ],
-    IN_PROCESS_CLAIMANT,
+    claimToken,
     row.workspace_id
   );
 }

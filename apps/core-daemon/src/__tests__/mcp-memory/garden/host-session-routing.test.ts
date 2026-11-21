@@ -92,7 +92,7 @@ describe("statement session routing over captured host sessions", () => {
     expect(request.messages.map(message => [message.message_id, message.recorded_at])).toEqual([
       ["message-0", "2026-05-06T09:00:00.000Z"], ["message-1", "2026-05-06T09:00:00.000Z"]]);
     const [session] = harness.sessionTasks();
-    expect(session).toMatchObject({ status: "completed", claimed_by: "in-process" });
+    expect(session).toMatchObject({ status: "completed", claimed_by: expect.stringMatching(/^in-process:/) });
     const completedEvents = (await harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events;
     expect(completedEvents.map(event => event.payload_json)).toEqual([
       expect.objectContaining({ task_kind: GardenTaskKind.SOURCE_STATEMENT_SESSION, success: true, candidate_signals_count: 2 })
@@ -118,7 +118,7 @@ describe("statement session routing over captured host sessions", () => {
     await expect(harness.signalRepo.getById(gardenTaskSignalId(session!.id, 0))).resolves.toMatchObject({
       workspace_id: "workspace-1"
     });
-    expect(session).toMatchObject({ status: "failed", claimed_by: "in-process" });
+    expect(session).toMatchObject({ status: "failed", claimed_by: expect.stringMatching(/^in-process:/) });
     const completion = (await harness.eventLogRepo.queryByType(GardenEventType.SOUL_GARDEN_TASK_COMPLETED)).events;
     expect(completion.at(-1)?.payload_json).toMatchObject({ success: false, candidate_signals_count: 1 });
   });

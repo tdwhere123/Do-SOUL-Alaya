@@ -80,11 +80,9 @@ function claimRedrive(
 ) {
   try {
     return repos.eventLogRepo.transactional(() => {
-      if (input.expected_raw_payload !== undefined) {
-        const current = repos.signalRepo.getByIdInCurrentTransaction(input.signal_id);
-        if (current?.workspace_id !== input.workspace_id ||
-            !isDeepStrictEqual(current.raw_payload, input.expected_raw_payload)) return null;
-      }
+      const current = repos.signalRepo.getByIdInCurrentTransaction(input.signal_id);
+      if (current?.workspace_id !== input.workspace_id ||
+          !isDeepStrictEqual(current.raw_payload, input.expected_raw_payload)) return null;
       if (input.recover_unqueued && (input.raw_payload !== undefined || input.audit_event !== undefined)) {
         throw new CoreError("VALIDATION", "Recover the retained deferral before proposing a redrive payload patch.");
       }

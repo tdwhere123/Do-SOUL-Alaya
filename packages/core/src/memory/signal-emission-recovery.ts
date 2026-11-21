@@ -1,7 +1,6 @@
 import {
   SignalEventType,
   SignalState,
-  SoulSignalEmittedPayloadSchema,
   SoulSignalNormalizedPayloadSchema,
   type CandidateMemorySignal,
   type EventLogEntry
@@ -11,6 +10,7 @@ import { CoreError } from "../shared/errors.js";
 import {
   buildSignalWarningMeta,
   buildEventLogRawPayloadSummary,
+  readSignalEmissionContext,
   readSignalRawPayloadDigest,
   resolveSignalMaterializationContext
 } from "./signal-service-helpers.js";
@@ -40,13 +40,11 @@ export async function resolveGroundingRedriveEmissionContext(
     SignalEventType.SOUL_SIGNAL_EMITTED, null, 2);
   if (emissions.length !== 1) return null;
   const emission = emissions[0]!;
-  const payload = SoulSignalEmittedPayloadSchema.safeParse(emission.payload_json);
-  if (!payload.success) return null;
-  const context = resolveSignalMaterializationContext(signal, emission, payload.data.raw_payload);
-  if (context === null) return null;
+  const verified = readSignalEmissionContext(signal, emission, "emission");
+  if (verified === null) return null;
 
   const normalized = await readRedriveNormalizations(dependencies, signal.signal_id, emission.revision);
-  let summary = payload.data.raw_payload;
+  let summary = verified.rawPayloadSummary;
   for (const event of normalized) {
     const parsed = SoulSignalNormalizedPayloadSchema.safeParse(event.payload_json);
     if (!parsed.success) return null;
@@ -63,7 +61,7 @@ export async function resolveGroundingRedriveEmissionContext(
     summary = next;
   }
   return stableStringify(summary) === stableStringify(buildEventLogRawPayloadSummary(signal.raw_payload))
-    ? context : null;
+    ? verified.context : null;
 }
 
 async function readRedriveNormalizations(

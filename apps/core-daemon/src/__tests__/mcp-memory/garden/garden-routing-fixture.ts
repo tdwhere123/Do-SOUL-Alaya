@@ -1,4 +1,5 @@
 import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
+import { createStatementSessionExtractionReceipts } from "../../../garden/statement-session/statement-session-extraction-receipts.js";
 import { expect, vi } from "vitest";
 import {
   GardenTaskKind,
@@ -356,6 +357,10 @@ export function createMcpDeps(base: {
     },
     postTurnSignalReceiver: {
       receiveSignal: async (signal) => await signalService.receiveSignal(signal)
+    },
+    statementSessionCompletion: {
+      receipts: createStatementSessionExtractionReceipts(base.eventLogRepo, base.eventPublisher),
+      admitRelations: async () => undefined
     },
     graphExploreService: {
       exploreOneHop: async () => []

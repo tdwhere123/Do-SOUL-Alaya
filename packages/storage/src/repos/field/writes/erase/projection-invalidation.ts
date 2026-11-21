@@ -12,6 +12,17 @@ export function discoverEraseGenerationSubjects(database: StorageDatabase, works
   `).all(workspaceId) as Readonly<{ subject_kind: "generation"; subject_id: string }>[];
 }
 
+export function retainErasedEvidenceBarriers(database: StorageDatabase,
+  barrier: FieldEraseBarrierRow, evidenceIds: readonly string[]): void {
+  database.connection.prepare(`
+    INSERT INTO source_erase_evidence_barriers (workspace_id, evidence_id, barrier_id)
+    SELECT capsule.workspace_id, capsule.object_id, ?
+    FROM json_each(?) AS affected JOIN evidence_capsules AS capsule ON capsule.object_id = affected.value
+    WHERE capsule.workspace_id = ?
+    ON CONFLICT DO NOTHING
+  `).run(barrier.barrier_id, JSON.stringify(evidenceIds), barrier.workspace_id);
+}
+
 export function invalidateErasedProjections(database: StorageDatabase,
   barrier: FieldEraseBarrierRow, generationIds: readonly string[]): void {
   const connection = database.connection;

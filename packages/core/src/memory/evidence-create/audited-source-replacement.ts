@@ -12,10 +12,10 @@ import {
   assertSourceAdmissionWorkspace,
   type AuditedSourceWriterInput
 } from "./audited-source-admission.js";
-import { runFieldAtomicWithOutcome } from "./field-stores.js";
+import { runFieldAtomicWithOutcome, type FieldAtomicOutcome } from "./field-stores.js";
 import { createSourceAdmissionPort } from "./source-admission.js";
 import {
-  appendSourceRecordAdmittedWithOutcome, recoverSourceRecordAdmissionAudit,
+  settleSourceRecordAdmissionAudit,
   type SourceAdmissionAuditHistory, type SourceAdmissionAuditOutcome
 } from "./source-admission-audit.js";
 
@@ -55,46 +55,39 @@ type SourceReplacementAdmissionRecovery =
   | Readonly<{ status: "not_committed" | "unknown" | "projection_unready"; cause: unknown }>
   | Readonly<{ status: "projection_settled"; projection: "ready" | "deferred"; audit: SourceAdmissionAuditOutcome }>;
 
+type SourceReplacementWriterInput = Omit<AuditedSourceWriterInput, "eventLogRepo"> & Readonly<{
+  auditHistory: SourceAdmissionAuditHistory;
+  admissionIntents: {
+    retain(record: SourceRecordIdentity): void;
+    clear(record: SourceRecordIdentity): void;
+  };
+}>;
+
 /** Trusted Node capability for core-daemon. Possession is authority; not an agent write surface. */
 export function createAuditedSourceReplacement(
-  input: AuditedSourceWriterInput & { readonly auditHistory: SourceAdmissionAuditHistory }
+  input: SourceReplacementWriterInput
 ): AuditedSourceReplacement {
   const admission = createSourceAdmissionPort(input);
+  const readRetainedRecord = (workspaceId: string, recordId: string) => {
+    const record = input.stores.getRecord(workspaceId, recordId);
+    if (record === null) throw new CoreError("NOT_FOUND", "Source admission receipt is unavailable.");
+    return record;
+  };
+  const auditAdmission = (workspaceId: string, recordId: string) => settleSourceRecordAdmissionAudit(
+    input.auditHistory, () => readRetainedRecord(workspaceId, recordId), input.runtimeNotifier,
+    record => input.admissionIntents.clear(record)
+  );
   return {
     async replaceCurrent(request, context) {
-      let captured: SourceReplacementRequest;
-      let workspaceId: string;
-      try {
-        captured = structuredClone(request);
-        workspaceId = context.workspaceId;
-        assertSourceAdmissionWorkspace(captured.replacement, workspaceId);
-        if (captured.expected_current.workspace_id !== workspaceId ||
-            captured.expected_current.source_id !== captured.replacement.source_id) {
-          throw new CoreError("OBLIGATION_VIOLATION", "source replacement must retain workspace and logical source");
-        }
-      } catch (cause) { return { status: "rejected", cause }; }
-
-      const outcome = runFieldAtomicWithOutcome(input.stores, () => {
-        const predecessor = input.stores.getCurrentRecord(workspaceId, captured.replacement.source_id);
-        assertExpectedCurrent(predecessor, captured.expected_current);
-        if (captured.replacement.source_version === predecessor.source_version ||
-            compareUtcInstants(captured.replacement.recorded_at, predecessor.recorded_at) !== 1) {
-          throw new CoreError("CONFLICT", "source replacement requires a new revision and strictly later ingestion time");
-        }
-        const replacement = admitRetainedSource(input, admission, captured.replacement, workspaceId, context);
-        assertExpectedCurrent(input.stores.getCurrentRecord(workspaceId, replacement.record.source_id), replacement.record);
-        return Object.freeze({ predecessor, replacement });
-      });
+      const outcome = retainSourceReplacement(input, admission, request, context);
       if (outcome.status === "not_committed") return { status: "rejected", cause: outcome.cause };
       if (outcome.status === "unknown") return { status: "unknown", cause: outcome.cause };
       const transition = outcome.result;
       if (outcome.projection === "unready") {
         return { status: "committed_projection_unready", transition, cause: outcome.cause };
       }
-      // No reread can recover this invocation's authorship. Likewise, another
-      // writer superseding B during this await does not erase the A -> B commit.
-      // Consumers must revalidate currentness in their later read snapshot.
-      const audit = await appendSourceRecordAdmittedWithOutcome(input.eventLogRepo, transition.replacement.record, input.runtimeNotifier);
+      const { record } = transition.replacement;
+      const audit = await auditAdmission(record.workspace_id, record.identity);
       if (audit.status === "audit_incomplete") {
         return { status: "committed_audit_incomplete", transition, audit: audit.audit, cause: audit.cause };
       }
@@ -108,22 +101,43 @@ export function createAuditedSourceReplacement(
     },
     async recoverAdmission(recordId, context) {
       const { workspaceId } = context;
-      const readRetainedRecord = () => {
-        const stored = input.stores.getStoredRecord(workspaceId, recordId);
-        if (stored === null) throw new CoreError("NOT_FOUND", "Source admission receipt is unavailable.");
-        return stored.record;
-      };
       // The source receipt and pending projection request survived the original
       // commit. Recovery drains the request without rerunning the replacement CAS.
-      const outcome = runFieldAtomicWithOutcome(input.stores, readRetainedRecord);
+      const outcome = runFieldAtomicWithOutcome(input.stores, () => readRetainedRecord(workspaceId, recordId));
       if (outcome.status !== "committed") return outcome;
       if (outcome.projection === "unready") return { status: "projection_unready", cause: outcome.cause };
-      const audit = await recoverSourceRecordAdmissionAudit(
-        input.auditHistory, readRetainedRecord, input.runtimeNotifier
-      );
+      const audit = await auditAdmission(workspaceId, recordId);
       return { status: "projection_settled", projection: outcome.projection, audit };
     }
   };
+}
+
+function retainSourceReplacement(input: SourceReplacementWriterInput, admission: ReturnType<typeof createSourceAdmissionPort>,
+  request: SourceReplacementRequest, context: SourceAdmissionContext): FieldAtomicOutcome<SourceReplacementTransition> {
+  const { workspaceId } = context;
+  let captured: SourceReplacementRequest;
+  try {
+    captured = structuredClone(request);
+    assertSourceAdmissionWorkspace(captured.replacement, workspaceId);
+    if (captured.expected_current.workspace_id !== workspaceId ||
+        captured.expected_current.source_id !== captured.replacement.source_id) {
+      throw new CoreError("OBLIGATION_VIOLATION", "source replacement must retain workspace and logical source");
+    }
+  } catch (cause) {
+    return { status: "not_committed", cause };
+  }
+  return runFieldAtomicWithOutcome(input.stores, () => {
+    const predecessor = input.stores.getCurrentRecord(workspaceId, captured.replacement.source_id);
+    assertExpectedCurrent(predecessor, captured.expected_current);
+    if (captured.replacement.source_version === predecessor.source_version ||
+        compareUtcInstants(captured.replacement.recorded_at, predecessor.recorded_at) !== 1) {
+      throw new CoreError("CONFLICT", "source replacement requires a new revision and strictly later ingestion time");
+    }
+    const replacement = admitRetainedSource(input, admission, captured.replacement, workspaceId, context);
+    assertExpectedCurrent(input.stores.getCurrentRecord(workspaceId, replacement.record.source_id), replacement.record);
+    input.admissionIntents.retain(replacement.record);
+    return Object.freeze({ predecessor, replacement });
+  });
 }
 
 function assertExpectedCurrent(

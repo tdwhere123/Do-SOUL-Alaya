@@ -26,6 +26,7 @@ function fixture() {
     return entry;
   } };
   const input = { stores, eventLogRepo, sha256: fieldContractSha256, runtimeNotifier: { notifyEntry: vi.fn() },
+    admissionIntents: { retain: vi.fn(), clear: vi.fn() },
     auditHistory: { ...eventLogRepo, transactional: <T>(work: () => T) => work(),
       queryByEntityInCurrentTransaction: (type: string, id: string) =>
         entries.filter(entry => entry.entity_type === type && entry.entity_id === id) } };
@@ -144,10 +145,12 @@ describe("audited predecessor-bound source replacement", () => {
       const outcome = f.stores.runAtomicWithOutcome!(work);
       return outcome.status === "committed" ? { status: "committed", result: outcome.result, projection } : outcome;
     } };
-    const writer = createAuditedSourceReplacement({ ...f.input, stores, eventLogRepo: { append: event => new Promise<EventLogEntry>(resolve => {
-      const entry = f.input.eventLogRepo.append(event);
-      release = () => resolve(entry);
-    }) } });
+    const writer = createAuditedSourceReplacement({ ...f.input, stores, runtimeNotifier: {
+      notifyEntry: entry => {
+        f.input.runtimeNotifier.notifyEntry(entry);
+        return new Promise<void>(resolve => { release = resolve; });
+      }
+    } });
     const pending = writer.replaceCurrent({ expected_current: first.record, replacement: replacementRequest() }, context);
     const third = await f.admission.admit(replacementRequest({ source_version: "3", recorded_at: "2026-09-13T00:00:02Z" }), context);
     release();
@@ -164,7 +167,7 @@ describe("audited predecessor-bound source replacement", () => {
   it("does not certify an audit append error merely because it resembles a notification failure", async () => {
     const f = fixture();
     const first = await f.admission.admit(request(), context);
-    const writer = createAuditedSourceReplacement({ ...f.input, eventLogRepo: { append() {
+    const writer = createAuditedSourceReplacement({ ...f.input, auditHistory: { ...f.input.auditHistory, append() {
       throw new EventPublisherPropagationError(f.entries[0]!, new Error("unacknowledged append"));
     } } });
     const result = await writer.replaceCurrent({ expected_current: first.record, replacement: replacementRequest() }, context);

@@ -20,6 +20,7 @@ import { closeCachedDatabase, initDatabase, SqliteEventLogRepo, StorageDatabase 
 import { seedWorkspaces } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import type { FieldProjectionAdmissionMode } from "../../../runtime/field/admission-mode.js";
 import { createDaemonFieldComposition } from "../../../runtime/field/field-composition.js";
+import { createSourceReplacementAdmissionIntents, withSourceReplacementAdmissionRecovery } from "../../../runtime/field/admission-checkpoint.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { createProjectionRebuildingFieldStores } from "../../../runtime/field/projection-rebuilding-field-stores.js";
 
@@ -47,7 +48,8 @@ const nextRequest = (overrides: Partial<SourceAdmissionRequest> = {}) => sourceR
 function bind(database: StorageDatabase, mode: FieldProjectionAdmissionMode) {
   const eventLogRepo = new SqliteEventLogRepo(database);
   const field = createDaemonFieldComposition({ database, eventLogRepo, fieldProjectionAdmissionMode: mode });
-  const input = { stores: field.stores, eventLogRepo, auditHistory: eventLogRepo, sha256: fieldContractSha256,
+  const admissionIntents = createSourceReplacementAdmissionIntents(database);
+  const input = { stores: field.stores, eventLogRepo, auditHistory: eventLogRepo, admissionIntents, sha256: fieldContractSha256,
     runtimeNotifier: { notifyEntry: vi.fn() } };
   return { database, eventLogRepo, field, input,
     admission: createAuditedSourceAdmission(input), writer: createAuditedSourceReplacement(input) };
@@ -187,8 +189,8 @@ describe("file-backed source replacement transaction and effects", () => {
       delegate: createSqliteFieldFormationStores({ database: f.database, repos: f.field.fieldRepos }),
       lifecycle: { ...f.field.projectionLifecycle, drainPending }
     });
-    const append = vi.fn(f.eventLogRepo.append.bind(f.eventLogRepo)), notifyEntry = vi.fn();
-    const writer = createAuditedSourceReplacement({ ...f.input, stores, eventLogRepo: { append }, runtimeNotifier: { notifyEntry } });
+    const notifyEntry = vi.fn();
+    const writer = createAuditedSourceReplacement({ ...f.input, stores, runtimeNotifier: { notifyEntry } });
     const result = await writer.replaceCurrent({ expected_current: first.record, replacement: nextRequest() }, context);
     expect(result).toMatchObject({ status: "committed_projection_unready", cause: { message: "projection flush unavailable" } });
     if (result.status !== "committed_projection_unready") throw new Error("postcommit phase evidence required");
@@ -197,12 +199,15 @@ describe("file-backed source replacement transaction and effects", () => {
     expectHistory(f.peer.database, first.record, "2");
     expect(f.peer.field.fieldRepos.generations.readActive(WORKSPACE)).toEqual(active);
     expect(f.peer.database.connection.prepare("SELECT workspace_id FROM field_projection_rebuild_requests").all()).toEqual([{ workspace_id: WORKSPACE }]);
-    expect(append).not.toHaveBeenCalled();
+    expect(sourceAudits(f.peer.database)).toBe(1);
     expect(notifyEntry).not.toHaveBeenCalled();
     expect(drainPending).toHaveBeenCalledOnce();
 
     const recordId = result.transition.replacement.record.identity;
     await expect(writer.recoverAdmission(recordId, context)).resolves.toMatchObject({ status: "projection_unready" });
+    const checkpoint = withSourceReplacementAdmissionRecovery(f.peer.field.fieldProjectionCheckpoint,
+      f.peer.writer, f.peer.input.admissionIntents);
+    await expect(Promise.all([checkpoint.refresh(), checkpoint.refresh()])).resolves.toContain(true);
     const recovered = await f.peer.writer.recoverAdmission(recordId, context);
     expect(recovered).toMatchObject({ status: "projection_settled", projection: "ready",
       audit: { status: "ready", entry: { entity_id: recordId } } });
@@ -210,6 +215,8 @@ describe("file-backed source replacement transaction and effects", () => {
     expect(f.field.fieldRepos.generations.readActive(WORKSPACE)).not.toEqual(active);
     await expect(f.writer.recoverAdmission(recordId, context)).resolves.toEqual(recovered);
     expect(await f.eventLogRepo.queryByEntity("source_record", recordId)).toHaveLength(1);
+    expect(f.input.admissionIntents.list()).toEqual([]);
+    await expect(checkpoint.refresh()).resolves.toBe(false);
     expectHistory(f.database, first.record, "2");
   });
 
@@ -218,7 +225,7 @@ describe("file-backed source replacement transaction and effects", () => {
     ["before_append", "explicit_checkpoint"], ["after_append", "explicit_checkpoint"], ["notification", "explicit_checkpoint"]
   ] as const)("preserves commit and distinguishes %s failure under %s admission", async (phase, mode) => {
     const f = fixture(mode), first = await f.admission.admit(sourceRequest(), context);
-    const append = vi.fn<Parameters<typeof createAuditedSourceReplacement>[0]["eventLogRepo"]["append"]>(event => {
+    const append = vi.fn<Parameters<typeof createAuditedSourceReplacement>[0]["auditHistory"]["append"]>(event => {
       if (phase === "before_append") throw new Error("audit append refused");
       const entry = f.eventLogRepo.append(event);
       if (phase === "after_append") throw new Error("audit response lost");
@@ -229,13 +236,16 @@ describe("file-backed source replacement transaction and effects", () => {
       expect(sourceAudits(f.peer.database)).toBe(2);
       throw new Error("notification failed");
     });
-    const writer = createAuditedSourceReplacement({ ...f.input, eventLogRepo: { append }, runtimeNotifier: { notifyEntry } });
+    const writer = createAuditedSourceReplacement({ ...f.input, auditHistory: {
+      append, transactional: f.eventLogRepo.transactional.bind(f.eventLogRepo),
+      queryByEntityInCurrentTransaction: f.eventLogRepo.queryByEntityInCurrentTransaction.bind(f.eventLogRepo)
+    }, runtimeNotifier: { notifyEntry } });
     const result = await writer.replaceCurrent({ expected_current: first.record, replacement: nextRequest() }, context);
     expect(result.status).toBe(phase === "notification" ? "committed_notification_failed" : "committed_audit_incomplete");
     if (result.status === "committed_audit_incomplete") expect(result.audit).toBe("unknown");
     if (result.status === "committed_notification_failed") expect(result.audit_entry.entity_id).toBe(result.transition.replacement.record.identity);
     expectHistory(f.peer.database, first.record, "2");
-    expect(sourceAudits(f.peer.database)).toBe(phase === "before_append" ? 1 : 2);
+    expect(sourceAudits(f.peer.database)).toBe(phase === "notification" ? 2 : 1);
     expect(append).toHaveBeenCalledOnce();
     expect(notifyEntry).toHaveBeenCalledTimes(phase === "notification" ? 1 : 0);
   });
@@ -280,11 +290,11 @@ describe("file-backed source replacement transaction and effects", () => {
     const f = fixture(), first = await f.admission.admit(sourceRequest(), context);
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
-    const writer = createAuditedSourceReplacement({ ...f.input, eventLogRepo: { async append(event) {
-      await gate;
-      return f.eventLogRepo.append(event);
-    } } });
+    const writer = createAuditedSourceReplacement({ ...f.input, runtimeNotifier: { notifyEntry: () => gate } });
     const pending = writer.replaceCurrent({ expected_current: first.record, replacement: nextRequest() }, context);
+    const second = f.field.stores.getCurrentRecord(WORKSPACE, "message")!;
+    await expect(f.peer.writer.recoverAdmission(second.identity, context)).resolves.toMatchObject({ status: "projection_settled" });
+    expect(await f.eventLogRepo.queryByEntity("source_record", second.identity)).toHaveLength(1);
     const third = await f.peer.admission.admit(nextRequest({ source_version: "3", recorded_at: "2026-09-13T00:00:02.000Z" }), context);
     release();
     const result = await pending;
@@ -296,6 +306,18 @@ describe("file-backed source replacement transaction and effects", () => {
     expect(f.field.stores.getCurrentRecord(WORKSPACE, "message")).toEqual(third.record);
     expect(f.peer.database.connection.prepare("SELECT source_version, source_body FROM source_records WHERE record_id = ?")
       .get(first.record.identity)).toEqual({ source_version: "1", source_body: "A café record." });
+  });
+
+  it("rejects repeated admission audits even when both match the retained replacement", async () => {
+    const f = fixture(), first = await f.admission.admit(sourceRequest(), context);
+    const result = await f.writer.replaceCurrent({ expected_current: first.record, replacement: nextRequest() }, context);
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") throw new Error("replacement audit required");
+    const { event_id: _id, revision: _revision, created_at: _createdAt, ...audit } = result.audit_entry;
+    await f.eventLogRepo.append(audit);
+    const recordId = result.transition.replacement.record.identity;
+    await expect(f.peer.writer.recoverAdmission(recordId, context)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await f.eventLogRepo.queryByEntity("source_record", recordId)).toHaveLength(2);
   });
 
   it("does not report COMMIT failure as a callback rollback or fabricate transition authorship", async () => {

@@ -33,10 +33,8 @@ import {
 import type { GardenTaskHandlerDependencies, GardenTaskToolCallContext } from "./garden-task-handlers.js";
 import { normalizeCandidateSignalGraphRefs } from "../tool/tool-handler-support.js";
 import { gardenTaskSourceAvailable, quarantineUnavailableSourceTasks } from "../../garden/post-turn-extract/source-provenance.js";
-import {
-  StatementSessionSourceUnavailableError, parseStatementSessionTaskPayload, receiveStatementSessionResponses,
-  statementSessionCompletionEnvelope, type StatementSessionTaskPayload
-} from "../../garden/statement-session/statement-session-task.js";
+import { statementSessionCompletionEnvelope } from "../../garden/statement-session/statement-session-task.js";
+import { admitClaimedStatementSession } from "./statement-session-completion.js";
 
 const EDGE_CLASSIFY_STALE_AFTER_MS = 5 * 60 * 1000;
 
@@ -157,7 +155,7 @@ function validateTaskResultEnvelope(
   const candidateSignalsCount = request.result_envelope?.candidate_signals?.length ?? 0;
   const statementResponses = request.result_envelope?.source_statement_responses;
   if (row.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION) {
-    if (candidateSignalsCount > 0 || (request.status === "completed" && statementResponses === undefined)) {
+    if (candidateSignalsCount > 0) {
       throw new GardenTaskValidationError("SOURCE_STATEMENT_SESSION requires source_statement_responses, not passive candidate_signals.");
     }
   } else if (statementResponses !== undefined) {
@@ -231,35 +229,26 @@ async function commitCandidateSignalCompletion(
   >,
   completionClaimedBy: string
 ): Promise<Readonly<{ counts: SignalOutcomeCounts; status: GardenCompleteTaskRequest["status"] }>> {
-  const sessionPayload = row.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION
-    ? readClaimedStatementSessionPayload(row, context, resolvedRunId)
-    : null;
-  const statements = sessionPayload === null || request.status !== "completed" ? null
-    : await receiveClaimedStatementSession(params, row, sessionPayload, request);
-  const candidateSignals = statements?.signals ?? (sessionPayload !== null ? [] : buildCandidateSignals(
-    params, contentOnlySignals, row.id, context.workspaceId, resolvedRunId, resolveGardenTaskSourceObservation(row)
-  ));
-  const status = statements?.incomplete === true ? "failed" : request.status;
-  const lastError = statements?.incomplete === true ? "Source statement extraction is incomplete; valid siblings and raw source were retained." : request.last_error_text;
+  const repo = requireGardenTaskRepo(params.deps);
+  const statementSession = row.kind === GardenTaskKind.SOURCE_STATEMENT_SESSION;
+  const extraction = statementSession ? await admitClaimedStatementSession(
+    params.deps, repo, row, request, context, resolvedRunId, completionClaimedBy, params.now
+  ) : null;
+  const status = extraction === null ? request.status : extraction.status === "complete" ? "completed" : "failed";
+  const lastError = extraction !== null && extraction.status !== "complete"
+    ? "Source statement extraction is incomplete; valid siblings and raw source were retained." : request.last_error_text;
   throwIfAborted(context.abortSignal);
   const outcomes = createSignalOutcomeCounter();
-  const emittedSignalIds = await emitTaskCandidateSignals(
-    params, row, candidateSignals, completionClaimedBy, outcomes, sessionPayload !== null
-  );
-  if (sessionPayload !== null && emittedSignalIds.length > 0 && params.deps.onStatementSessionSettled !== undefined) {
-    try {
-      await params.deps.onStatementSessionSettled({ workspaceId: context.workspaceId, runId: resolvedRunId });
-    } catch (error) {
-      params.warn("statement structural relation admission after completion failed", {
-        workspace_id: context.workspaceId,
-        task_id: row.id,
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  }
-  const counts = outcomes.snapshot();
+  const emittedSignalIds = statementSession ? extraction?.emitted_signal_ids ?? [] : await emitTaskCandidateSignals(
+    params, row, buildCandidateSignals(params, contentOnlySignals, row.id, context.workspaceId,
+      resolvedRunId, resolveGardenTaskSourceObservation(row)), completionClaimedBy, outcomes);
+  const counts = extraction === null ? outcomes.snapshot() : {
+    failed_candidate_signals_count: extraction.failed_candidate_signals_count,
+    unknown_candidate_signals_count: extraction.unknown_candidate_signals_count,
+    inflight_candidate_signals_count: extraction.inflight_candidate_signals_count
+  };
   throwIfAborted(context.abortSignal);
-  await requireGardenTaskRepo(params.deps).completeWithEvents(
+  await repo.completeWithEvents(
     row.id,
     {
       status,
@@ -272,36 +261,6 @@ async function commitCandidateSignalCompletion(
     context.workspaceId
   );
   return { counts, status };
-}
-
-function readClaimedStatementSessionPayload(
-  row: GardenTaskRow,
-  context: GardenTaskToolCallContext,
-  resolvedRunId: string | null
-): StatementSessionTaskPayload {
-  const payload = parseStatementSessionTaskPayload(row.payload);
-  if (payload.workspace_id !== context.workspaceId || payload.run_id !== resolvedRunId) {
-    throw new GardenTaskValidationError(`Garden task statement session payload escaped the claimed workspace or run: ${row.id}`);
-  }
-  return payload;
-}
-
-async function receiveClaimedStatementSession(
-  params: GardenTaskCompletionParams,
-  row: GardenTaskRow,
-  payload: StatementSessionTaskPayload,
-  request: GardenCompleteTaskRequest
-) {
-  try {
-    return await receiveStatementSessionResponses({ taskId: row.id, payload,
-      sources: requireGardenTaskRepo(params.deps).statementSessions,
-      responses: request.result_envelope?.source_statement_responses ?? [], now: params.now });
-  } catch (error) {
-    if (error instanceof StatementSessionSourceUnavailableError) {
-      throw new GardenTaskValidationError(`Garden task statement session source is unavailable: ${row.id}`);
-    }
-    throw error;
-  }
 }
 
 function assertCandidateSignalRetryCompatible(

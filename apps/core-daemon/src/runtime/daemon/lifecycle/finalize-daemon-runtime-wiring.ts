@@ -1,4 +1,5 @@
 import { createSourceSemanticPublication } from "../../field/source-semantic-publication.js";
+import { createSourceReplacementAdmissionIntents, withSourceReplacementAdmissionRecovery } from "../../field/admission-checkpoint.js";
 import type { AlayaDaemonRuntime } from "./daemon-runtime-types.js";
 import { SqliteSourceRootRecallReader } from "@do-soul/alaya-storage";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
@@ -14,7 +15,8 @@ import {
 import type { FinalizeDaemonRuntimeWiringInput } from "../../../index.js";
 import { createPostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
 import { createDaemonHostSessionCapture, type HostSessionCapture } from "../../../garden/host-session/host-session-capture.js";
-import { materializeWorkspaceSessionStructuralRelations } from "../../garden-wiring/session-structural-relations.js";
+import { admitStatementSessionStructuralRelations } from "../../garden-wiring/session-structural-relations.js";
+import { createStatementSessionExtractionReceipts } from "../../../garden/statement-session/statement-session-extraction-receipts.js";
 import { createPrivacyEffectLookup } from "../../../mcp-memory/proposal/phases/privacy-hard-effect.js";
 
 export async function finalizeDaemonRuntimeFromWiring(
@@ -26,6 +28,8 @@ export async function finalizeDaemonRuntimeFromWiring(
     gardenTaskRepo: input.gardenTaskRepo, relationAssertionService: input.relationAssertionService,
     warn: input.warnLogger.warn,
     now: receiptTime === undefined ? () => new Date().toISOString() : () => receiptTime });
+  const serviceExports = createDaemonServiceExports(input, hostSessionCapture);
+  await serviceExports.fieldProjectionCheckpoint.refresh();
   return await finalizeAlayaDaemonRuntime({
     startupConfig: input.startupConfig,
     requestProtection: input.requestProtection,
@@ -36,7 +40,7 @@ export async function finalizeDaemonRuntimeFromWiring(
     mcpMemoryToolHandlerInput: createMcpMemoryToolHandlerInput(input, hostSessionCapture),
     appInput: createDaemonAppInput(input),
     lifecycleControlsInput: createLifecycleControlsInput(input),
-    serviceExports: createDaemonServiceExports(input, hostSessionCapture)
+    serviceExports
   });
 }
 
@@ -83,14 +87,14 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     synthesisMemberResolver: createSynthesisMemberResolver(input),
     signalService: input.signalService,
     postTurnSignalReceiver: createPostTurnSignalReceiver(input.signalService),
-    onStatementSessionSettled: async (evt: Readonly<{ workspaceId: string; runId: string | null }>) => {
-      await materializeWorkspaceSessionStructuralRelations({
+    statementSessionCompletion: {
+      receipts: createStatementSessionExtractionReceipts(input.eventLogRepo, input.eventPublisher),
+      admitRelations: (evt: Readonly<{ workspaceId: string; runId: string }>) => admitStatementSessionStructuralRelations({
         database: input.eventLogRepo.getStorageConnectionIdentity(),
         assertionService: input.relationAssertionService,
-        workspaceId: evt.workspaceId,
-        runId: evt.runId,
+        ...evt,
         warn: input.warnLogger.warn
-      });
+      })
     },
     graphExploreService: input.graphExploreService,
     edgeProposalService: input.edgeProposalService,
@@ -268,6 +272,11 @@ function createMemoryHqExports(input: FinalizeDaemonRuntimeWiringInput) {
 
 function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput,
   hostSessionCapture: HostSessionCapture | undefined) {
+  const admissionIntents = createSourceReplacementAdmissionIntents(input.eventLogRepo.getStorageConnectionIdentity());
+  const sourceRecordReplacement = createAuditedSourceReplacement({
+    sha256: fieldContractSha256, stores: input.fieldComposition.stores,
+    auditHistory: input.eventLogRepo, runtimeNotifier: input.runtimeNotifier, admissionIntents
+  });
   return {
     ...(hostSessionCapture === undefined ? {} : { hostSessionCapture }),
     sourceRecordAdmission: createAuditedSourceAdmission({
@@ -276,13 +285,7 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput,
       eventLogRepo: input.eventLogRepo,
       runtimeNotifier: input.runtimeNotifier
     }),
-    sourceRecordReplacement: createAuditedSourceReplacement({
-      sha256: fieldContractSha256,
-      stores: input.fieldComposition.stores,
-      eventLogRepo: input.eventLogRepo,
-      auditHistory: input.eventLogRepo,
-      runtimeNotifier: input.runtimeNotifier
-    }),
+    sourceRecordReplacement,
     environmentStatusService: input.environmentStatusService,
     embeddingStatusService: input.embeddingStatusService,
     embeddingProviderWarmup: input.embeddingProviderWarmup,
@@ -301,7 +304,8 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput,
     relationAssertionService: input.relationAssertionService,
     relationAssertionAdmissionPort: input.relationAssertionAdmissionPort,
     relationProjectionCheckpoint: input.relationProjectionCheckpoint,
-    fieldProjectionCheckpoint: input.fieldComposition.fieldProjectionCheckpoint,
+    fieldProjectionCheckpoint: withSourceReplacementAdmissionRecovery(
+      input.fieldComposition.fieldProjectionCheckpoint, sourceRecordReplacement, admissionIntents),
     recallUtilizationService: input.recallUtilizationService,
     reconciliationBasisStatus: input.reconciliationBasisStatus,
     runService: input.runService,

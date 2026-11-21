@@ -1,4 +1,5 @@
 import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
+import { createStatementSessionExtractionReceipts } from "../../../garden/statement-session/statement-session-extraction-receipts.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -222,6 +223,10 @@ async function createTrustworthyLoopHarness(
     signalService,
     postTurnSignalReceiver: {
       receiveSignal: async (signal) => await signalService.receiveSignal(signal)
+    },
+    statementSessionCompletion: {
+      receipts: createStatementSessionExtractionReceipts(eventLogRepo, eventPublisher),
+      admitRelations: async () => undefined
     },
     graphExploreService: { exploreOneHop: async () => [] },
     sessionOverrideService: { apply: async () => ({ runtime_id: "override-1" }) },

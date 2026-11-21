@@ -1,5 +1,6 @@
 import type { DynamicsService } from "@do-soul/alaya-core";
 import type { HostSessionCapture } from "../../garden/host-session/host-session-capture.js";
+import type { GardenTaskHandlerDependencies } from "../garden-task/garden-task-handlers.js";
 import {
   SoulBatchReviewEdgeProposalsResponseSchema,
   SoulListPendingEdgeProposalsResponseSchema,
@@ -142,6 +143,7 @@ export interface McpMemoryToolHandlerDependencies {
     }>>;
   };
   readonly postTurnSignalReceiver?: PostTurnSignalReceiver;
+  readonly statementSessionCompletion?: GardenTaskHandlerDependencies["statementSessionCompletion"];
   readonly graphExploreService: {
     exploreOneHop(
       memoryId: string,

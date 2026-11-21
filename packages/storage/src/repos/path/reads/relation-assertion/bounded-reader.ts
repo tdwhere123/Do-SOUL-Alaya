@@ -2,6 +2,7 @@ import { RelationFormationSourceObservationSchema, RelationValiditySchema, type 
 import type { StorageDatabase } from "../../../../sqlite/db.js";
 import { cachedReadStatement } from "../../../../sqlite/dynamic-prepared-statement-cache.js";
 import { StorageError } from "../../../../shared/errors.js";
+import { erasedAssertionSql } from "../../relation-assertion/erased-formation-evidence.js";
 import { CURRENT_STATEMENT_MEMORY_FILTER_SQL, UNAVAILABLE_BOUND_STATEMENT_SQL } from "../../../source-index/statement-dependencies.js";
 
 export interface RecallAssertionObservation {
@@ -37,6 +38,7 @@ JOIN relation_assertion_evidence e ON e.assertion_id = a.assertion_id
 LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id
 WHERE a.workspace_id = ? AND lower(json_extract(a.anchors_json, '$.source_anchor.object_id')) = ?
   AND a.relation_kind = ?
+  AND NOT ${erasedAssertionSql("a.workspace_id", "a.assertion_id")}
   AND NOT EXISTS (
     SELECT 1 FROM projection_erase_barriers barrier
     WHERE barrier.workspace_id = a.workspace_id
@@ -126,6 +128,7 @@ JOIN memory_entries
 LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertion_id AND r.workspace_id = a.workspace_id
 WHERE a.workspace_id = ?
   AND a.relation_kind = ?
+  AND NOT ${erasedAssertionSql("a.workspace_id", "a.assertion_id")}
   AND NOT EXISTS (
     SELECT 1 FROM privacy_current_quarantine q
     WHERE q.workspace_id = memory_entries.workspace_id

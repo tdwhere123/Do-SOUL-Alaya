@@ -38,7 +38,7 @@ export function assertSourceAdmissionWorkspace(request: SourceAdmissionRequest, 
 
 /** Must run inside the caller's storage transaction, including span formation. */
 export function admitRetainedSource(
-  input: AuditedSourceWriterInput,
+  input: Pick<AuditedSourceWriterInput, "stores">,
   admission: ReturnType<typeof createSourceAdmissionPort>,
   request: SourceAdmissionRequest,
   workspaceId: string,

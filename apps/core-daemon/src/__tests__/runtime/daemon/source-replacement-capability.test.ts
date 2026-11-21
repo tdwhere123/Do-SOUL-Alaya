@@ -33,7 +33,7 @@ it("exposes predecessor-bound replacement through the wired Node capability and 
   mkdirSync(workspaceRoot);
   for (const [key, value] of Object.entries({ DATA_DIR: dataDir, ALAYA_CONFIG_DIR: config,
     HOME: join(directory, "home"), CODEX_HOME: join(directory, "codex-home"),
-    ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false", ALAYA_EMBEDDING_PROVIDER: "local_onnx", ALAYA_SQLITE_WRITE_QUEUE: "0" })) {
+    ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false", ALAYA_EMBEDDING_PROVIDER: "local_onnx", ALAYA_SQLITE_WRITE_QUEUE: "1" })) {
     vi.stubEnv(key, value);
   }
   let runtime: AlayaDaemonRuntime | undefined;
@@ -66,11 +66,51 @@ it("exposes predecessor-bound replacement through the wired Node capability and 
     expect((await runtime.services.sourceRecordReplacement.replaceCurrent({ expected_current: result.transition.replacement.record,
       replacement: { ...replacement, source_version: "3", recorded_at: "2026-09-13T00:00:02.000Z" } }, { workspaceId: "foreign" })).status).toBe("rejected");
     expect(database.connection.prepare("SELECT count(*) AS n FROM source_records WHERE workspace_id = ?").get(request.workspace_id)).toEqual({ n: 2 });
+    const third = await retainUnauditedReplacement(runtime, database, result.transition.replacement.record, replacement, "3");
+    expect(readAdmissionEvents(database, third)).toEqual([]);
+    await expect(runtime.services.fieldProjectionCheckpoint.refresh()).resolves.toBe(true);
+    await expect(runtime.services.fieldProjectionCheckpoint.refresh()).resolves.toBe(false);
+    expect(readAdmissionEvents(database, third)).toHaveLength(1);
+
+    const fourth = await retainUnauditedReplacement(runtime, database, third, replacement, "4");
+    expect(readAdmissionEvents(database, fourth)).toEqual([]);
+    await runtime.shutdown();
+    runtime = await createAlayaDaemonRuntime();
+    const reopened = initDatabase({ filename: join(dataDir, "alaya.db") });
+    expect(readAdmissionEvents(reopened, fourth)).toHaveLength(1);
+    await expect(runtime.services.fieldProjectionCheckpoint.refresh()).resolves.toBe(false);
   } finally {
     try { await runtime?.shutdown(); }
     finally { rmSync(directory, { recursive: true, force: true }); rmSync(config, { recursive: true, force: true }); }
   }
 }, 45_000);
+
+type RuntimeReplacement = AlayaDaemonRuntime["services"]["sourceRecordReplacement"];
+type Predecessor = Parameters<RuntimeReplacement["replaceCurrent"]>[0]["expected_current"];
+
+async function retainUnauditedReplacement(runtime: AlayaDaemonRuntime, database: ReturnType<typeof initDatabase>,
+  predecessor: Predecessor, replacement: SourceAdmissionRequest, revision: "3" | "4") {
+  database.connection.exec(`CREATE TRIGGER reject_source_admission_audit BEFORE INSERT ON event_log
+    WHEN NEW.event_type = 'soul.field.source_record.admitted'
+    BEGIN SELECT RAISE(ABORT, 'source audit temporarily unavailable'); END`);
+  try {
+    const outcome = await runtime.services.sourceRecordReplacement.replaceCurrent({ expected_current: predecessor,
+      replacement: { ...replacement, source_version: revision, content_bytes: `Revision ${revision}.`,
+        recorded_at: `2026-09-13T00:00:0${revision}.000Z` }
+    }, { workspaceId: predecessor.workspace_id });
+    expect(outcome.status).toBe("committed_audit_incomplete");
+    if (outcome.status !== "committed_audit_incomplete") throw new Error("unaudited receipt required");
+    return outcome.transition.replacement.record;
+  } finally {
+    database.connection.exec("DROP TRIGGER reject_source_admission_audit");
+  }
+}
+
+function readAdmissionEvents(database: ReturnType<typeof initDatabase>, record: Predecessor) {
+  return database.connection.prepare(`SELECT event_id FROM event_log
+    WHERE workspace_id = ? AND entity_type = 'source_record' AND entity_id = ? AND event_type = ?`)
+    .all(record.workspace_id, record.identity, FieldGenerationEventType.SOUL_FIELD_SOURCE_RECORD_ADMITTED);
+}
 
 it("exposes deferred predecessor-bound replacement through the wired Node capability until checkpoint publishes the new frontier", async () => {
   const directory = mkdtempSync(join(tmpdir(), "daemon-source-replacement-deferred-"));

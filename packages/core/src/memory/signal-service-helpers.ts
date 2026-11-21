@@ -101,23 +101,27 @@ export function buildSignalEmittedEventInput(
     workspace_id: signal.workspace_id,
     run_id: signal.run_id,
     caused_by: signal.source,
-    payload_json: SoulSignalEmittedPayloadSchema.parse({
-      signal_id: signal.signal_id,
-      workspace_id: signal.workspace_id,
-      run_id: signal.run_id,
-      source: signal.source,
-      signal_kind: signal.signal_kind,
-      ...(signal.source_delivery_ids === undefined
-        ? {}
-        : { source_delivery_ids: signal.source_delivery_ids }),
-      source_observation: signal.source_observation ?? null,
-      source_memory_refs: signal.source_memory_refs,
-      supersedes_refs: signal.supersedes_refs,
-      exception_to_refs: signal.exception_to_refs,
-      contradicts_refs: signal.contradicts_refs,
-      incompatible_with_refs: signal.incompatible_with_refs,
-      raw_payload: buildEventLogRawPayloadSummary(signal.raw_payload)
-    })
+    payload_json: SoulSignalEmittedPayloadSchema.parse(
+      signalEmissionPayload(signal, buildEventLogRawPayloadSummary(signal.raw_payload))
+    )
+  };
+}
+
+function signalEmissionPayload(signal: CandidateMemorySignal, rawPayload: Record<string, unknown>) {
+  return {
+    signal_id: signal.signal_id,
+    workspace_id: signal.workspace_id,
+    run_id: signal.run_id,
+    source: signal.source,
+    signal_kind: signal.signal_kind,
+    ...(signal.source_delivery_ids === undefined ? {} : { source_delivery_ids: signal.source_delivery_ids }),
+    source_observation: signal.source_observation ?? null,
+    source_memory_refs: signal.source_memory_refs,
+    supersedes_refs: signal.supersedes_refs,
+    exception_to_refs: signal.exception_to_refs,
+    contradicts_refs: signal.contradicts_refs,
+    incompatible_with_refs: signal.incompatible_with_refs,
+    raw_payload: rawPayload
   };
 }
 
@@ -128,42 +132,38 @@ export function buildSignalEmittedEventInput(
  */
 export function resolveSignalMaterializationContext(
   signal: CandidateMemorySignal,
-  event: EventLogEntry,
-  emittedRawPayloadSummary = buildEventLogRawPayloadSummary(signal.raw_payload)
+  event: EventLogEntry
 ): SignalMaterializationContext | null {
-  const expected = buildSignalEmittedEventInput(signal);
+  return readSignalEmissionContext(signal, event, "stored_signal")?.context ?? null;
+}
+
+export function readSignalEmissionContext(
+  signal: CandidateMemorySignal,
+  event: EventLogEntry,
+  rawPayloadAuthority: "stored_signal" | "emission"
+): Readonly<{ context: SignalMaterializationContext; rawPayloadSummary: Record<string, unknown> }> | null {
   if (
     event.event_type !== SignalEventType.SOUL_SIGNAL_EMITTED ||
-    event.entity_type !== expected.entity_type ||
-    event.entity_id !== expected.entity_id ||
-    event.workspace_id !== expected.workspace_id ||
-    event.run_id !== expected.run_id ||
-    event.caused_by !== expected.caused_by
+    event.entity_type !== "candidate_memory_signal" ||
+    event.entity_id !== signal.signal_id ||
+    event.workspace_id !== signal.workspace_id ||
+    event.run_id !== signal.run_id ||
+    event.caused_by !== signal.source
   ) {
     return null;
   }
-
-  try {
-    const actualPayload = SoulSignalEmittedPayloadSchema.parse(event.payload_json);
-    if (stableStringify(actualPayload) !== stableStringify({
-      ...expected.payload_json, raw_payload: emittedRawPayloadSummary
-    })) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-
+  const payload = SoulSignalEmittedPayloadSchema.safeParse(event.payload_json);
+  if (!payload.success) return null;
+  const rawPayloadSummary = payload.data.raw_payload;
+  const expected = signalEmissionPayload(signal, rawPayloadAuthority === "emission"
+    ? rawPayloadSummary : buildEventLogRawPayloadSummary(signal.raw_payload));
+  if (stableStringify(payload.data) !== stableStringify(expected)) return null;
   const sourceObservation = signal.source_observation ?? null;
-  if (sourceObservation === null) {
-    return { source_event_anchor: null };
-  }
   return {
-    source_event_anchor: {
-      event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
-      event_id: event.event_id,
-      occurred_at: sourceObservation.observed_at
-    }
+    rawPayloadSummary,
+    context: { source_event_anchor: sourceObservation === null ? null : {
+      event_type: SignalEventType.SOUL_SIGNAL_EMITTED, event_id: event.event_id,
+      occurred_at: sourceObservation.observed_at } }
   };
 }
 
