@@ -488,6 +488,43 @@ describe("Page-1 fixed-fragment Delta + Next packing", () => {
     expect(omittedWire.results[1]?.target).toMatchObject({
       span: { content_start: 0, content_end: 0, content_complete: false }
     });
+
+    // 3b. Tight 2,000 B boundary: omitted middle row charges its 17 B "[payload omitted]" placeholder
+    // so a locked 275 B tail is deferred intact to Page 2 instead of shipping shortened to 258 B,
+    // while a 258 B tail fits intact on Page 1 with content_complete: true.
+    const orderedMid = "mid-0004-mmmmmmmmmmm";
+    const tail275 = `tail-0013-${"z".repeat(265)}`; // 275 B
+    const tail258 = `tail-0009-${"y".repeat(248)}`; // 258 B
+
+    const roots275: MockRoot[] = [
+      { id: "to-0", body: omittedHead, messages: [] },
+      { id: "to-1", body: orderedMid, messages: [] },
+      { id: "to-2", body: tail275, messages: [] }
+    ];
+    const req275 = makeRequest(makeReaders(roots275));
+    const p1_275 = runConditionalFieldRecallWithReceipt(req275);
+    const w1_275 = encodeEnvelope(req275, p1_275);
+    expect(w1_275.results).toHaveLength(2);
+    expect(w1_275.results[0]?.target).toMatchObject({ root_id: "to-0", span: { content_complete: true } });
+    expect(w1_275.results[1]?.payload_available).toBe(false);
+    const p2_275 = runConditionalFieldRecallWithReceipt({ ...req275, continuation: p1_275.index.continuation });
+    const w2_275 = encodeEnvelope(req275, p2_275);
+    expect(w2_275.results).toHaveLength(1);
+    expect(w2_275.results[0]?.content_preview).toBe(tail275);
+    expect(w2_275.results[0]?.target).toMatchObject({ root_id: "to-2", span: { content_end: 275, content_complete: true } });
+
+    const roots258: MockRoot[] = [
+      { id: "to-0", body: omittedHead, messages: [] },
+      { id: "to-1", body: orderedMid, messages: [] },
+      { id: "to-2", body: tail258, messages: [] }
+    ];
+    const req258 = makeRequest(makeReaders(roots258));
+    const p1_258 = runConditionalFieldRecallWithReceipt(req258);
+    const w1_258 = encodeEnvelope(req258, p1_258);
+    expect(w1_258.results).toHaveLength(3);
+    expect(w1_258.results[1]?.payload_available).toBe(false);
+    expect(w1_258.results[2]?.content_preview).toBe(tail258);
+    expect(w1_258.results[2]?.target).toMatchObject({ root_id: "to-2", span: { content_end: 258, content_complete: true } });
     const literalReq = makeRequest(makeReaders(omittedMidRoots.slice(1)));
     const literalExec = runConditionalFieldRecallWithReceipt(literalReq);
     const literalIndex = {
