@@ -37,18 +37,21 @@ function statementTarget(database: StorageDatabase, workspaceId: string, generat
   return raw === undefined ? null : SourceIndexTargetSchema.parse(readJsonColumn(readRecord(raw, "source index target"), "target_json"));
 }
 
-function relationFromGist(database: StorageDatabase, workspaceId: string, artifactId: string, sha256: FieldContractSha256) {
-  const raw = cachedReadStatement(database,
-    "SELECT gist FROM evidence_capsules WHERE workspace_id=? AND object_id=? AND lifecycle_state='active'")
-    .get(workspaceId, artifactId);
-  if (raw === undefined) return null;
-  const gist = readStringField(readRecord(raw, "statement relation gist"), "gist");
+function parseRelationFromGistText(gist: string, sha256: FieldContractSha256) {
   let parsed: unknown;
   try { parsed = JSON.parse(gist); } catch { return null; }
   const bound = BoundSourceStatementSchema.safeParse(parsed);
   if (!bound.success) return null;
   const relation = bound.data.statement.relation;
   return { relation, digest: hashContentDigest(relation, sha256) };
+}
+
+function relationFromGist(database: StorageDatabase, workspaceId: string, artifactId: string, sha256: FieldContractSha256) {
+  const raw = cachedReadStatement(database,
+    "SELECT gist FROM evidence_capsules WHERE workspace_id=? AND object_id=? AND lifecycle_state='active'")
+    .get(workspaceId, artifactId);
+  if (raw === undefined) return null;
+  return parseRelationFromGistText(readStringField(readRecord(raw, "statement relation gist"), "gist"), sha256);
 }
 
 export function readStatementRelationText(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
@@ -89,13 +92,19 @@ export function readStatementRelationText(database: StorageDatabase, records: Sq
   }
   const gistBudget = need(1, 0);
   if (gistBudget !== null) return gistBudget;
-  const gist = relationFromGist(database, source.target.workspace_id, source.auxiliary.artifact_id, sha256);
+  const maxGistBytes = budget.native_bytes - resources.native_bytes;
+  const rawGist = cachedReadStatement(database, `SELECT octet_length(gist) AS gist_bytes,
+    CASE WHEN octet_length(gist) <= ? THEN gist ELSE NULL END AS gist
+    FROM evidence_capsules WHERE workspace_id=? AND object_id=? AND lifecycle_state='active'`)
+    .get(maxGistBytes, source.target.workspace_id, source.auxiliary.artifact_id);
   resources.work++;
+  if (rawGist === undefined) return unavailable("statement_relation_unavailable", true);
+  const gistRow = readRecord(rawGist, "statement relation gist");
+  const gistBytes = readIntegerField(gistRow, "gist_bytes");
+  if (gistBytes > maxGistBytes) return unknown("statement_relation_text_read_budget");
+  resources.native_bytes += gistBytes;
+  const gist = parseRelationFromGistText(readStringField(gistRow, "gist"), sha256);
   if (gist === null) return unavailable("statement_relation_unavailable", true);
-  const bytes = Buffer.byteLength(gist.relation);
-  const readyBudget = need(0, bytes);
-  if (readyBudget !== null) return readyBudget;
-  resources.native_bytes += bytes;
   return { status: "ready", relation: gist.relation, resources };
 }
 

@@ -32,7 +32,7 @@ export function compareTasks(
   return left.task_id.localeCompare(right.task_id);
 }
 
-export function buildCoolingKey(
+function buildCoolingKey(
   taskKind: GardenTaskDescriptor["task_kind"],
   targetRef: string
 ): string {
