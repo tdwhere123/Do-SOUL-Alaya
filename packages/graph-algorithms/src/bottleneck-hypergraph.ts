@@ -96,12 +96,11 @@ export function canonicalRuleStructureKey(
   return JSON.stringify([kind, headId, [...premiseIds].sort()]);
 }
 
-export function clampGrade(value: number, top: number): number {
-  if (!Number.isFinite(value)) return 0;
-  const integer = Math.trunc(value);
-  if (integer < 0) return 0;
-  if (integer > top) return top;
-  return integer;
+export function requireGrade(value: number, top: number): number {
+  if (!Number.isFinite(value) || value < 0 || value > top) {
+    throw new RangeError(`max-min grade must be finite and within [0, ${top}]`);
+  }
+  return Math.trunc(value);
 }
 
 export function indexUniqueNodes(nodeIds: readonly string[]): {
@@ -127,7 +126,7 @@ export function collectNormalizedSeeds(
   for (const [nodeId, raw] of seeds) {
     const idx = indexById.get(nodeId);
     if (idx === undefined) continue;
-    const grade = clampGrade(raw, top);
+    const grade = requireGrade(raw, top);
     const prior = collected.get(idx);
     if (prior === undefined || grade > prior) collected.set(idx, grade);
   }
@@ -160,7 +159,7 @@ export function normalizeRules(
       }
     }
     if (invalid) continue;
-    const capacity = edge.kind === "identity" ? top : clampGrade(edge.strength, top);
+    const capacity = edge.kind === "identity" ? top : requireGrade(edge.strength, top);
     rules.push({
       ruleId: edge.id ?? `rule#${i}`,
       explicitId: edge.id !== undefined,
@@ -282,7 +281,7 @@ function buildSolveResult(
     frontierUpperBound,
     openExtensionUpperBound(pendingCap: number | undefined): ReadonlyMap<string, number> {
       if (pendingCap === undefined) return frontierUpperBound;
-      const cap = clampGrade(pendingCap, top);
+      const cap = requireGrade(pendingCap, top);
       const bounded = new Map<string, number>();
       for (const id of nodeIds) {
         const current = frontierUpperBound.get(id);

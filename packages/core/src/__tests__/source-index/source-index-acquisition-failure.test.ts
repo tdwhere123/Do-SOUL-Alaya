@@ -69,6 +69,29 @@ function expectUnknown(result: ReturnType<typeof acquire>, stage: "lexical" | "v
 }
 
 describe("native SQLite reads then injected repository/admission failure", () => {
+  it("settles a completed SQLite admission when its optional cache entry cannot fit", () => {
+    const environment = setup();
+    publishIndex(environment, [AXIS_ROOTS[0]!]);
+    const read = environment.index.readLexicalCandidates.bind(environment.index);
+    const admit = environment.index.admitQueryCandidate.bind(environment.index);
+    let lexicalBytes = 0, admissionBytes = 0;
+    vi.spyOn(environment.index, "readLexicalCandidates").mockImplementation((...args) => {
+      const result = read(...args);
+      lexicalBytes = result.resources.native_bytes;
+      return result;
+    });
+    vi.spyOn(environment.index, "admitQueryCandidate").mockImplementation((source, binding, capacity) => {
+      const result = admit(source, binding, capacity);
+      admissionBytes = result.resources.native_bytes;
+      return { ...result, resources: { ...result.resources, memory_bytes: capacity!.memory_bytes } };
+    });
+    const result = query(environment, unavailableInput(), admitScope);
+    expect(admissionBytes).toBeGreaterThan(0);
+    expect(result.resources.native_bytes).toBe(lexicalBytes + admissionBytes);
+    expect(result.resource_refusals).toContainEqual({ stage: "admission", phase: "source admission reuse retention" });
+    expect(result.nominations).toHaveLength(0);
+  });
+
   it("retains completed lexical debits when a later native vector read throws", () => {
     const environment = setup();
     publishIndex(environment);

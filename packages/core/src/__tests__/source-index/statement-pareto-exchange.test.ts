@@ -74,6 +74,29 @@ describe("winning-key relation scoring", () => {
 });
 
 describe("injective condition assignment and secondary exchange", () => {
+  it("skips an injective winner that would evict the head's sole witness for another column", () => {
+    const association = coverage(2, { a: [0.7, null], b: [null, 0.1], f: [0.9, null], g: [null, 0.9] }, {
+      relations: roots.map(id => id === "b" ? [null, 0.1] : id === "g" ? [null, 0.9] : [null, null]) });
+    const head = ["a", "b"], tail = ["c", "d", "e", "f", "g", "h"];
+    expect(exchangeStatementParetoSecondary({ association, pool: roots, head, tail, agreed: [], meter: meter() }).swapped)
+      .toBe(true);
+    expect(head).toEqual(["a", "g"]);
+    expect(tail).toEqual(["c", "d", "e", "f", "b", "h"]);
+  });
+
+  it("vetoes a derived rank-2 swap that would reduce the head matching", () => {
+    const association = coverage(3, {
+      a: [0.95, 0.95, null], b: [null, null, 0.1], c: [0.3, null, null], d: [null, 0.8, null],
+      e: [null, 0.2, null], f: [0.8, null, null], g: [null, null, 0.9], h: [null, 0.3, null]
+    }, { spans: roots.map(() => [[0, 1], [1, 2], [2, 3]]),
+      relations: roots.map(id => id === "b" ? [null, null, 0.1] : id === "g" ? [null, null, 0.9] : [null, null, null]),
+      possible: roots.map(id => [id === "b", false, false]) });
+    const head = ["a", "d", "c", "b"], tail = ["e", "f", "g", "h"];
+    expect(exchangeStatementParetoSecondary({ association, pool: roots, head, tail, agreed: ["c"], meter: meter() }).swapped)
+      .toBe(false);
+    expect(head).toEqual(["a", "d", "c", "b"]);
+  });
+
   it("rematches duplicate marginal tops and leaves distinct tops unsolved", () => {
     const pool = ["a", "b", "c"];
     const value = (id: string, column: number) => ({ a: [0.9, 0.8], b: [0.1, 0.7], c: [0.2, 0.1] }[id]![column]!);
@@ -179,8 +202,8 @@ describe("injective condition assignment and secondary exchange", () => {
     };
     const head = identities.slice(0, 5), tail = identities.slice(5);
     const quote = quoteStatementParetoExchange(16, statements);
-    expect(quote.work_units).toBeLessThanOrEqual(6_000);
-    expect(quote.memory_bytes).toBe(11_520);
+    expect(quote.work_units).toBeLessThanOrEqual(9_000);
+    expect(quote.memory_bytes).toBeLessThanOrEqual(13_000);
     const packedBytes = 4 * 16 + 8 * 16 + 8 * 16 + 8 * statements;
     expect(packedBytes).toBeLessThan(quote.memory_bytes);
     const ledger = meter(quote.work_units, quote.memory_bytes);

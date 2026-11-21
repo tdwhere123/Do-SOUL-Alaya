@@ -486,7 +486,10 @@ export class SourceIndexProducer {
         pass.spent.model_inputs += result.resources.model_inputs_submitted;
         pass.spent.input_bytes += result.resources.model_input_bytes_submitted;
         if (result.status !== "root_complete") return;
-      } catch { return; }
+      } catch (error) {
+        if (error instanceof SourceIndexOperationError) pass.chargeNative(error.resources);
+        return;
+      }
     }
   }
 

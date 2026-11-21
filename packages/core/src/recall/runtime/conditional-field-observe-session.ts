@@ -347,6 +347,8 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
       session.state = { ...interruptObservedField(before),
         remaining_exploration: rejected.remaining_exploration,
         remaining_reserve: rejected.remaining_reserve,
+        solver_completed_work: rejected.solver_completed_work,
+        admitted_allocation_bytes: rejected.admitted_allocation_bytes,
         memory_exhausted: rejected.memory_exhausted,
         retention_rejected: rejected.retention_rejected };
       return true;
@@ -473,7 +475,9 @@ function retainObservedContext(
   const bytes = facts.bytes - (before.source_fact_bytes ?? 0) + relationBytes - (before.observed_relation_bytes ?? 0)
     + pairProgress.bytes - before.pair_progress_bytes;
   if (bytes > state.remaining_memory_bytes) return { ...before,
-    remaining_exploration: state.remaining_exploration, memory_exhausted: true, last_observer_status: "interrupted",
+    remaining_exploration: state.remaining_exploration, remaining_reserve: state.remaining_reserve,
+    solver_completed_work: state.solver_completed_work, admitted_allocation_bytes: state.admitted_allocation_bytes,
+    memory_exhausted: true, last_observer_status: "interrupted",
     closure: { ...before.closure, observation: "interrupted", requested_index: "open" },
     residuals: before.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region) };
   return { ...state, source_facts: facts.snapshot, source_fact_bytes: facts.bytes,

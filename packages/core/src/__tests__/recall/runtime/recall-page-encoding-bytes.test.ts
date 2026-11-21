@@ -100,12 +100,10 @@ describe("recall page encoding UTF-8 byte charges", () => {
     expect("😀".length).toBe(2);
   });
 
-  it("does not split an emoji scalar under a 3-byte cap", () => {
+  it("defers an emoji when neither the scalar nor the omission marker fits", () => {
     const { index, previews } = memoryPage(["😀"]);
     const encoded = encodeIndexResults(index, previews, 3);
-    expect(encoded[0]!.content_preview).not.toContain("\uFFFD");
-    expect(encoded[0]!.content_preview.includes("😀")).toBe(false);
-    expect(encoded[0]!.budget_state.token_estimate).toBeLessThanOrEqual(3);
+    expect(encoded).toEqual([]);
   });
 
   it("keeps the default page cap at 2000 encoded bytes", () => {

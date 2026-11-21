@@ -16,6 +16,10 @@ const TEMPORAL_TERM_PATTERN = new RegExp([
 ].join("|"), "giu");
 
 export function extractTemporalTerms(text: string): readonly string[] {
-  const terms = [...text.matchAll(TEMPORAL_TERM_PATTERN)].map((match) => match[0].trim());
+  const terms = [...temporalTermMatches(text)].map((match) => match[0].trim());
   return [...new Set(terms)].slice(0, 64);
+}
+
+export function temporalTermMatches(text: string): Iterable<RegExpMatchArray> {
+  return text.matchAll(TEMPORAL_TERM_PATTERN);
 }

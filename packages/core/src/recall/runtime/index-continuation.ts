@@ -341,8 +341,7 @@ export function deliveredPayloadEntry(queryKey: string, target: RecallTargetRef)
   readonly index: InformationIndex;
   readonly entry: IndexEntry;
 }> | undefined {
-  for (const issued of [...recallExecutionRetention.values<IssuedDelivery>("page:")].reverse()) {
-    if (issued.query_key !== queryKey) continue;
+  for (const issued of recallExecutionRetention.valuesForExecution<IssuedDelivery>(queryKey, "page:").reverse()) {
     const entry = issued.index.entries.find((candidate) => candidate.target.kind === "source_evidence"
       && target.kind === "source_evidence" && sameSourceEvidenceRoot(candidate.target, target));
     if (entry !== undefined) return { index: issued.index, entry };
@@ -363,11 +362,9 @@ export function assertMembershipContinuation(continuation: Continuation | null |
 
 export function evictIssuedDeliveries(queryKey: string): readonly string[] {
   const removed: string[] = [];
-  for (const issued of recallExecutionRetention.values<IssuedDelivery>("page:")) {
-    if (issued.query_key === queryKey) {
-      recallExecutionRetention.delete(`page:${issued.request_digest}`);
-      removed.push(issued.request_digest);
-    }
+  for (const issued of recallExecutionRetention.valuesForExecution<IssuedDelivery>(queryKey, "page:")) {
+    recallExecutionRetention.delete(`page:${issued.request_digest}`);
+    removed.push(issued.request_digest);
   }
   return removed;
 }

@@ -5,6 +5,7 @@ import {
   SoulMemorySearchResponseSchema,
   SoulMemorySearchResponseWireSchema,
   sourceDisclosure,
+  sourceGoldRootIdentity,
   sourceRecallTarget,
   type HostDependencyExposure,
   type SourceDeliveryBoundaries
@@ -36,6 +37,7 @@ type MockRoot = Readonly<{
   id: string;
   body: string;
   messages: readonly number[];
+  omitPayload?: boolean;
   dependency?: (span: readonly [number, number]) => HostDependencyExposure;
 }>;
 
@@ -43,24 +45,28 @@ function makeReaders(roots: readonly MockRoot[], options?: Readonly<{
   payloadRange?: ObserverReaders["sourceRootPayloadRange"];
 }>): ObserverReaders {
   const byId = new Map(roots.map(root => [root.id, root]));
+  const admittedRoots = roots.map(root => sourceRecallTarget({
+    workspace_id: WS,
+    root_kind: "source_record",
+    root_id: root.id,
+    source_version: "1",
+    content_digest: sha(root.body),
+    evidence_object_id: null
+  }));
   return {
     nominateSources: () => ({
       result: null,
       witness: [],
-      admitted_roots: roots.map(root => sourceRecallTarget({
-        workspace_id: WS,
-        root_kind: "source_record",
-        root_id: root.id,
-        source_version: "1",
-        content_digest: sha(root.body),
-        evidence_object_id: null
-      })),
-      catalog_positions: Object.fromEntries(roots.map((root, idx) => [root.id, idx]))
+      admitted_roots: admittedRoots,
+      catalog_positions: Object.fromEntries(admittedRoots.map((root, idx) => [sourceGoldRootIdentity(root), idx]))
     }),
     sourceRootPayloadRange: options?.payloadRange,
     sourceRoot: (input): SourceRootHydrateObserverPage => {
       const root = byId.get(input.rootId);
       if (root === undefined) return { row: null, rowsRead: 1, bytesRead: 0, unavailable: true };
+      if (input.purpose === "payload" && root.omitPayload === true) {
+        return { row: null, rowsRead: 1, bytesRead: 0, unavailable: true };
+      }
       const buf = Buffer.from(root.body, "utf8");
       const offset = input.offset ?? 0;
       const byteLimit = input.byteLimit ?? 65_536;
@@ -84,7 +90,7 @@ function makeReaders(roots: readonly MockRoot[], options?: Readonly<{
           revision: "1",
           digest: sha(root.body),
           evidence_object_id: null,
-          content: chunk,
+          ...(root.omitPayload === true ? {} : { content: chunk }),
           content_start: offset,
           content_end: sliceEnd,
           content_complete: complete,
@@ -473,60 +479,52 @@ describe("Page-1 fixed-fragment Delta + Next packing", () => {
       runConditionalFieldRecallWithReceipt(makeRequest(makeReaders([{ id: "probe", body: "x", messages: [] }])))
     );
     const discBytes = Buffer.byteLength(JSON.stringify({ source_disclosure: probeEnc.results[0]!.source_disclosure }));
-    const omittedHead = `needle ${"h".repeat(Math.max(1, 2_000 - 2 * discBytes - 7))}`;
+    const omittedHead = `needle ${"h".repeat(Math.max(1, 2_000 - 2 * discBytes - 39))}`;
     const omittedMid = "mid twenty byte text";
     const omittedTail = "end twenty byte text";
     const omittedMidRoots: MockRoot[] = [
       { id: "om-0", body: omittedHead, messages: [] },
-      { id: "om-1", body: omittedMid, messages: [] },
+      { id: "om-1", body: omittedMid, messages: [], omitPayload: true },
       { id: "om-2", body: omittedTail, messages: [] }
     ];
     const omittedReq = makeRequest(makeReaders(omittedMidRoots));
     const omittedExec = runConditionalFieldRecallWithReceipt(omittedReq);
     const omittedWire = encodeEnvelope(omittedReq, omittedExec);
-    expect(omittedWire.results).toHaveLength(3);
-    expect(omittedWire.results[1]?.payload_available).toBe(false);
+    expect(omittedWire.results.map(row => [row.target.kind === "source_evidence" && row.target.root_id, row.payload_available]))
+      .toEqual([["om-0", true], ["om-1", false], ["om-2", true]]);
     expect(omittedWire.results[1]?.content_preview).toBe("[payload omitted]");
-    expect(omittedWire.results[1]?.target).toMatchObject({
-      span: { content_start: 0, content_end: 0, content_complete: false }
-    });
+    expect(omittedWire.results[1]?.target).toMatchObject({ root_id: "om-1" });
 
-    // 3b. Tight 2,000 B boundary: omitted middle row charges its 17 B "[payload omitted]" placeholder
-    // so a locked 275 B tail is deferred intact to Page 2 instead of shipping shortened to 258 B,
-    // while a 258 B tail fits intact on Page 1 with content_complete: true.
-    const orderedMid = "mid-0004-mmmmmmmmmmm";
-    const tail275 = `tail-0013-${"z".repeat(265)}`; // 275 B
-    const tail258 = `tail-0009-${"y".repeat(248)}`; // 258 B
+    // 3b. A locked tail one byte over the residual is deferred intact.
+    const remaining = omittedWire.results[2]!.budget_state.remaining_tokens;
+    expect(remaining).toBeTypeOf("number");
+    const tailCapacity = remaining! + Buffer.byteLength(omittedTail);
+    const tooLargeTail = "z".repeat(tailCapacity + 1);
+    const fittingTail = "y".repeat(tailCapacity);
 
-    const roots275: MockRoot[] = [
-      { id: "to-0", body: omittedHead, messages: [] },
-      { id: "to-1", body: orderedMid, messages: [] },
-      { id: "to-2", body: tail275, messages: [] }
-    ];
-    const req275 = makeRequest(makeReaders(roots275));
-    const p1_275 = runConditionalFieldRecallWithReceipt(req275);
-    const w1_275 = encodeEnvelope(req275, p1_275);
-    expect(w1_275.results).toHaveLength(2);
-    expect(w1_275.results[0]?.target).toMatchObject({ root_id: "to-0", span: { content_complete: true } });
-    expect(w1_275.results[1]?.payload_available).toBe(false);
-    const p2_275 = runConditionalFieldRecallWithReceipt({ ...req275, continuation: p1_275.index.continuation });
-    const w2_275 = encodeEnvelope(req275, p2_275);
-    expect(w2_275.results).toHaveLength(1);
-    expect(w2_275.results[0]?.content_preview).toBe(tail275);
-    expect(w2_275.results[0]?.target).toMatchObject({ root_id: "to-2", span: { content_end: 275, content_complete: true } });
+    const requestWithTail = (body: string) => makeRequest(makeReaders([
+      ...omittedMidRoots.slice(0, 2), { id: "om-2", body, messages: [] }
+    ]));
+    const oversizeReq = requestWithTail(tooLargeTail);
+    const oversize = runConditionalFieldRecallWithReceipt(oversizeReq);
+    const first = encodeEnvelope(oversizeReq, oversize);
+    expect(first.results).toHaveLength(2);
+    expect(first.results[0]?.target).toMatchObject({ root_id: "om-0", span: { content_complete: true } });
+    expect(first.results[1]?.payload_available).toBe(false);
+    const resumed = runConditionalFieldRecallWithReceipt({ ...oversizeReq, continuation: oversize.index.continuation });
+    const second = encodeEnvelope(oversizeReq, resumed);
+    expect(second.results).toHaveLength(1);
+    expect(second.results[0]?.content_preview).toBe(tooLargeTail);
+    expect(second.results[0]?.target).toMatchObject({ root_id: "om-2",
+      span: { content_end: tailCapacity + 1, content_complete: true } });
 
-    const roots258: MockRoot[] = [
-      { id: "to-0", body: omittedHead, messages: [] },
-      { id: "to-1", body: orderedMid, messages: [] },
-      { id: "to-2", body: tail258, messages: [] }
-    ];
-    const req258 = makeRequest(makeReaders(roots258));
-    const p1_258 = runConditionalFieldRecallWithReceipt(req258);
-    const w1_258 = encodeEnvelope(req258, p1_258);
-    expect(w1_258.results).toHaveLength(3);
-    expect(w1_258.results[1]?.payload_available).toBe(false);
-    expect(w1_258.results[2]?.content_preview).toBe(tail258);
-    expect(w1_258.results[2]?.target).toMatchObject({ root_id: "to-2", span: { content_end: 258, content_complete: true } });
+    const fittingReq = requestWithTail(fittingTail);
+    const fitting = encodeEnvelope(fittingReq, runConditionalFieldRecallWithReceipt(fittingReq));
+    expect(fitting.results).toHaveLength(3);
+    expect(fitting.results[1]?.payload_available).toBe(false);
+    expect(fitting.results[2]?.content_preview).toBe(fittingTail);
+    expect(fitting.results[2]?.target).toMatchObject({ root_id: "om-2",
+      span: { content_end: tailCapacity, content_complete: true } });
     const literalReq = makeRequest(makeReaders(omittedMidRoots.slice(1)));
     const literalExec = runConditionalFieldRecallWithReceipt(literalReq);
     const literalIndex = {

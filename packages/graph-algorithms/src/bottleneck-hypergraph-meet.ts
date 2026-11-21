@@ -1,6 +1,6 @@
 import {
   canonicalRuleStructureKey,
-  clampGrade,
+  requireGrade,
   solveBottleneckHypergraph,
   type BottleneckHypergraphInput,
   type BottleneckWitness,
@@ -35,7 +35,7 @@ export function resolvePriorFixedPoint(
   const arr = new Float64Array(nodeIds.length).fill(-1);
   for (let i = 0; i < nodeIds.length; i += 1) {
     const v = map.get(nodeIds[i]!);
-    if (v !== undefined) arr[i] = clampGrade(v, top);
+    if (v !== undefined) arr[i] = requireGrade(v, top);
   }
   return { map, arr };
 }

@@ -25,12 +25,12 @@ describe("facet collection visits against the request allowance", () => {
       pending_path_effects: { offset: 0, progress_position: 0 } };
     const before = fieldProgressFingerprint(state);
     for (const next of [
-      { ...state, solver_completed_work: 1 },
+      { ...state, solver_retained_work: 1 },
       { ...state, explanation_completed_work: 1 },
       { ...state, support_scan_offset: 1 },
       { ...state, pending_path_effects: { offset: 0, progress_position: 1 } }
     ]) expect(fieldProgressFingerprint(next)).not.toBe(before);
-    expect(fieldProgressFingerprint({ ...state, ...{ support_completed_work: 100 },
+    expect(fieldProgressFingerprint({ ...state, ...{ solver_completed_work: 100, support_completed_work: 100 },
       pending_path_effects: { ...state.pending_path_effects, ...{ completed_work: 100 } } })).toBe(before);
   });
 

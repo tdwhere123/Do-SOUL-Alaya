@@ -26,6 +26,13 @@ describe("mintMemoryObjectKeys", () => {
     expect(complementaryTemporalAliasSurfaces("2/8/2026")).toContain("2026-02-08");
     expect(complementaryTemporalAliasSurfaces("2/8")).toContain("February 8");
     expect(complementaryNumericAliasSurfaces("二十本书")).toContain("20");
+    expect(complementaryNumericAliasSurfaces("我买了3本书")).toContain("三");
+  });
+  it.each(["-5", "+5", "−5", "3.14", "3.0", ".5"])("keeps %s whole when minting cardinal aliases", text => {
+    const keys = mintMemoryObjectKeys({ workspace_id: WORKSPACE, owner_id: OWNER, memory_content: "The recorded value.",
+      evidence: [{ object_id: EVIDENCE, gist: `It was ${text}.`, fact_key_contents: [], osf_graph: null }] });
+    expect(surfacesOf(keys, "numeric_alias")).toEqual([]);
+    expect(complementaryNumericAliasSurfaces(`It was ${text}.`)).toEqual([]);
   });
   it("mints gist-remainder keys that are not already in distilled content", () => {
     const keys = mintMemoryObjectKeys({

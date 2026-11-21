@@ -435,6 +435,18 @@ describe("incremental relation-row join", () => {
     expect(deltaLeaves).toEqual(fullLeaves.filter((ids) => ids.includes("new-q")));
   });
 
+  it("joins compatible prior and delta proofs in three disjoint conjunctive tuples", () => {
+    const program: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "and",
+      premises: [relation("p", "y"), relation("q", "z")] };
+    const state = seeded(program);
+    const prior = [edge("p", "a", "b", "old-p"), edge("q", "a", "c", "old-q")];
+    const delta = [edge("p", "a", "b", "new-p"), edge("q", "a", "c", "new-q")];
+    const effects = adjacencyEffectsForRows([...prior, ...delta], { interpretation: state.interpretation, asOf: AS_OF,
+      overlay: {}, liveStates: state.seen_identities, sourceFacts: facts(["a", "b", "c"]), joinRows: delta });
+    expect(hyperLeaves(effects).map(leaves => [...leaves].sort().join(",")).sort())
+      .toEqual(["new-p,new-q", "new-p,old-q", "new-q,old-p"]);
+  });
+
   it("promotes an old row when a later state supplies the missing target revision", () => {
     const program = relation("p");
     const state = seeded(program);

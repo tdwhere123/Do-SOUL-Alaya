@@ -277,9 +277,12 @@ describe("source assertion boundaries", () => {
     });
   });
 
-  it("grounds a bounded template-slot assertion only when the field and subject are explicit", () => {
-    const source = 'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a coffee shop in the city.';
-    expect(resolveSourceAssertion(source, source)).toEqual({ status: "grounded", assertion: source });
+  it.each(["How We Met", "Meeting Locations"])("rejects unresolved template references under %s", (heading) => {
+    const source = `Under "${heading}", I'll include the location where I met them. For Sophia, it was a coffee shop in the city.`;
+    expect(resolveSourceAssertion(source, source)).toMatchObject({
+      status: "rejected",
+      reason: "source_assertion_not_self_contained"
+    });
   });
 
   it.each([
@@ -320,78 +323,6 @@ describe("source assertion boundaries", () => {
       "By the way, I was thinking of trying out some BBQ ribs for my party, and I remember Alex telling me he marinated them in a special sauce for 24 hours before grilling them to perfection.",
       "I remember Alex telling me he marinated them in a special sauce for 24 hours before grilling them to perfection."
     ],
-    [
-      "Under How We Met, I'll include the location where I met them. For Sophia, it was a cafe.",
-      "Under How We Met, I'll include the location where I met them. For Sophia, it was a cafe."
-    ],
-    [
-      'Under "Favorite Color", I\'ll include the location where I met them. For Sophia, it was a cafe.',
-      'Under "Favorite Color", I\'ll include the location where I met them. For Sophia, it was a cafe.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia and Mark, it was a cafe.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia and Mark, it was a cafe.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe she liked.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe she liked.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the former cafe.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the former cafe.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the same place.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the same place.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the aforementioned cafe.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the aforementioned cafe.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Them, it was a coffee shop.',
-      'Under "How We Met", I\'ll include the location where I met them. For Them, it was a coffee shop.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe near the park by its entrance.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe near the park by its entrance.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the other cafe near the park.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the other cafe near the park.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the previous cafe.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the previous cafe.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe and the park.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe and the park.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe near ours.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe near ours.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe near theirs.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe near theirs.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the red one.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the red one.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a different one.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a different one.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the place.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was the place.'
-    ],
-    [
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe near the place.',
-      'Under "How We Met", I\'ll include the location where I met them. For Sophia, it was a cafe near the place.'
-    ]
   ])("rejects a local pronoun with competing antecedents: %s", (source, matchedText) => {
     expect(resolveSourceAssertion(source, matchedText)).toMatchObject({
       status: "rejected",

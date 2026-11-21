@@ -1,5 +1,5 @@
 import { parseAbsoluteTemporalWindow } from "./absolute-temporal-window.js";
-import { extractTemporalTerms } from "./temporal-terms.js";
+import { temporalTermMatches } from "./temporal-terms.js";
 import { parseRelativeTemporalTerm, resolveRelativeTemporalWindow } from "./temporal-window.js";
 
 /** Inclusive UTC civil-day interval as epoch milliseconds of each day's midnight. */
@@ -47,27 +47,42 @@ export function statementEventIntervals(text: string, sessionDay: number): reado
   const out: EventDayInterval[] = [];
   const push = (startMs: number, endMs: number) => out.push({
     startDay: Math.floor(startMs / DAY_MS) * DAY_MS, endDay: Math.floor(endMs / DAY_MS) * DAY_MS });
-  for (const term of extractTemporalTerms(text)) {
+  const consumed = new Uint8Array(text.length);
+  const overlaps = (match: RegExpMatchArray) =>
+    consumed.subarray(match.index!, match.index! + match[0].length).includes(1);
+  const consume = (match: RegExpMatchArray) => consumed.fill(1, match.index!, match.index! + match[0].length);
+  for (const [pattern, parts] of DATED) for (const match of text.matchAll(pattern)) {
+    if (overlaps(match)) continue;
+    consume(match);
+    const [year, month0, day] = parts(match), ms = validDay(year!, month0!, day!);
+    if (ms !== null) push(ms, ms);
+  }
+  const terms = new Set<string>();
+  for (const match of temporalTermMatches(text)) {
+    if (overlaps(match)) continue;
+    consume(match);
+    const term = match[0].trim();
+    if (terms.has(term) || terms.size >= 64) continue;
+    terms.add(term);
     const relative = parseRelativeTemporalTerm(term.replace(/^a\s+(?=(?:day|week|month|year)s?\s+ago$)/iu, "one "));
     const window = relative === null ? parseAbsoluteTemporalWindow(term) : resolveRelativeTemporalWindow(relative, sessionDay);
     if (window !== null) push(window.startMs, window.endMs);
   }
-  for (const [pattern, parts] of DATED) for (const match of text.matchAll(pattern)) {
-    const [year, month0, day] = parts(match), ms = validDay(year!, month0!, day!);
-    if (ms !== null) push(ms, ms);
-  }
   const year = new Date(sessionDay).getUTCFullYear();
   for (const [pattern, parts] of YEARLESS) for (const match of text.matchAll(pattern)) {
+    if (overlaps(match)) continue;
     const [month0, day] = parts(match);
     const past = [year, year - 1].map(y => validDay(y, month0!, day!)).find(ms => ms !== null && ms <= sessionDay);
     if (past !== undefined && past !== null) push(past, past);
   }
   const weekday = new Date(sessionDay).getUTCDay();
   for (const [pattern, index] of WEEKDAYS) for (const match of text.matchAll(pattern)) {
+    if (overlaps(match)) continue;
     const target = index(match);
     if (target >= 0) { const ms = sessionDay - ((weekday - target + 7) % 7) * DAY_MS; push(ms, ms); }
   }
   for (const match of text.matchAll(CJK_RELATIVE)) {
+    if (overlaps(match)) continue;
     const amount = cjkNumber(match[1]!), unit = match[2] === "天" ? "day" : match[2] === "周" ? "week" : match[2] === "年" ? "year" : "month";
     if (amount !== null) { const window = resolveRelativeTemporalWindow({ kind: "offset", unit, amount: -amount }, sessionDay); push(window.startMs, window.endMs); }
   }

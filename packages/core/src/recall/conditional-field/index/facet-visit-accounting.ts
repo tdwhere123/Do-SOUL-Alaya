@@ -231,7 +231,7 @@ export function fieldProgressFingerprint(state: {
   readonly seeds: { readonly length: number };
   readonly transitions: { readonly length: number };
   readonly grounding_progress?: { readonly completed_work: number };
-  readonly solver_completed_work?: number;
+  readonly solver_retained_work?: number;
   readonly explanation_completed_work?: number;
   readonly support_scan_offset?: number;
   readonly resume_cursors: unknown;
@@ -250,7 +250,7 @@ export function fieldProgressFingerprint(state: {
   return JSON.stringify([
     state?.observations.length ?? 0, state?.seeds.length ?? 0,
     state?.transitions.length ?? 0, state?.grounding_progress?.completed_work ?? 0,
-    state?.solver_completed_work ?? 0, state?.explanation_completed_work ?? 0,
+    state?.solver_retained_work ?? 0, state?.explanation_completed_work ?? 0,
     state?.support_scan_offset ?? 0, state?.pending_path_effects?.progress_position ?? 0,
     state?.resume_cursors ?? {}, state?.pair_progress ?? {}, state?.support_progress ?? {},
     state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {},

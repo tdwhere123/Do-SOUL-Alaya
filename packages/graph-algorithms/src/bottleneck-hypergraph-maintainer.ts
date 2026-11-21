@@ -1,7 +1,7 @@
 import {
   assertValidTop,
   canonicalRuleStructureKey,
-  clampGrade,
+  requireGrade,
   type BottleneckHyperedge,
   type BottleneckWitness
 } from "./bottleneck-hypergraph.js";
@@ -83,7 +83,7 @@ export class MonotonicHypergraphMaintainer {
       for (const [id, raw] of input.initialValues) {
         const idx = this.indexById.get(id);
         if (idx === undefined) continue;
-        this.valuesArr[idx] = clampGrade(raw, this.top);
+        this.valuesArr[idx] = requireGrade(raw, this.top);
         const w = input.initialWitnesses?.get(id);
         if (w !== undefined) this.witnessesArr[idx] = w;
       }
@@ -92,7 +92,7 @@ export class MonotonicHypergraphMaintainer {
       for (const [id, raw] of input.seeds) {
         const idx = this.indexById.get(id);
         if (idx === undefined) continue;
-        const grade = clampGrade(raw, this.top);
+        const grade = requireGrade(raw, this.top);
         this.raiseNode(idx, grade, { kind: "seed", grade });
       }
     }
@@ -144,8 +144,8 @@ export class MonotonicHypergraphMaintainer {
   public raiseSeed(nodeId: string, grade: number, options?: { readonly propagate?: boolean }): void {
     const idx = this.indexById.get(nodeId);
     if (idx === undefined) return;
-    const clamped = clampGrade(grade, this.top);
-    this.raiseNode(idx, clamped, { kind: "seed", grade: clamped });
+    grade = requireGrade(grade, this.top);
+    this.raiseNode(idx, grade, { kind: "seed", grade });
     if (options?.propagate !== false) this.propagate();
   }
 
@@ -169,7 +169,7 @@ export class MonotonicHypergraphMaintainer {
   public upgradeEdge(edgeId: string, newStrength: number, options?: { readonly propagate?: boolean }): void {
     const refs = this.edgeRefsByUserId.get(edgeId);
     if (refs === undefined) return;
-    const nextCap = clampGrade(newStrength, this.top);
+    const nextCap = requireGrade(newStrength, this.top);
     for (const ref of refs) this.upgradeEdgeRef(ref, nextCap);
     if (options?.propagate !== false) this.propagate();
   }
@@ -211,6 +211,8 @@ export class MonotonicHypergraphMaintainer {
       }
       this.notifyAndWatchers(p, val);
     }
+    this.queue.length = 0;
+    this.queueHead = 0;
   }
 
   private notifyAndWatchers(p: number, val: number): void {
@@ -285,7 +287,7 @@ export class MonotonicHypergraphMaintainer {
     if (to === undefined) return;
     const premises = resolveUniquePremises(this.indexById, edge);
     if (premises === undefined) return;
-    const cap = edge.kind === "identity" ? this.top : clampGrade(edge.strength, this.top);
+    const cap = edge.kind === "identity" ? this.top : requireGrade(edge.strength, this.top);
     const structKey = canonicalRuleStructureKey(edge.kind, edge.to, premises.map((p) => this.nodeIds[p]!));
     const compositeKey = edge.id === undefined ? undefined : JSON.stringify([edge.id, structKey]);
     if (compositeKey !== undefined && this.edgeRefByStructAndId.has(compositeKey)) {

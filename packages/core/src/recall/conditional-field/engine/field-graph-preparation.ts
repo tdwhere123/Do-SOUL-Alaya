@@ -229,7 +229,7 @@ function admitSeed(state: PreparedFieldGraph, seed: SeedActivation, coordinate =
   return { ...registered.state, numericValues: result.values,
     changedProduct: registered.node.product,
     values: registered.state.values.with(registered.node, normalizedGrade),
-    queue: prior === normalizedGrade ? registered.state.queue : registered.state.queue.push({ nodeId: registered.id, strength: normalizedGrade }) };
+    queue: result.workQueue };
 }
 
 function admitTransition(state: PreparedFieldGraph, edge: Transition, coordinate = coordinateOf({ transition: edge })): PreparedFieldGraph {

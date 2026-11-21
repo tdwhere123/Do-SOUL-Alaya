@@ -79,6 +79,22 @@ function declaredRule(order: readonly string[], value: StatementAssociation): st
 }
 
 describe("statement key retention and evidence coverage", () => {
+  it("chooses the opening condition by its column quantile even when another cosine is higher", () => {
+    const associate = (a: readonly [number, number], b: readonly [number, number]) => {
+      const retained = new StatementKeyRetention(meter(), noRefusal, ready([1, 0, 0], [0, 1, 0]));
+      for (const [id, [x, y]] of [["a", a], ["b", b]] as const) {
+        retained.consider(id, 0.5, Float32Array.of(x, y, Math.sqrt(1 - x * x - y * y)), auxKey(id, 10));
+      }
+      return retained.associate(["a", "b"], witnesses())!;
+    };
+    const base = associate([0.4, 0.65], [0.2, 0.75]);
+    const transformed = associate([0.8, 0.325], [0.4, 0.375]);
+    expect(base.coverage[0]![0]).toBeLessThan(base.coverage[0]![1]!);
+    expect(transformed.coverage[0]![0]).toBeGreaterThan(transformed.coverage[0]![1]!);
+    expect(base.openings).toEqual([{ statement: 0, span: [10, 20] }, { statement: 1, span: [10, 20] }]);
+    expect(transformed.openings).toEqual(base.openings);
+  });
+
   it("keeps the stable best sixteen keys per root and scores each statement by its best retained key", () => {
     const retained = new StatementKeyRetention(meter(), noRefusal, ready([1, 0], [0, 1]));
     // Seventeen keys: the lowest question cosine (0) is dropped even though it matches statement 1 exactly.

@@ -101,6 +101,9 @@ export async function openWorkspaceSourceTarget(input: Readonly<{
   if (outcome.status === "unavailable") {
     throw new AlayaError("UNAVAILABLE", `Pointer source target read could not complete: ${outcome.reason}`);
   }
+  if (!outcome.row.content_complete && outcome.row.content_end === startOffset) {
+    throw new AlayaError("VALIDATION", "byte_budget cannot fit the UTF-8 character at start_offset.");
+  }
   return buildSourceOpenPointerResponse(outcome.row, input.workspaceId, input.evaluatedAsOf);
 }
 

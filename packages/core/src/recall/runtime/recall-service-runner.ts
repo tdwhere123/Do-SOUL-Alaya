@@ -430,8 +430,9 @@ function runCompiledConditionalFieldRecall(
     remaining_memory_bytes: field.remaining_memory_bytes + progressDelivery.retention_hold },
     { ...input, on_retained_progress: () => { observationAdvanced = true; },
       on_atomic_work_block: recordWorkBlock });
+  const solverAdvanced = (field.solver_retained_work ?? 0) > (reusedCostOwner?.solver_retained_work ?? 0);
   const progress = observedRecallProgressDelivery(progressDelivery, field, { block: observation.block,
-    advanced: observationAdvanced || observedWork.relaxations > 0 || observedWork.state_creates > 0,
+    advanced: observationAdvanced || solverAdvanced || observedWork.state_creates > 0,
     fresh_exploration: freshExploration, fresh_execution: executionBudget.work_units });
   cost.add("index", { charged_retained_bytes: Math.max(0,
     (assessed.admitted_allocation_bytes ?? 0) - (field.admitted_allocation_bytes ?? 0)) });

@@ -12,7 +12,6 @@ import { CoreError } from "../../shared/errors.js";
 import { quoteIndexDeliveryRetention, type ProjectionProgress } from "./index-continuation.js";
 import type { BoundedIndexPayload } from "./index-payload.js";
 import { encodeIndexResults } from "./recall-page-encoding.js";
-import { PAYLOAD_OMITTED_PREVIEW } from "./recall-result-encoding.js";
 import { deliveryBudgetOf, framingReserve } from "./recall-page-fit.js";
 import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
 import type { RequestCostLedger } from "./request-cost-ledger.js";
@@ -229,19 +228,6 @@ function partitionVirtualLiteralPages(
   return exhausted ? null : { fragments, firstVirtualWidth, exceedsPrefixLimit };
 }
 
-function omittedFragmentLiteralBytes(frag: MemorySearchResult): number {
-  const disclosureBytes = frag.source_disclosure === undefined
-    ? 0
-    : Buffer.byteLength(JSON.stringify({ source_disclosure: frag.source_disclosure }));
-  const pointerWarningBytes = frag.evidence_pointers.length === 0 && (frag.staged_warnings?.length ?? 0) === 0
-    ? 0
-    : Buffer.byteLength(JSON.stringify({
-      evidencePointers: frag.evidence_pointers,
-      stagedWarnings: frag.staged_warnings
-    }));
-  return Math.max(1, Buffer.byteLength(PAYLOAD_OMITTED_PREVIEW) + disclosureBytes + pointerWarningBytes);
-}
-
 function selectWidenedDeltaPrefix(
   fragments: readonly MemorySearchResult[],
   maxTotalTokens: number
@@ -258,9 +244,7 @@ function selectWidenedDeltaPrefix(
       if (anchorDisclosure === undefined) anchorDisclosure = frag.source_disclosure;
       else savings = sourceDisclosureFieldByteSavings(frag.source_disclosure, anchorDisclosure);
     }
-    const literalEstimate = frag.payload_available === true
-      ? frag.budget_state.token_estimate
-      : Math.max(frag.budget_state.token_estimate, omittedFragmentLiteralBytes(frag));
+    const literalEstimate = frag.budget_state.token_estimate;
     const nextUsed = cumulativeBytes + literalEstimate - savings;
     if (nextUsed > maxTotalTokens) break;
     cumulativeBytes = nextUsed;
