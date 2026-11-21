@@ -1,23 +1,23 @@
 import { access, constants as fsConstants, stat } from "node:fs/promises";
-import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
-import {
-  localOnnxHostSingleFlightEnabled,
-  type WorkspaceBootstrapReconcileResult
+import { parseEnvBoolean, type EmbeddingStatus } from "@do-soul/alaya-protocol";
+import type {
+  EmbeddingQueryWarmupSummary,
+  WorkspaceBootstrapReconcileResult
 } from "@do-soul/alaya-core";
-import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
-import type { GraphHealthWarning } from "../../services/status/graph-health-service.js";
-import type { GardenCaptureHealth } from "../../garden/host-session/capture-health.js";
-import { resolveEffectiveEmbeddingPosture } from "../../ai/daemon-embedding-runtime-config.js";
-import type { AlayaCliArgsSchema } from "../bridge.js";
-import { writeDoctorAuditSummary } from "./doctor-audit.js";
+import { attachedAgentEnvHoldsConfirmationToken } from "../../attach/attached-agent-mcp-child-env.js";
 import { ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW } from "../../attach/profile-mutation/profile-mutation.js";
+import type { PathPlasticityLookupTelemetrySnapshot } from "../../garden/path-plasticity/path-plasticity-runtime.js";
+import type { BuildInfo } from "../../runtime/daemon/support/build-info.js";
+import { createEmptyGraphHealthSnapshot } from "../../services/status/graph-health-service.js";
+import type { AlayaCliArgsSchema } from "../bridge.js";
+import { doctorAuditCheckStatus, type DoctorAuditSnapshot } from "./doctor-audit.js";
 import type {
   DoctorArgs,
   DoctorBootstrapReconcileSummary,
   DoctorCommandDependencies,
   DoctorReport,
   GardenComputeStatus,
-  GardenKeychainCheck
+  RuntimeWiringStatus
 } from "./doctor.js";
 
 export function doctorArgsSchema(): AlayaCliArgsSchema<DoctorArgs> {
@@ -70,15 +70,7 @@ function parseDoctorWorkspaceFlag(
       readonly ok: false;
       readonly result:
         | ReturnType<typeof duplicateDoctorFlag>
-        | {
-            readonly success: false;
-            readonly error: {
-              readonly issues: readonly {
-                readonly path: readonly number[];
-                readonly message: string;
-              }[];
-            };
-          };
+        | ReturnType<typeof doctorWorkspaceFlagError>;
     } {
   if (duplicate) return { ok: false, result: duplicateDoctorFlag("--workspace", cursor) };
   const next = input[cursor + 1];
@@ -155,23 +147,6 @@ export async function inspectStorageGrowth(
     };
   } catch {
     return { db_size_bytes: null, advisory: "unknown" };
-  }
-}
-
-export function writeHumanSummary(
-  stream: NodeJS.WritableStream,
-  report: DoctorReport,
-  env: NodeJS.ProcessEnv = processEnvLookup()
-): void {
-  writeDoctorCoreSummary(stream, report);
-  writeGardenComputeSummary(stream, report);
-  writeRecallGraphSummary(stream, report, env);
-  writeDoctorAuditSummary(stream, report.audit);
-  writeDoctorProfileSummary(stream, report);
-  if (report.confirmation_token_isolation === "executor_holds_token") {
-    stream.write(
-      "attached MCP executor holds ALAYA_MCP_TOOL_CONFIRMATION_TOKEN; confirmation belongs in an isolated confirmer.\n"
-    );
   }
 }
 
@@ -273,252 +248,6 @@ function readErrnoCode(error: unknown): string | null {
   return typeof code === "string" && code.length > 0 ? code : null;
 }
 
-function writeDoctorCoreSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {
-  stream.write(`doctor overall: ${report.overall}\n`);
-  stream.write(
-    `version: ${report.build_info.version}` +
-      ` git_head: ${shortenGitHead(report.build_info.git_head)}` +
-      ` built_at: ${report.build_info.built_at}\n`
-  );
-  stream.write(`runtime ready: ${report.startup.ready ? "yes" : "no"}\n`);
-  stream.write(`storage db path: ${report.storage.db_path}\n`);
-  stream.write(`storage exists: ${report.storage.exists ? "yes" : "no"}\n`);
-  stream.write(`storage readable: ${report.storage.readable ? "yes" : "no"}\n`);
-  stream.write(`storage writable: ${report.storage.writable ? "yes" : "no"}\n`);
-  if (report.storage.error_code !== null) {
-    stream.write(`storage error_code: ${report.storage.error_code}\n`);
-  }
-  if (report.storage.schema_ok !== null) {
-    stream.write(
-      `storage schema_ok: ${report.storage.schema_ok ? "yes" : "no"}` +
-        ` (persisted=${report.storage.schema_version_persisted ?? "none"}, expected=${
-          report.storage.schema_version_expected ?? "?"
-        })\n`
-    );
-  }
-  stream.write(
-    `storage growth: db_size_bytes=${report.storage_growth.db_size_bytes ?? "unknown"}` +
-      ` advisory=${report.storage_growth.advisory}\n`
-  );
-  if (report.storage_growth.advisory === "large") {
-    stream.write(
-      "storage growth WARNING: the SQLite DB has grown past the advisory" +
-        " threshold; monitor tail latency and plan compaction/retention.\n"
-    );
-  }
-  stream.write(`mcp transport: ${report.mcp.transport}\n`);
-  stream.write(`garden scheduler activity: ${report.garden.status} (recent enqueue/dispatch; task success is separate)\n`);
-  stream.write(`garden schema_ok: ${report.garden.schema_ok ? "yes" : "no"}\n`);
-  if (report.garden_compute.degraded_reason) {
-    stream.write(`garden compute degraded_reason: ${report.garden_compute.degraded_reason}\n`);
-  }
-  stream.write(`garden credential provenance: ${formatGardenCredentialProvenance(report.garden.credential_provenance)}\n`);
-  stream.write(
-    `runtime wiring: request_token=${report.runtime_wiring.request_token_source}` +
-      ` daemon_socket=${report.runtime_wiring.daemon_socket ?? "none"}` +
-      ` wildcard_bind=${report.runtime_wiring.wildcard_bind_opt_in ? "yes" : "no"}` +
-      ` token_workspaces=${report.runtime_wiring.request_token_workspaces ?? "none"}\n`
-  );
-  if (report.runtime_wiring.request_token_source === "ephemeral") {
-    stream.write(
-      "runtime wiring WARNING: ALAYA_REQUEST_TOKEN unset; using a process-generated" +
-        " ephemeral request token (rotates each restart — set ALAYA_REQUEST_TOKEN for a stable token).\n"
-    );
-  }
-  if (report.runtime_wiring.wildcard_bind_opt_in) {
-    stream.write(
-      "runtime wiring WARNING: ALAYA_ALLOW_WILDCARD_BIND=1; wildcard TCP bind still requires loopback or ALAYA_DAEMON_SOCKET.\n"
-    );
-  }
-}
-
-function writeGardenComputeSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {
-  // Surface Garden compute truth so operators can tell whether Garden is
-  // calling out (official_api), running locally (local_heuristics), or
-  // borrowing the embedding key (deprecated embedding-fallback).
-  stream.write(
-    `garden compute: kind=${report.garden_compute.provider_kind}` +
-      ` routing=${report.garden_compute.routing_decision}` +
-      ` model=${report.garden_compute.model_id ?? "default"}` +
-      ` cred=${formatCredentialSource(report.garden_compute.credential_source)}\n`
-  );
-  if (report.garden_compute.keychain_check !== undefined) {
-    stream.write(`${formatGardenKeychainCheck(report.garden_compute.keychain_check)}\n`);
-  }
-  // Auto-extract path: every recall (with turn text) enqueues a turn-text
-  // extract task; tell the operator where those tasks get run so "memory is
-  // not being captured" is diagnosable from doctor alone.
-  stream.write(
-    `recall-driven extraction: ${
-      report.garden_compute.routing_decision === "host_worker"
-        ? "queued for a host worker (provider_kind=host_worker)"
-        : `in-process via ${report.garden_compute.routing_decision}`
-    }\n`
-  );
-  // Surface the zero-own-LLM default's operating mode: under host_worker, tell
-  // the operator whether an attached CLI agent is claiming extract work (LLM
-  // quality) or whether it is aging unclaimed and falling back to the zero-cloud
-  // heuristic — so "attach an agent for better extraction" is diagnosable from
-  // doctor alone.
-  if (report.garden_compute.host_worker_advisory !== undefined) {
-    const advisory = report.garden_compute.host_worker_advisory;
-    if (advisory.attach_worker_recommended) {
-      stream.write(
-        `garden compute WARNING: provider_kind=host_worker is the default and` +
-          ` ${advisory.pending_extract_tasks} recall-driven SOURCE_STATEMENT_SESSION task(s) are unclaimed` +
-          ` (${advisory.stale_claimed_extract_tasks} claimed-then-abandoned),` +
-          ` ${advisory.pending_edge_classify_tasks} EDGE_CLASSIFY task(s) are unclaimed` +
-          ` (${advisory.stale_claimed_edge_classify_tasks} claimed-then-abandoned). Attach Codex /` +
-          ` Claude Code (\`alaya attach <target>\`) for LLM-quality extraction and edge refinement;` +
-          ` unclaimed work falls back to the zero-cloud heuristic after the host-worker wait window.\n`
-      );
-    } else {
-      stream.write(
-        `garden compute: host_worker default — attach a CLI agent for LLM-quality extraction` +
-          ` (zero-cloud heuristic fallback runs if no worker claims).\n`
-      );
-    }
-  }
-  const capture = report.garden_compute.capture;
-  if (capture !== undefined) writeCaptureSummary(stream, capture);
-}
-
-function writeCaptureSummary(stream: NodeJS.WritableStream, capture: GardenCaptureHealth): void {
-  const host = capture.host_session;
-  stream.write(host.captured_messages === 0
-    ? "host session capture: none — the host must call soul.capture_host_session (report_context_usage no longer captures)\n"
-    : `host session capture: messages=${host.captured_messages} excerpt=${host.excerpt_messages}` +
-      ` unbound=${host.unbound_messages} overdue_unbound=${host.overdue_unbound_messages} last=${host.last_captured_at}\n`);
-  const sessions = capture.statement_sessions;
-  stream.write(`statement sessions: ${sessions.failed} failed of the last ${sessions.recent_window}` +
-    (sessions.latest_error === null ? "" : ` (latest: ${sessions.latest_error})`) + "\n");
-  if (capture.legacy_post_turn_unprocessed > 0) {
-    stream.write(`legacy post-turn captures without statements: ${capture.legacy_post_turn_unprocessed}\n`);
-  }
-}
-
-function writeRecallGraphSummary(
-  stream: NodeJS.WritableStream,
-  report: DoctorReport,
-  env: NodeJS.ProcessEnv
-): void {
-  stream.write(
-    `recall path plasticity lookup: count=${report.recall.path_plasticity_lookup.lookup_count}` +
-      ` p99_ms=${report.recall.path_plasticity_lookup.duration_p99_ms ?? "n/a"}` +
-      ` samples=${report.recall.path_plasticity_lookup.sample_count}` +
-      ` window=${report.recall.path_plasticity_lookup.window_size}\n`
-  );
-  stream.write(
-    `graph health: ${report.graph_health.status}` +
-      ` path_relations=${report.graph_health.path_relations_total}` +
-      ` latest_path_event=${report.graph_health.latest_path_event_at ?? "none"}\n`
-  );
-  if (report.graph_health.warnings.length > 0) {
-    stream.write(
-      `graph health warnings: ${formatGraphHealthWarnings(report.graph_health.warnings)}` +
-        ` - ${report.graph_health.hint ?? "Inspect graph/path producers for this workspace."}\n`
-    );
-  }
-  if (report.provider.embedding !== null) {
-    stream.write(
-      `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`
-    );
-    writeLocalOnnxHostSingleFlightHint(stream, env);
-  }
-  if (report.provider.query_embedding_warmup !== null) {
-    stream.write(
-      `query embedding warmup: ${report.provider.query_embedding_warmup.status}` +
-        ` ready=${report.provider.query_embedding_warmup.ready_count}` +
-        ` requested=${report.provider.query_embedding_warmup.requested_count}` +
-        (report.provider.query_embedding_warmup.last_error === undefined
-          ? ""
-          : ` last_error=${report.provider.query_embedding_warmup.last_error}`) +
-        "\n"
-    );
-  }
-  if (report.bootstrap_reconcile !== undefined) {
-    stream.write(`${formatBootstrapReconcileSummary(report.bootstrap_reconcile)}\n`);
-  }
-}
-
-function writeLocalOnnxHostSingleFlightHint(
-  stream: NodeJS.WritableStream,
-  env: NodeJS.ProcessEnv
-): void {
-  const posture = resolveEffectiveEmbeddingPosture((key) => env[key]);
-  if (posture.providerKind !== "local_onnx") {
-    return;
-  }
-  if (localOnnxHostSingleFlightEnabled(env)) {
-    stream.write("local ONNX host single-flight: enabled\n");
-    return;
-  }
-  stream.write(
-    "local ONNX host single-flight: off (set ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT=1 when multiple local ONNX processes share a host)\n"
-  );
-}
-
-function writeDoctorProfileSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {
-  for (const profile of report.attached_profiles) {
-    if (profile.attached_preview === ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW) {
-      stream.write(
-        `attached profile (${profile.target}): MCP env must not contain ALAYA_MCP_TOOL_CONFIRMATION_TOKEN ` +
-          `(${profile.profile_path}).\n`
-      );
-      continue;
-    }
-    if (profile.status === "drifted") {
-      stream.write(
-        `attached profile (${profile.target}): instructions DRIFTED — ` +
-          `host file is older than current source. ` +
-          `Run \`alaya attach ${profile.target}\` to refresh ` +
-          `(${profile.profile_path}).\n`
-      );
-    } else if (profile.status === "in_sync") {
-      stream.write(`attached profile (${profile.target}): in sync\n`);
-    } else if (profile.status === "error") {
-      stream.write(
-        `attached profile (${profile.target}): ERROR reading profile drift` +
-          `${profile.profile_path.length > 0 ? ` (${profile.profile_path})` : ""}\n`
-      );
-    }
-    // status === "absent" is silent — the user may have intentionally not
-    // attached this target.
-  }
-}
-
-function formatGraphHealthWarnings(warnings: readonly GraphHealthWarning[]): string {
-  return warnings.join(",");
-}
-
-function shortenGitHead(head: string): string {
-  if (head === "unknown") {
-    return head;
-  }
-  return head.length >= 7 ? head.slice(0, 7) : head;
-}
-
-function formatCredentialSource(source: GardenComputeStatus["credential_source"]): string {
-  switch (source.kind) {
-    case "env":
-      return `env:${source.name}`;
-    case "file":
-      return `file:${source.masked_path}`;
-    case "keychain":
-      return `keychain:${source.service}:${source.account}`;
-    case "embedding-fallback":
-      return "embedding-fallback (deprecated)";
-    case "none":
-      return "none";
-  }
-}
-
-function formatGardenCredentialProvenance(provenance: GardenCredentialProvenance): string {
-  return provenance.kind === "embedding-fallback"
-    ? "deprecated embedding-fallback"
-    : provenance.kind;
-}
-
 export async function runBootstrapReconcile(
   handler:
     | ((workspaceId: string) => Promise<WorkspaceBootstrapReconcileResult>)
@@ -532,30 +261,13 @@ export async function runBootstrapReconcile(
     const result = await handler(workspaceId);
     switch (result.status) {
       case "planted":
-        return {
-          status: "planted",
-          paths_planted: result.paths_planted,
-          record_id: result.record_id,
-          template_ids: result.template_ids
-        };
+        return { status: "planted", paths_planted: result.paths_planted, record_id: result.record_id, template_ids: result.template_ids };
       case "already_planted":
-        return {
-          status: "already_planted",
-          record_id: result.record_id,
-          relation_count: result.relation_count
-        };
+        return { status: "already_planted", record_id: result.record_id, relation_count: result.relation_count };
       case "corrupt_partial":
-        return {
-          status: "corrupt_partial",
-          record_id: result.record_id,
-          relation_count: result.relation_count,
-          reason: result.reason
-        };
+        return { status: "corrupt_partial", record_id: result.record_id, relation_count: result.relation_count, reason: result.reason };
       case "skipped_no_templates":
-        return {
-          status: "skipped_no_templates",
-          template_ids: result.template_ids
-        };
+        return { status: "skipped_no_templates", template_ids: result.template_ids };
       case "skipped_no_planner":
         return { status: "skipped_no_planner" };
     }
@@ -567,45 +279,212 @@ export async function runBootstrapReconcile(
   }
 }
 
-function formatBootstrapReconcileSummary(summary: DoctorBootstrapReconcileSummary): string {
-  switch (summary.status) {
-    case "planted":
-      return (
-        `bootstrap reconcile: planted ${summary.paths_planted} seed path(s)` +
-        ` (record=${summary.record_id})`
-      );
-    case "already_planted":
-      return (
-        `bootstrap reconcile: already planted` +
-        ` (record=${summary.record_id ?? "absent"}, relations=${summary.relation_count})`
-      );
-    case "corrupt_partial":
-      return (
-        `bootstrap reconcile: corrupt partial state` +
-        ` (record=${summary.record_id}, relations=${summary.relation_count}) - ${summary.reason}`
-      );
-    case "skipped_no_templates":
-      return "bootstrap reconcile: skipped - no configured bootstrap templates";
-    case "skipped_no_planner":
-      return "bootstrap reconcile: skipped - planner not wired";
-    case "skipped_no_handler":
-      return "bootstrap reconcile: skipped - no handler available";
-    case "failed":
-      return `bootstrap reconcile: failed - ${summary.reason}`;
-  }
+export async function readDoctorServices(
+  deps: DoctorCommandDependencies,
+  workspaceId: string,
+  effectiveEnv: NodeJS.ProcessEnv
+) {
+  const toolchainStatus = await deps.getToolchainStatus();
+  const [
+    storage,
+    storageGrowth,
+    embeddingStatus,
+    queryEmbeddingWarmup,
+    mcp,
+    garden,
+    gardenCredentialProvenance,
+    gardenCompute,
+    pathPlasticityLookupTelemetry,
+    graphHealth
+  ] = await Promise.all([
+    inspectStorage(toolchainStatus.db_path, deps.getSchemaSummary),
+    inspectStorageGrowth(toolchainStatus.db_path),
+    deps.getEmbeddingStatus ? await deps.getEmbeddingStatus(workspaceId) : null,
+    deps.getQueryEmbeddingWarmup ? await deps.getQueryEmbeddingWarmup() : null,
+    await deps.getMcpHealth(),
+    await deps.getGardenHealth(),
+    deps.getGardenCredentialProvenance ? await deps.getGardenCredentialProvenance() : ({ kind: "none" } as const),
+    deps.getGardenCompute ? await deps.getGardenCompute(workspaceId) : defaultDoctorGardenCompute(),
+    (await deps.getPathPlasticityLookupTelemetry?.()) ?? defaultPathPlasticityLookupTelemetry(),
+    (await deps.getGraphHealth?.(workspaceId)) ?? createEmptyGraphHealthSnapshot(workspaceId)
+  ]);
+  const runtimeWiring = withRuntimeWiringDefaults(
+    deps.getRuntimeWiring
+      ? await deps.getRuntimeWiring()
+      : resolveRuntimeWiringFromEnv(effectiveEnv)
+  );
+  return {
+    storage,
+    storageGrowth,
+    runtimeWiring,
+    embeddingStatus,
+    queryEmbeddingWarmup,
+    mcp,
+    garden,
+    gardenCredentialProvenance,
+    gardenCompute,
+    pathPlasticityLookupTelemetry,
+    graphHealth
+  };
 }
 
-function formatGardenKeychainCheck(check: GardenKeychainCheck): string {
-  // Defensive: a malformed ref can reach this branch with empty
-  // service/account when keychainCheckField is invoked directly with
-  // an invalid ref string (post-schema-fallback this is unreachable
-  // via the normal doctor pipeline, but the renderer still needs to
-  // render something operator-actionable instead of "keychain::").
-  const ref =
-    check.service === "" || check.account === ""
-      ? "keychain:<malformed>"
-      : `keychain:${check.service}:${check.account}`;
-  return check.ok
-    ? `garden keychain: ok (${ref})`
-    : `garden keychain: unavailable (${ref}) — ${check.remediation}`;
+interface AssembleDoctorReportInput {
+  readonly checkedAt: string;
+  readonly buildInfo: BuildInfo;
+  readonly startup: DoctorReport["startup"];
+  readonly workspaceId: string;
+  readonly services: Awaited<ReturnType<typeof readDoctorServices>>;
+  readonly bootstrapReconcileSummary: DoctorBootstrapReconcileSummary | null;
+  readonly attachedProfiles: DoctorReport["attached_profiles"];
+  readonly audit: DoctorAuditSnapshot;
+  readonly env: NodeJS.ProcessEnv;
+}
+
+export function assembleDoctorReport(input: AssembleDoctorReportInput): DoctorReport {
+  const checks = buildDoctorChecks(
+    input.startup.ready, input.services, input.bootstrapReconcileSummary,
+    input.attachedProfiles, input.audit, input.env
+  );
+  return {
+    checked_at: input.checkedAt,
+    overall: Object.values(checks).every((status) => status === "pass") ? "green" : "degraded",
+    build_info: input.buildInfo,
+    startup: input.startup,
+    storage: input.services.storage,
+    provider: {
+      workspace_id: input.workspaceId,
+      embedding: input.services.embeddingStatus,
+      configured: input.services.embeddingStatus?.provider_configured ?? true,
+      query_embedding_warmup: input.services.queryEmbeddingWarmup
+    },
+    mcp: input.services.mcp,
+    garden: {
+      ...input.services.garden,
+      health_basis: "scheduler_activity",
+      schema_ok: input.services.gardenCompute.schema_ok !== false,
+      credential_provenance: input.services.gardenCredentialProvenance
+    },
+    garden_compute: input.services.gardenCompute,
+    recall: { path_plasticity_lookup: input.services.pathPlasticityLookupTelemetry },
+    graph_health: input.services.graphHealth,
+    runtime_wiring: input.services.runtimeWiring,
+    storage_growth: input.services.storageGrowth,
+    attached_profiles: input.attachedProfiles,
+    audit: input.audit,
+    confirmation_token_isolation: attachedAgentEnvHoldsConfirmationToken(input.env)
+      ? "executor_holds_token"
+      : "ok",
+    ...(input.bootstrapReconcileSummary === null
+      ? {}
+      : { bootstrap_reconcile: input.bootstrapReconcileSummary }),
+    checks
+  };
+}
+
+function resolveRuntimeWiringFromEnv(env: NodeJS.ProcessEnv): RuntimeWiringStatus {
+  const requestToken = env.ALAYA_REQUEST_TOKEN?.trim();
+  const daemonSocket = env.ALAYA_DAEMON_SOCKET?.trim();
+  const tokenWorkspaces = env.ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
+  return {
+    request_token_source:
+      requestToken !== undefined && requestToken.length > 0 ? "env" : "ephemeral",
+    daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
+    wildcard_bind_opt_in: parseEnvBoolean(env.ALAYA_ALLOW_WILDCARD_BIND, "ALAYA_ALLOW_WILDCARD_BIND"),
+    request_token_workspaces:
+      tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
+  };
+}
+
+function withRuntimeWiringDefaults(
+  wiring: RuntimeWiringStatus
+): RuntimeWiringStatus {
+  return {
+    request_token_source: wiring.request_token_source,
+    daemon_socket: wiring.daemon_socket ?? null,
+    wildcard_bind_opt_in: wiring.wildcard_bind_opt_in === true,
+    request_token_workspaces: wiring.request_token_workspaces ?? null
+  };
+}
+
+function defaultDoctorGardenCompute(): GardenComputeStatus {
+  return {
+    provider_kind: "local_heuristics",
+    model_id: null,
+    provider_url: null,
+    credential_source: { kind: "none" },
+    routing_decision: "local_heuristics"
+  };
+}
+
+function defaultPathPlasticityLookupTelemetry(): Readonly<PathPlasticityLookupTelemetrySnapshot> {
+  return {
+    lookup_count: 0,
+    sample_count: 0,
+    duration_p99_ms: null,
+    window_size: 128
+  };
+}
+
+function buildDoctorChecks(
+  daemonReady: boolean,
+  services: Awaited<ReturnType<typeof readDoctorServices>>,
+  bootstrapReconcileSummary: DoctorBootstrapReconcileSummary | null,
+  attachedProfiles: DoctorReport["attached_profiles"],
+  audit: DoctorAuditSnapshot,
+  env: NodeJS.ProcessEnv
+): DoctorReport["checks"] {
+  return {
+    runtime: daemonReady ? "pass" : "fail",
+    storage:
+      services.storage.exists &&
+      services.storage.readable &&
+      services.storage.writable &&
+      services.storage.schema_ok !== false
+        ? "pass"
+        : "fail",
+    provider: resolveProviderCheck(services.embeddingStatus, services.queryEmbeddingWarmup),
+    mcp: services.mcp.transport === "ready" ? "pass" : "fail",
+    garden:
+      services.garden.status === "healthy" &&
+      services.gardenCompute.keychain_check?.ok !== false &&
+      services.gardenCompute.schema_ok !== false &&
+      (services.gardenCompute.capture?.statement_sessions.failed ?? 0) === 0 &&
+      (services.gardenCompute.capture?.host_session.overdue_unbound_messages ?? 0) === 0
+        ? "pass"
+        : "fail",
+    bootstrap_reconcile: resolveBootstrapReconcileCheck(bootstrapReconcileSummary),
+    config:
+      doctorAuditCheckStatus(audit) === "pass" &&
+      attachedProfiles.every((profile) => profile.status !== "error") &&
+      attachedProfiles.every(
+        (profile) => profile.attached_preview !== ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW
+      ) &&
+      !attachedAgentEnvHoldsConfirmationToken(env)
+        ? "pass"
+        : "fail"
+  };
+}
+
+function resolveProviderCheck(
+  embeddingStatus: EmbeddingStatus | null,
+  queryEmbeddingWarmup: EmbeddingQueryWarmupSummary | null
+): "pass" | "fail" {
+  if (queryEmbeddingWarmup?.status === "failed" || queryEmbeddingWarmup?.status === "partial") {
+    return "fail";
+  }
+  if (embeddingStatus === null || embeddingStatus.effective_mode !== "degraded") {
+    return "pass";
+  }
+  return "fail";
+}
+
+function resolveBootstrapReconcileCheck(
+  bootstrapReconcileSummary: DoctorBootstrapReconcileSummary | null
+): "pass" | "fail" {
+  return bootstrapReconcileSummary === null ||
+    bootstrapReconcileSummary.status === "planted" ||
+    bootstrapReconcileSummary.status === "already_planted" ||
+    bootstrapReconcileSummary.status === "skipped_no_templates"
+    ? "pass"
+    : "fail";
 }

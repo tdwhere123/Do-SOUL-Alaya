@@ -7,6 +7,7 @@ import {
   GardenEventType,
   HealthEventKind,
   RuntimeGardenComputeConfigSchema,
+  RuntimeGardenProviderKindSchema,
   RuntimeEmbeddingConfigSchema,
   secretRefScheme,
   SoulHealthJournalRecordedPayloadSchema,
@@ -98,53 +99,18 @@ export async function getRuntimeEmbeddingConfig(
   });
 }
 
-const VALID_GARDEN_PROVIDER_KINDS = new Set<string>([
-  "official_api",
-  "local_heuristics",
-  "host_worker"
-]);
-
 export async function getRuntimeGardenComputeConfig(
   repo: ConfigRepo,
   paths: AlayaConfigPaths,
   warn: (message: string) => void,
   env: NodeJS.ProcessEnv = processEnvLookup()
 ): Promise<RuntimeGardenComputeConfigView> {
-  const persisted = repo.getParsed(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, {
-    parse: (value) => parseGardenComputeConfigWithLegacyFallback(value, "garden-compute config", warn)
+  const rawPersisted = repo.getParsed(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, {
+    parse: (value) => value
   });
   const configEnv = await loadConfigEnv(paths.envPath);
-  const overrides = readGardenComputeEnvOverrides(env, configEnv, persisted?.secret_ref);
-  if (hasUnrepairedPersistedSchemaFailure(persisted, overrides)) {
-    return persisted!;
-  }
-  const secretRef = overrides.secretSelection?.ref ?? null;
-  const providerKind =
-    overrides.providerKind ??
-    persisted?.provider_kind ??
-    resolveProductGardenProviderKind(overrides.declaredProviderKind, secretRef !== null);
-  const modelId =
-    overrides.modelId ?? (persisted !== null ? persisted.model_id : OFFICIAL_API_GARDEN_MODEL);
-  const providerUrl = overrides.providerUrl ?? persisted?.provider_url ?? null;
-  const providerKindOverridden =
-    overrides.providerKind !== null && persisted !== null && overrides.providerKind !== persisted.provider_kind;
-  const enabled =
-    !providerKindOverridden && persisted !== null
-      ? persisted.enabled
-      : providerKind === "official_api" && secretRef !== null;
-
-  return parseGardenComputeConfigWithLegacyFallback(
-    {
-      config_version: persisted?.config_version ?? CURRENT_CONFIG_VERSION,
-      provider_kind: providerKind,
-      model_id: modelId,
-      provider_url: providerUrl,
-      secret_ref: secretRef,
-      enabled
-    },
-    "garden-compute config",
-    warn
-  );
+  const candidate = mergeGardenComputeRawWithEnv(rawPersisted, env, configEnv);
+  return parseGardenComputeConfigWithLegacyFallback(candidate, "garden-compute config", warn);
 }
 
 export async function patchRuntimeEmbeddingConfig(input: Readonly<{
@@ -428,31 +394,57 @@ function readGardenComputeEnvOverrides(
 ) {
   const readEnv = (key: string) => env[key] ?? configEnv.get(key);
   const declaredProviderKind = readNonEmptyEnv(readEnv(ALAYA_GARDEN_PROVIDER_KIND_ENV));
+  const parsedProviderKind =
+    declaredProviderKind === null ? null : RuntimeGardenProviderKindSchema.safeParse(declaredProviderKind);
   return {
     secretSelection: selectEffectiveGardenSecretRef(env, configEnv, persistedSecretRef),
     modelId: readNonEmptyEnv(readEnv(OFFICIAL_API_GARDEN_MODEL_ENV)),
     providerUrl: readNonEmptyEnv(readEnv(OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),
     declaredProviderKind,
-    providerKind:
-      declaredProviderKind !== null && VALID_GARDEN_PROVIDER_KINDS.has(declaredProviderKind)
-        ? (declaredProviderKind as RuntimeGardenComputeConfig["provider_kind"])
-        : null
+    providerKind: parsedProviderKind?.success ? parsedProviderKind.data : null
   };
 }
 
-function hasUnrepairedPersistedSchemaFailure(
-  persisted: RuntimeGardenComputeConfigView | null,
-  overrides: ReturnType<typeof readGardenComputeEnvOverrides>
-): boolean {
-  return (
-    persisted !== null &&
-    persisted.degraded_reason !== undefined &&
-    persisted.degraded_reason !== null &&
-    overrides.secretSelection === null &&
-    overrides.modelId === null &&
-    overrides.providerUrl === null &&
-    overrides.providerKind === null
-  );
+function mergeGardenComputeRawWithEnv(
+  rawPersisted: unknown,
+  env: NodeJS.ProcessEnv,
+  configEnv: ReadonlyMap<string, string>
+): unknown {
+  if (rawPersisted === null) {
+    return buildDefaultGardenComputeCandidate(env, configEnv);
+  }
+  if (typeof rawPersisted !== "object" || Array.isArray(rawPersisted)) {
+    return rawPersisted;
+  }
+  const persisted = rawPersisted as Record<string, unknown>;
+  const persistedSecretRef = typeof persisted.secret_ref === "string" ? persisted.secret_ref : undefined;
+  const overrides = readGardenComputeEnvOverrides(env, configEnv, persistedSecretRef);
+  return {
+    ...persisted,
+    ...(overrides.providerKind !== null ? { provider_kind: overrides.providerKind } : {}),
+    ...(overrides.modelId !== null ? { model_id: overrides.modelId } : {}),
+    ...(overrides.providerUrl !== null ? { provider_url: overrides.providerUrl } : {}),
+    ...(overrides.secretSelection !== null ? { secret_ref: overrides.secretSelection.ref } : {})
+  };
+}
+
+function buildDefaultGardenComputeCandidate(
+  env: NodeJS.ProcessEnv,
+  configEnv: ReadonlyMap<string, string>
+) {
+  const overrides = readGardenComputeEnvOverrides(env, configEnv);
+  const secretRef = overrides.secretSelection?.ref ?? null;
+  const providerKind =
+    overrides.providerKind ??
+    resolveProductGardenProviderKind(overrides.declaredProviderKind, secretRef !== null);
+  return {
+    config_version: CURRENT_CONFIG_VERSION,
+    provider_kind: providerKind,
+    model_id: overrides.modelId ?? OFFICIAL_API_GARDEN_MODEL,
+    provider_url: overrides.providerUrl,
+    secret_ref: secretRef,
+    enabled: providerKind === "official_api" && secretRef !== null
+  };
 }
 
 async function defaultRuntimeGardenComputeConfig(
@@ -461,23 +453,8 @@ async function defaultRuntimeGardenComputeConfig(
   env: NodeJS.ProcessEnv = processEnvLookup()
 ): Promise<RuntimeGardenComputeConfig> {
   const configEnv = await loadConfigEnv(paths.envPath);
-  const overrides = readGardenComputeEnvOverrides(env, configEnv);
-  const secretRef = overrides.secretSelection?.ref ?? null;
-  const modelId = overrides.modelId ?? OFFICIAL_API_GARDEN_MODEL;
-  const providerKind = resolveProductGardenProviderKind(
-    overrides.declaredProviderKind,
-    secretRef !== null
-  );
-
   return parseGardenComputeConfigWithLegacyFallback(
-    {
-      config_version: CURRENT_CONFIG_VERSION,
-      provider_kind: providerKind,
-      model_id: modelId,
-      provider_url: overrides.providerUrl,
-      secret_ref: secretRef,
-      enabled: providerKind === "official_api" && secretRef !== null
-    },
+    buildDefaultGardenComputeCandidate(env, configEnv),
     "garden-compute env defaults",
     warn
   );

@@ -25,8 +25,23 @@ export function resolveAlayaConfigDir(environment, platform = process.platform, 
   return path.resolve(resolveHomeDirectory(environment, homeDir), ".config", "alaya");
 }
 
-export function resolveConfiguredDatabasePath(tomlPath, environment, fallbackPath, launchCwd = process.cwd()) {
-  return resolveConfiguredDatabasePathFromToml(readOptionalToml(tomlPath), environment, fallbackPath, launchCwd);
+export function resolveConfiguredDatabasePath(
+  tomlPath,
+  environment,
+  fallbackPath,
+  launchCwd = process.cwd(),
+  envPath = path.join(path.dirname(tomlPath), ".env")
+) {
+  const effectiveEnvironment =
+    environment.DATA_DIR !== undefined
+      ? environment
+      : { ...environment, DATA_DIR: readConfigEnvDataDir(envPath) };
+  return resolveConfiguredDatabasePathFromToml(
+    readOptionalFile(tomlPath),
+    effectiveEnvironment,
+    fallbackPath,
+    launchCwd
+  );
 }
 
 // null is a captured absent file, not permission to re-read mutable config.
@@ -44,9 +59,9 @@ export function resolveConfiguredDatabasePathFromToml(tomlContent, environment, 
   return path.resolve(launchCwd, fallbackPath);
 }
 
-function readOptionalToml(tomlPath) {
+function readOptionalFile(filePath) {
   try {
-    return readFileSync(tomlPath, "utf8");
+    return readFileSync(filePath, "utf8");
   } catch (error) {
     if (isNodeErrorWithCode(error, "ENOENT")) {
       return null;
@@ -55,12 +70,46 @@ function readOptionalToml(tomlPath) {
   }
 }
 
+function readConfigEnvDataDir(envPath) {
+  const content = readOptionalFile(envPath);
+  if (content === null) {
+    return undefined;
+  }
+  let found;
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith("#")) {
+      continue;
+    }
+    const separator = line.indexOf("=");
+    if (separator <= 0 || line.slice(0, separator).trim() !== "DATA_DIR") {
+      continue;
+    }
+    found = parseDotEnvValue(line.slice(separator + 1).trim());
+  }
+  return found;
+}
+
+function parseDotEnvValue(rawValue) {
+  if (rawValue.startsWith("\"")) {
+    if (!rawValue.endsWith("\"") || rawValue.length === 1) {
+      throw new Error("Invalid quoted .env value for DATA_DIR.");
+    }
+    return rawValue.slice(1, -1).replace(/\\(["\\])/gu, "$1");
+  }
+  return rawValue;
+}
+
 export function parseStorageDbPathFromToml(tomlContent) {
   const lines = tomlContent.split(/\r?\n/u);
   let section = null;
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (line.length === 0 || line.startsWith("#")) {
+      continue;
+    }
+    if (/^\[\[[^\]]+\]\]\s*(?:#.*)?$/u.test(line)) {
+      section = null;
       continue;
     }
     const sectionMatch = line.match(/^\[([^\]]+)\]\s*(?:#.*)?$/u);

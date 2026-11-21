@@ -31,7 +31,7 @@ import { createConfigService } from "../../services/config/config-service.js";
 import { applyRuntimeEmbeddingConfigFiles } from "../../services/env-file/env-file-service.js";
 
 import { resolveAlayaConfigPaths } from "../../cli/support/config-files.js";
-import { createServiceHarness } from "./routes-config-port.harness.js";
+import { createMemoryConfigRepo, createServiceHarness } from "./routes-config-port.harness.js";
 
 describe("routes-config port batch", () => {
 
@@ -118,16 +118,51 @@ describe("routes-config port batch", () => {
       secret_ref: "file:/tmp/updated-garden-secret",
       model_id: "process-garden-model",
       provider_url: "https://persisted.example.test/v1",
-      enabled: true
+      enabled: false
     });
     await expect(harness.service.getGardenCredentialProvenance()).resolves.toEqual({ kind: "file" });
 
     // process.env overrides .env and persisted row for secret_ref too.
     env.ALAYA_OFFICIAL_GARDEN_SECRET_REF = "env:PROCESS_GARDEN_KEY";
     await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
-      secret_ref: "env:PROCESS_GARDEN_KEY"
+      secret_ref: "env:PROCESS_GARDEN_KEY",
+      enabled: false
     });
     await expect(harness.service.getGardenCredentialProvenance()).resolves.toEqual({ kind: "env" });
+  });
+
+  it("keeps degraded_reason when env overrides only model on a persisted schema-invalid row", async () => {
+    const repo = createMemoryConfigRepo();
+    repo.setParsed(
+      "runtime:garden-compute",
+      {
+        config_version: 1,
+        provider_kind: "bogus_provider",
+        provider_url: null,
+        secret_ref: null,
+        model_id: null,
+        enabled: false
+      },
+      { parse: (value) => value as Record<string, unknown> }
+    );
+    const env: NodeJS.ProcessEnv = {
+      OFFICIAL_API_GARDEN_MODEL: "gpt-4.1-mini"
+    };
+    const harness = await createServiceHarness({ repo, env });
+
+    await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      enabled: false,
+      degraded_reason: "schema_invalid"
+    });
+
+    env.ALAYA_GARDEN_PROVIDER_KIND = "official_api";
+    await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      provider_kind: "official_api",
+      model_id: "gpt-4.1-mini",
+      enabled: false
+    });
+    const repaired = await harness.service.getRuntimeGardenComputeConfig();
+    expect(repaired.degraded_reason).toBeUndefined();
   });
 
   it("normalizes env secret mode in daemon service, writes only file refs publicly, and keeps plaintext out of audit/env", async () => {

@@ -72,4 +72,47 @@ db_path = "folder\tname.db"`)).toBe(String.raw`folder\tname.db`);
       expect(await readFile(installerPath!, "utf8")).toBe(cwdName);
     }
   });
+
+  it("stops [storage] parsing at [[array.of.tables]] headers and matches daemon .env DATA_DIR precedence", async () => {
+    expect(
+      parseStorageDbPathFromToml("[storage]\n[[backup.targets]]\ndb_path = \"ignored/backup.db\"\n")
+    ).toBeNull();
+    expect(
+      parseStorageDbPathFromToml("[[storage]]\ndb_path = \"ignored/array-table.db\"\n")
+    ).toBeNull();
+
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), "alaya-dotenv-data-dir-")));
+    roots.push(root);
+    const configDir = path.join(root, "config");
+    const launchCwd = path.join(root, "launch");
+    await mkdir(configDir);
+    await mkdir(launchCwd);
+    await writeFile(path.join(configDir, ".env"), "DATA_DIR=dotenv-data\n", "utf8");
+
+    const envWithoutDataDir: NodeJS.ProcessEnv = { ...process.env, ALAYA_CONFIG_DIR: configDir };
+    delete envWithoutDataDir.DATA_DIR;
+    const expectedFromDotenv = path.join(launchCwd, "dotenv-data", "alaya.db");
+    expect(
+      await resolveConfiguredDatabasePath(resolveAlayaConfigPaths(configDir), {
+        env: envWithoutDataDir,
+        launchCwd,
+        fallbackPath: path.join(configDir, "alaya.db")
+      })
+    ).toBe(expectedFromDotenv);
+    const locatorFromDotenv = execFileSync(process.execPath, [locator], {
+      cwd: launchCwd,
+      env: envWithoutDataDir,
+      encoding: "utf8"
+    });
+    expect(locatorFromDotenv.trim().split("\t")).toEqual([configDir, expectedFromDotenv]);
+
+    const envWithProcessDataDir = { ...envWithoutDataDir, DATA_DIR: "process-data" };
+    const expectedFromProcess = path.join(launchCwd, "process-data", "alaya.db");
+    const locatorFromProcess = execFileSync(process.execPath, [locator], {
+      cwd: launchCwd,
+      env: envWithProcessDataDir,
+      encoding: "utf8"
+    });
+    expect(locatorFromProcess.trim().split("\t")).toEqual([configDir, expectedFromProcess]);
+  });
 });

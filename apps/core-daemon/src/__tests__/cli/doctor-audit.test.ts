@@ -83,6 +83,13 @@ describe("doctor audit snapshot", () => {
     const brokenTemporal = readDoctorAuditSnapshot(brokenTemporalPath, {});
     expect(brokenTemporal.temporal_projection.schema).toBe("error");
     expect(doctorAuditCheckStatus(brokenTemporal)).toBe("fail");
+
+    const regularParentFile = path.join(work, "not-a-directory");
+    writeFileSync(regularParentFile, "regular-file", "utf8");
+    const enotdir = readDoctorAuditSnapshot(path.join(regularParentFile, "alaya.db"), {});
+    expect(enotdir.temporal_projection.schema).toBe("error");
+    expect(enotdir.temporal_projection.error).toBeTruthy();
+    expect(doctorAuditCheckStatus(enotdir)).toBe("fail");
   });
 
   it("reads injected env instead of raw process.env", () => {

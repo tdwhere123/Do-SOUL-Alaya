@@ -1,4 +1,4 @@
-import { parseEnvBoolean, type EmbeddingStatus, type ToolchainStatus } from "@do-soul/alaya-protocol";
+import type { EmbeddingStatus, ToolchainStatus } from "@do-soul/alaya-protocol";
 import { mergeDaemonEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import { loadConfigEnv } from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "../support/config-files.js";
@@ -14,22 +14,23 @@ import type { GardenCaptureHealth } from "../../garden/host-session/capture-heal
 import type { PathPlasticityLookupTelemetrySnapshot } from "../../garden/path-plasticity/path-plasticity-runtime.js";
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
 import type { ResolveSecretError } from "../../secrets/index.js";
-import { detectAttachedProfileInstructionsDrift, type ProfileInstructionsDriftReport, type ProfileTarget } from "../../attach/index.js";
-import { ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW } from "../../attach/profile-mutation/profile-mutation.js";
-import { attachedAgentEnvHoldsConfirmationToken } from "../../attach/attached-agent-mcp-child-env.js";
+import {
+  detectAttachedProfileInstructionsDrift,
+  type ProfileInstructionsDriftReport,
+  type ProfileTarget
+} from "../../attach/index.js";
 import { ALAYA_SYSEXITS, type AlayaCliContext, type AlayaCliResult, type AlayaSubcommandSpec } from "../bridge.js";
 import { resolveCliWorkspaceContext } from "../support/workspace-context.js";
-import {
-  createEmptyGraphHealthSnapshot,
-  type GraphHealthSnapshot
-} from "../../services/status/graph-health-service.js";
+import type { GraphHealthSnapshot } from "../../services/status/graph-health-service.js";
 import type { BuildInfo } from "../../runtime/daemon/support/build-info.js";
+import { readDoctorAuditSnapshot, type DoctorAuditSnapshot } from "./doctor-audit.js";
 import {
-  doctorAuditCheckStatus,
-  readDoctorAuditSnapshot,
-  type DoctorAuditSnapshot
-} from "./doctor-audit.js";
-import { doctorArgsSchema, inspectStorage, inspectStorageGrowth, runBootstrapReconcile, writeHumanSummary } from "./doctor-support.js";
+  assembleDoctorReport,
+  doctorArgsSchema,
+  readDoctorServices,
+  runBootstrapReconcile
+} from "./doctor-support.js";
+import { writeHumanSummary } from "./doctor-summary.js";
 
 const UNKNOWN_BUILD_INFO: BuildInfo = {
   version: "0.0.0-dev",
@@ -59,21 +60,7 @@ export interface GardenComputeStatus {
   readonly routing_decision: "official_api" | "local_heuristics" | "host_worker";
   readonly schema_ok?: boolean;
   readonly degraded_reason?: string | null;
-  // Present only when the active Garden secret_ref is keychain:<service>:<account>.
   readonly keychain_check?: GardenKeychainCheck;
-  // Present only under the host_worker product default. Surfaces whether
-  // recall-driven host-worker work is waiting for an attached CLI agent (LLM
-  // quality) or being left to the zero-cloud heuristic fallback.
-  // pending_extract_tasks counts unclaimed SOURCE_STATEMENT_SESSION tasks;
-  // stale_claimed_extract_tasks counts tasks a worker claimed but abandoned past
-  // the stale window (reclaimed back to pending on the next scheduler pass).
-  // pending_edge_classify_tasks / stale_claimed_edge_classify_tasks carry the
-  // same split for EDGE_CLASSIFY tasks (the LLM-quality edge verdict): unclaimed
-  // means heuristic edges that have not been refined by any host worker.
-  // attach_worker_recommended is true when there is unclaimed extract OR
-  // edge-classify work — the operator should attach Codex / Claude Code for
-  // LLM-quality processing, else Alaya runs on the deterministic heuristic after
-  // the wait window.
   readonly host_worker_advisory?: Readonly<{
     readonly pending_extract_tasks: number;
     readonly stale_claimed_extract_tasks: number;
@@ -81,7 +68,6 @@ export interface GardenComputeStatus {
     readonly stale_claimed_edge_classify_tasks: number;
     readonly attach_worker_recommended: boolean;
   }>;
-  // Present when the garden task repo is wired.
   readonly capture?: GardenCaptureHealth;
 }
 
@@ -95,7 +81,7 @@ export type GardenKeychainCheck =
       readonly remediation: string;
     }>;
 
-interface RuntimeWiringStatus {
+export interface RuntimeWiringStatus {
   readonly request_token_source: "env" | "ephemeral" | "rotated";
   readonly daemon_socket: string | null;
   readonly wildcard_bind_opt_in: boolean;
@@ -104,12 +90,6 @@ interface RuntimeWiringStatus {
 
 export interface DoctorCommandDependencies {
   readonly getToolchainStatus: () => Promise<ToolchainStatus>;
-  /**
-   * Report the daemon's live request-protection wiring (token / origin source).
-   * When omitted, doctor derives a conservative snapshot from processEnvLookup() using
-   * the same rule as createRequestProtection, so `alaya doctor` still surfaces
-   * an ephemeral-token warning without a running daemon.
-   */
   readonly getRuntimeWiring?: () => RuntimeWiringStatus | Promise<RuntimeWiringStatus>;
   readonly getEmbeddingStatus?: (workspaceId: string) => Promise<EmbeddingStatus>;
   readonly getQueryEmbeddingWarmup?: () =>
@@ -119,17 +99,9 @@ export interface DoctorCommandDependencies {
   readonly getMcpHealth: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
   readonly getGardenHealth: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
   readonly getGardenCredentialProvenance?: () => Promise<GardenCredentialProvenance>;
-  // see also: WorkspaceService.reconcileBootstrapPaths; idempotent re-plant
-  // for workspaces created before migration 042.
   readonly reconcileBootstrapPaths?: (
     workspaceId: string
   ) => Promise<WorkspaceBootstrapReconcileResult>;
-  /**
-   * Surface Garden compute provider truth (kind / model / credential /
-   * routing) so operators can tell official_api from local_heuristics from
-   * the deprecated embedding-fallback. When omitted, doctor reports a
-   * conservative "local_heuristics + none" snapshot.
-   */
   readonly getGardenCompute?: (workspaceId: string) => Promise<GardenComputeStatus> | GardenComputeStatus;
   readonly getPathPlasticityLookupTelemetry?: () =>
     | Readonly<PathPlasticityLookupTelemetrySnapshot>
@@ -137,11 +109,6 @@ export interface DoctorCommandDependencies {
   readonly getGraphHealth?: (workspaceId: string) =>
     | Readonly<GraphHealthSnapshot>
     | Promise<Readonly<GraphHealthSnapshot>>;
-  /**
-   * Optional schema readiness probe. When provided, doctor reports
-   * `storage.schema_ok` so an operator can tell apart "db file exists and is
-   * writable" from "db is fully migrated for this binary".
-   */
   readonly getSchemaSummary?: (
     dbPath: string
   ) => Promise<Readonly<{ persistedMaxVersion: number | null; knownMaxVersion: number; schemaOk: boolean }>>;
@@ -150,12 +117,6 @@ export interface DoctorCommandDependencies {
   ) => readonly DaemonStartupStepRecord[];
   readonly defaultWorkspaceId?: string;
   readonly clock?: () => string;
-  /**
-   * Build-time stamp (version / git_head / built_at) that doctor surfaces
-   * so operators can tell which binary the daemon is running. When omitted,
-   * doctor renders a "0.0.0-dev / unknown / unknown" sentinel — convenient
-   * for unit tests and for source runs without a built dist/build-info.json.
-   */
   readonly getBuildInfo?: () => BuildInfo;
 }
 
@@ -186,9 +147,6 @@ export type DoctorBootstrapReconcileSummary = Readonly<
       readonly status: "skipped_no_templates";
       readonly template_ids: readonly string[];
     }
-  // skipped_no_templates is a normal wired-daemon outcome when no
-  // ontology-approved bootstrap seeds are configured. skipped_no_planner /
-  // skipped_no_handler remain defence-in-depth arms for partial harnesses.
   | { readonly status: "skipped_no_planner" }
   | { readonly status: "skipped_no_handler" }
   | { readonly status: "failed"; readonly reason: string }
@@ -245,11 +203,7 @@ export interface DoctorReport {
     readonly path_plasticity_lookup: Readonly<PathPlasticityLookupTelemetrySnapshot>;
   }>;
   readonly graph_health: Readonly<GraphHealthSnapshot>;
-  // Surfaces the daemon's request-protection wiring so an operator can tell an
-  // ephemeral (process-generated) request token apart from an env-supplied one.
   readonly runtime_wiring: RuntimeWiringStatus;
-  // Conservative storage-growth signal: the on-disk DB size plus a coarse
-  // advisory. "unknown" when the DB is absent/unreadable.
   readonly storage_growth: Readonly<{
     readonly db_size_bytes: number | null;
     readonly advisory: "ok" | "large" | "unknown";
@@ -257,12 +211,9 @@ export interface DoctorReport {
   readonly attached_profiles: ReadonlyArray<ProfileInstructionsDriftReport>;
   readonly audit: DoctorAuditSnapshot;
   readonly confirmation_token_isolation: "ok" | "executor_holds_token";
-  // Present only when --reconcile-bootstrap is requested.
   readonly bootstrap_reconcile?: DoctorBootstrapReconcileSummary;
   readonly checks: Readonly<Record<DoctorCheckName, DoctorCheckStatus>>;
 }
-
-const PROFILE_TARGETS: readonly ProfileTarget[] = ["codex", "claude-code"];
 
 export function createDoctorCommand(
   deps: DoctorCommandDependencies
@@ -320,62 +271,17 @@ async function buildDoctorReport(
     : null;
   const attachedProfiles = await readAttachedProfileDrift(ctx.env);
   const audit = readDoctorAuditSnapshot(services.storage.db_path, effectiveEnv);
-  const checks = buildDoctorChecks(
-    startup.ready,
+  return assembleDoctorReport({
+    checkedAt: now(),
+    buildInfo: deps.getBuildInfo?.() ?? UNKNOWN_BUILD_INFO,
+    startup,
+    workspaceId,
     services,
     bootstrapReconcileSummary,
     attachedProfiles,
     audit,
-    ctx.env
-  );
-  return {
-    checked_at: now(),
-    overall: Object.values(checks).every((status) => status === "pass") ? "green" : "degraded",
-    build_info: deps.getBuildInfo?.() ?? UNKNOWN_BUILD_INFO,
-    startup,
-    storage: services.storage,
-    provider: {
-      workspace_id: workspaceId,
-      embedding: services.embeddingStatus,
-      configured: services.embeddingStatus?.provider_configured ?? true,
-      query_embedding_warmup: services.queryEmbeddingWarmup
-    },
-    mcp: services.mcp,
-    garden: {
-      ...services.garden,
-      health_basis: "scheduler_activity",
-      schema_ok: services.gardenCompute.schema_ok !== false,
-      credential_provenance: services.gardenCredentialProvenance
-    },
-    garden_compute: services.gardenCompute,
-    recall: {
-      path_plasticity_lookup: services.pathPlasticityLookupTelemetry
-    },
-    graph_health: services.graphHealth,
-    runtime_wiring: services.runtimeWiring,
-    storage_growth: services.storageGrowth,
-    attached_profiles: attachedProfiles,
-    audit,
-    confirmation_token_isolation: attachedAgentEnvHoldsConfirmationToken(ctx.env)
-      ? "executor_holds_token"
-      : "ok",
-    ...(bootstrapReconcileSummary === null ? {} : { bootstrap_reconcile: bootstrapReconcileSummary }),
-    checks
-  };
-}
-
-function resolveRuntimeWiringFromEnv(env: NodeJS.ProcessEnv): RuntimeWiringStatus {
-  const requestToken = env.ALAYA_REQUEST_TOKEN?.trim();
-  const daemonSocket = env.ALAYA_DAEMON_SOCKET?.trim();
-  const tokenWorkspaces = env.ALAYA_REQUEST_TOKEN_WORKSPACES?.trim();
-  return {
-    request_token_source:
-      requestToken !== undefined && requestToken.length > 0 ? "env" : "ephemeral",
-    daemon_socket: daemonSocket !== undefined && daemonSocket.length > 0 ? daemonSocket : null,
-    wildcard_bind_opt_in: parseEnvBoolean(env.ALAYA_ALLOW_WILDCARD_BIND, "ALAYA_ALLOW_WILDCARD_BIND"),
-    request_token_workspaces:
-      tokenWorkspaces !== undefined && tokenWorkspaces.length > 0 ? tokenWorkspaces : null
-  };
+    env: ctx.env
+  });
 }
 
 function readDoctorStartup(
@@ -386,42 +292,25 @@ function readDoctorStartup(
   return assessStartupReadiness(startupSteps);
 }
 
-async function readDoctorServices(
-  deps: DoctorCommandDependencies,
-  workspaceId: string,
-  effectiveEnv: NodeJS.ProcessEnv
-) {
-  const toolchainStatus = await deps.getToolchainStatus();
-  const [storage, storageGrowth, embeddingStatus, queryEmbeddingWarmup, mcp, garden, gardenCredentialProvenance, gardenCompute, pathPlasticityLookupTelemetry, graphHealth] = await Promise.all([
-    inspectStorage(toolchainStatus.db_path, deps.getSchemaSummary),
-    inspectStorageGrowth(toolchainStatus.db_path),
-    deps.getEmbeddingStatus ? await deps.getEmbeddingStatus(workspaceId) : null,
-    deps.getQueryEmbeddingWarmup ? await deps.getQueryEmbeddingWarmup() : null,
-    await deps.getMcpHealth(),
-    await deps.getGardenHealth(),
-    deps.getGardenCredentialProvenance ? await deps.getGardenCredentialProvenance() : ({ kind: "none" } as const),
-    deps.getGardenCompute ? await deps.getGardenCompute(workspaceId) : defaultDoctorGardenCompute(),
-    (await deps.getPathPlasticityLookupTelemetry?.()) ?? defaultPathPlasticityLookupTelemetry(),
-    (await deps.getGraphHealth?.(workspaceId)) ?? createEmptyGraphHealthSnapshot(workspaceId)
-  ]);
-  const runtimeWiring = withRuntimeWiringDefaults(
-    deps.getRuntimeWiring
-      ? await deps.getRuntimeWiring()
-      : resolveRuntimeWiringFromEnv(effectiveEnv)
+const PROFILE_TARGETS: readonly ProfileTarget[] = ["codex", "claude-code"];
+
+async function readAttachedProfileDrift(
+  env: NodeJS.ProcessEnv
+): Promise<readonly ProfileInstructionsDriftReport[]> {
+  return await Promise.all(
+    PROFILE_TARGETS.map(async (target) => {
+      try {
+        return await detectAttachedProfileInstructionsDrift(target, { env });
+      } catch {
+        return {
+          target,
+          profile_path: "",
+          status: "error",
+          attached_preview: null
+        } as const satisfies ProfileInstructionsDriftReport;
+      }
+    })
   );
-  return {
-    storage,
-    storageGrowth,
-    runtimeWiring,
-    embeddingStatus,
-    queryEmbeddingWarmup,
-    mcp,
-    garden,
-    gardenCredentialProvenance,
-    gardenCompute,
-    pathPlasticityLookupTelemetry,
-    graphHealth
-  };
 }
 
 export const GARDEN_STALE_PASS_INTERVALS = 2;
@@ -455,117 +344,4 @@ export function assessGardenPassHealth(
     return "degraded";
   }
   return "healthy";
-}
-
-function defaultDoctorGardenCompute(): GardenComputeStatus {
-  return {
-    provider_kind: "local_heuristics",
-    model_id: null,
-    provider_url: null,
-    credential_source: { kind: "none" },
-    routing_decision: "local_heuristics"
-  };
-}
-
-function defaultPathPlasticityLookupTelemetry(): Readonly<PathPlasticityLookupTelemetrySnapshot> {
-  return {
-    lookup_count: 0,
-    sample_count: 0,
-    duration_p99_ms: null,
-    window_size: 128
-  };
-}
-
-async function readAttachedProfileDrift(
-  env: NodeJS.ProcessEnv
-): Promise<readonly ProfileInstructionsDriftReport[]> {
-  return await Promise.all(
-    PROFILE_TARGETS.map(async (target) => {
-      try {
-        return await detectAttachedProfileInstructionsDrift(target, { env });
-      } catch {
-        return {
-          target,
-          profile_path: "",
-          status: "error",
-          attached_preview: null
-        } as const satisfies ProfileInstructionsDriftReport;
-      }
-    })
-  );
-}
-
-function buildDoctorChecks(
-  daemonReady: boolean,
-  services: Awaited<ReturnType<typeof readDoctorServices>>,
-  bootstrapReconcileSummary: DoctorBootstrapReconcileSummary | null,
-  attachedProfiles: readonly ProfileInstructionsDriftReport[],
-  audit: DoctorAuditSnapshot,
-  env: NodeJS.ProcessEnv
-): Record<DoctorCheckName, DoctorCheckStatus> {
-  return {
-    runtime: daemonReady ? "pass" : "fail",
-    storage:
-      services.storage.exists &&
-      services.storage.readable &&
-      services.storage.writable &&
-      services.storage.schema_ok !== false
-        ? "pass"
-        : "fail",
-    provider: resolveProviderCheck(services.embeddingStatus, services.queryEmbeddingWarmup),
-    mcp: services.mcp.transport === "ready" ? "pass" : "fail",
-    garden:
-      services.garden.status === "healthy" &&
-      services.gardenCompute.keychain_check?.ok !== false &&
-      services.gardenCompute.schema_ok !== false &&
-      (services.gardenCompute.capture?.statement_sessions.failed ?? 0) === 0 &&
-      (services.gardenCompute.capture?.host_session.overdue_unbound_messages ?? 0) === 0
-        ? "pass"
-        : "fail",
-    bootstrap_reconcile: resolveBootstrapReconcileCheck(bootstrapReconcileSummary),
-    config:
-      doctorAuditCheckStatus(audit) === "pass" &&
-      attachedProfiles.every((profile) => profile.status !== "error") &&
-      attachedProfiles.every(
-        (profile) => profile.attached_preview !== ATTACHED_MCP_CONFIRMATION_TOKEN_LEAK_PREVIEW
-      ) &&
-      !attachedAgentEnvHoldsConfirmationToken(env)
-        ? "pass"
-        : "fail"
-  };
-}
-
-function withRuntimeWiringDefaults(
-  wiring: RuntimeWiringStatus
-): RuntimeWiringStatus {
-  return {
-    request_token_source: wiring.request_token_source,
-    daemon_socket: wiring.daemon_socket ?? null,
-    wildcard_bind_opt_in: wiring.wildcard_bind_opt_in === true,
-    request_token_workspaces: wiring.request_token_workspaces ?? null
-  };
-}
-
-function resolveProviderCheck(
-  embeddingStatus: EmbeddingStatus | null,
-  queryEmbeddingWarmup: EmbeddingQueryWarmupSummary | null
-): DoctorCheckStatus {
-  if (queryEmbeddingWarmup?.status === "failed" || queryEmbeddingWarmup?.status === "partial") {
-    return "fail";
-  }
-  if (embeddingStatus === null || embeddingStatus.effective_mode !== "degraded") {
-    return "pass";
-  }
-  return "fail";
-}
-
-function resolveBootstrapReconcileCheck(
-  bootstrapReconcileSummary: DoctorBootstrapReconcileSummary | null
-): DoctorCheckStatus {
-  return bootstrapReconcileSummary === null ||
-    bootstrapReconcileSummary.status === "planted" ||
-    bootstrapReconcileSummary.status === "already_planted" ||
-    bootstrapReconcileSummary.status === "skipped_no_templates"
-    ? "pass"
-    : "fail";
 }

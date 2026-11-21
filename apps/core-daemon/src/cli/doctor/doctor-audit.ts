@@ -147,7 +147,7 @@ function checkDatabaseExists(
       typeof error === "object" && error !== null && "code" in error
         ? (error as { readonly code?: unknown }).code
         : undefined;
-    if (code === "ENOENT" || code === "ENOTDIR") {
+    if (code === "ENOENT") {
       return { status: "missing" };
     }
     return { status: "error", error: error instanceof Error ? error.message : String(error) };

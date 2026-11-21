@@ -560,6 +560,10 @@ test("configured-paths parses comments and single-quoted TOML db_path and reject
     parseStorageDbPathFromToml("[storage]\ndb_path = 'C:\\data\\alaya.db' # literal\n"),
     "C:\\data\\alaya.db"
   );
+  assert.equal(
+    parseStorageDbPathFromToml("[storage]\n[[backup.targets]]\ndb_path = \"ignored/backup.db\"\n"),
+    null
+  );
   assert.throws(
     () => parseStorageDbPathFromToml("[storage]\ndb_path = unquoted\n"),
     /Malformed \[storage\]\.db_path/
@@ -568,4 +572,21 @@ test("configured-paths parses comments and single-quoted TOML db_path and reject
     () => parseStorageDbPathFromToml('[storage]\ndb_path = "unterminated\n'),
     /Malformed \[storage\]\.db_path/
   );
+});
+
+test("live db locator reads DATA_DIR from config-dir .env when process.env.DATA_DIR is unset", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-locator-dotenv-"));
+  try {
+    const configDir = path.join(work, "config");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(path.join(configDir, ".env"), "DATA_DIR=dotenv-data\n");
+
+    const fromDotenv = locateLiveDb({ ALAYA_CONFIG_DIR: configDir }, work);
+    assert.equal(fromDotenv.dbPath, path.join(work, "dotenv-data", "alaya.db"));
+
+    const overriddenByEnv = locateLiveDb({ ALAYA_CONFIG_DIR: configDir, DATA_DIR: "env-data" }, work);
+    assert.equal(overriddenByEnv.dbPath, path.join(work, "env-data", "alaya.db"));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 });
