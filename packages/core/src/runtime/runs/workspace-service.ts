@@ -24,6 +24,7 @@ import type {
   CreateWorkspaceInput,
   WorkspaceBootstrapReconcileResult,
   WorkspaceListPageOptions,
+  WorkspaceListScope,
   WorkspaceServiceDependencies
 } from "./workspace-service-ports.js";
 
@@ -156,12 +157,32 @@ export class WorkspaceService {
     return await this.bootstrapCoordinator.reconcileBootstrapPaths(workspaceId, options);
   }
 
-  public list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]> {
-    return this.dependencies.workspaceRepo.list(page);
+  public async list(
+    page?: WorkspaceListPageOptions,
+    scope: WorkspaceListScope = { kind: "all" }
+  ): Promise<readonly Workspace[]> {
+    const normalizedScope = normalizeWorkspaceListScope(scope);
+    if (normalizedScope.kind === "allowlist") {
+      if (normalizedScope.workspaceIds.length === 0) {
+        return [];
+      }
+      return await this.dependencies.workspaceRepo.list(page, normalizedScope);
+    }
+    return await this.dependencies.workspaceRepo.list(page);
   }
 
-  public async count(): Promise<number> {
+  public async count(scope: WorkspaceListScope = { kind: "all" }): Promise<number> {
+    const normalizedScope = normalizeWorkspaceListScope(scope);
     const count = this.dependencies.workspaceRepo.count;
+    if (normalizedScope.kind === "allowlist") {
+      if (normalizedScope.workspaceIds.length === 0) {
+        return 0;
+      }
+      if (count !== undefined) {
+        return await count.call(this.dependencies.workspaceRepo, normalizedScope);
+      }
+      return (await this.dependencies.workspaceRepo.list(undefined, normalizedScope)).length;
+    }
     if (count !== undefined) {
       return await count.call(this.dependencies.workspaceRepo);
     }
@@ -319,4 +340,14 @@ export class WorkspaceService {
       })
     } as const;
   }
+}
+
+function normalizeWorkspaceListScope(scope: WorkspaceListScope): WorkspaceListScope {
+  if (scope.kind === "all") {
+    return scope;
+  }
+  const workspaceIds = Array.from(
+    new Set(scope.workspaceIds.map((id) => id.trim()).filter((id) => id.length > 0))
+  );
+  return { kind: "allowlist", workspaceIds };
 }

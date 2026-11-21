@@ -207,6 +207,51 @@ describe("ZeroDaySecurityLayer", () => {
     }
   });
 
+  it("evaluates sub-second policy activation and expiry transitions against the live clock within the cache window", async () => {
+    const loadPolicies = vi.fn(async () => [
+      createPolicy({
+        policy_id: "policy-subsecond-tool",
+        kind: "deny_tool",
+        target: "tools.exec_shell",
+        effective_at: "2026-04-14T12:00:00.200Z",
+        expires_at: "2026-04-14T12:00:00.600Z"
+      })
+    ]);
+    let now = "2026-04-14T12:00:00.000Z";
+    const layer = new ZeroDaySecurityLayer({
+      loadPolicies,
+      now: () => now,
+      policyEvaluationCacheTtlMs: 1_000
+    });
+
+    // t = 0ms: not yet active
+    const beforeActivation = await layer.getSecurityStatus("workspace-1");
+    expect(beforeActivation.posture).toBe("baseline");
+    expect(beforeActivation.zero_day_active).toBe(false);
+    expect(beforeActivation.last_assessment_at).toBe("2026-04-14T12:00:00.000Z");
+    await expect(layer.enforceToolAccess("workspace-1", "tools.exec_shell")).resolves.toBeUndefined();
+
+    // t = 250ms: within 1,000ms cache TTL, policy is now active
+    now = "2026-04-14T12:00:00.250Z";
+    const whileActive = await layer.getSecurityStatus("workspace-1");
+    expect(whileActive.posture).toBe("elevated");
+    expect(whileActive.zero_day_active).toBe(true);
+    expect(whileActive.last_assessment_at).toBe("2026-04-14T12:00:00.250Z");
+    await expect(layer.enforceToolAccess("workspace-1", "tools.exec_shell")).rejects.toMatchObject({
+      code: "VALIDATION"
+    });
+
+    // t = 600ms: within 1,000ms cache TTL, policy has reached expires_at and is inactive again
+    now = "2026-04-14T12:00:00.600Z";
+    const afterExpiry = await layer.getSecurityStatus("workspace-1");
+    expect(afterExpiry.posture).toBe("baseline");
+    expect(afterExpiry.zero_day_active).toBe(false);
+    expect(afterExpiry.last_assessment_at).toBe("2026-04-14T12:00:00.600Z");
+    await expect(layer.enforceToolAccess("workspace-1", "tools.exec_shell")).resolves.toBeUndefined();
+
+    expect(loadPolicies).toHaveBeenCalledTimes(1);
+  });
+
   it("summarizes active passthrough policies and only initializes a workspace once", async () => {
     const layer = new ZeroDaySecurityLayer({
       loadPolicies: async () => [

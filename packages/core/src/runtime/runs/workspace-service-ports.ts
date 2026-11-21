@@ -10,6 +10,10 @@ import type {
 
 import type { EventPublisher } from "../event-publisher.js";
 
+export type WorkspaceListScope =
+  | { readonly kind: "all" }
+  | { readonly kind: "allowlist"; readonly workspaceIds: readonly string[] };
+
 export interface WorkspaceRepoPort {
   create(data: {
     readonly workspace_id: string;
@@ -22,8 +26,8 @@ export interface WorkspaceRepoPort {
     readonly workspace_state: Workspace["workspace_state"];
   }): Workspace;
   getById(id: string): Promise<Workspace | null>;
-  list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]>;
-  count?(): Promise<number>;
+  list(page?: WorkspaceListPageOptions, scope?: WorkspaceListScope): Promise<readonly Workspace[]>;
+  count?(scope?: WorkspaceListScope): Promise<number>;
   delete(id: string): void;
   updateDefaultEngineClass(id: string, engineClass: Workspace["default_engine_class"]): Workspace;
 }

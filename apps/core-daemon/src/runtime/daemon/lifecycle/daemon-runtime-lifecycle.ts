@@ -19,7 +19,6 @@ import {
   type LifecycleTimerPort
 } from "./daemon-runtime-timing.js";
 import {
-  resolveDaemonHostFromEnv,
   resolveDaemonListenPolicy,
   warnIfRemoteDaemonListening
 } from "../../server-options.js";
@@ -300,12 +299,12 @@ function createHttpServerStarter(
     }
     validateEphemeralTokenPolicy(input.requestProtection, options);
     ensureServerNotRunning(state);
-    logEphemeralTokenStartup(input, options);
 
     const env = input.env ?? processEnvLookup();
-    const policy = resolveDaemonListenPolicy(env);
-    const hostname = options.hostname ?? (policy.kind === "unix" ? policy.tcpHost : policy.host);
+    const policy = resolveDaemonListenPolicy(env, { hostname: options.hostname });
+    const hostname = policy.kind === "unix" ? policy.tcpHost : policy.host;
     const port = options.port ?? parsePort(env.PORT, 3000);
+    logEphemeralTokenStartup(input, hostname, port);
     const serverFactory = input.serverFactory ?? serve;
     const tcpServer = serverFactory({
       fetch: input.app.fetch,
@@ -369,15 +368,16 @@ function ensureServerNotRunning(state: LifecycleState): void {
 
 function logEphemeralTokenStartup(
   input: CreateDaemonLifecycleControlsInput,
-  options: AlayaDaemonListenOptions
+  hostname: string,
+  port: number
 ): void {
   if (input.requestProtection.tokenSource !== "ephemeral") {
     return;
   }
 
   input.warnLogger.warn("starting managed daemon with ephemeral request token", {
-    host: options.hostname ?? resolveDaemonHostFromEnv(input.env ?? processEnvLookup()),
-    port: options.port ?? parsePort((input.env ?? processEnvLookup()).PORT, 3000)
+    host: hostname,
+    port
   });
 }
 

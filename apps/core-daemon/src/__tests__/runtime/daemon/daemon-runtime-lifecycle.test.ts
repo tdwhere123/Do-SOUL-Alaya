@@ -211,6 +211,19 @@ describe("createDaemonLifecycleControls", () => {
     }
   });
 
+  it("rejects programmatic non-loopback options.hostname before binding a socket", async () => {
+    const serverFactory = vi.fn();
+    const { controls } = createControls("env", { serverFactory });
+
+    await expect(
+      controls.startHttpServer({ port: 0, hostname: "0.0.0.0" })
+    ).rejects.toThrow(/Plaintext remote HTTP is unsupported/);
+    await expect(
+      controls.startHttpServer({ port: 0, hostname: "192.168.1.50" })
+    ).rejects.toThrow(/Plaintext remote HTTP is unsupported/);
+    expect(serverFactory).not.toHaveBeenCalled();
+  });
+
   it("binds the unix socket when ALAYA_DAEMON_SOCKET is set", async () => {
     const unixSocketServe = vi.fn(async (
       _fetch: Parameters<typeof serveDaemonUnixSocket>[0],

@@ -11,6 +11,7 @@ import {
   type Workspace,
   type WorkspaceEngineConfig
 } from "@do-soul/alaya-protocol";
+import { resolveRequestWorkspaceGrantScope } from "../../runtime/request-token-binding.js";
 import {
   parseJsonBody,
   parseListPagination,
@@ -63,12 +64,16 @@ function registerWorkspaceCrudRoutes(app: Hono, services: WorkspaceRouteServices
 
   app.get("/workspaces", async (context) => {
     const pagination = parseListPagination(context);
+    const scope = resolveRequestWorkspaceGrantScope(context);
+    const [listed, totalCount] = await Promise.all([
+      services.workspaceService.list(pagination, scope),
+      services.workspaceService.count(scope)
+    ]);
     const workspaces = await Promise.all(
-      (await services.workspaceService.list(pagination)).map(async (workspace) =>
+      listed.map(async (workspace) =>
         await sanitizeWorkspaceForGenericRead(workspace, services.gitBindingValidation)
       )
     );
-    const totalCount = await services.workspaceService.count();
     writeListPaginationHeaders(context, totalCount, pagination);
     return context.json({ success: true, data: workspaces }, 200);
   });

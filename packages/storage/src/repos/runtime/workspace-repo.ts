@@ -14,11 +14,15 @@ export type WorkspaceCreateInput = Omit<Workspace, "created_at" | "archived_at" 
   readonly repo_path?: Workspace["repo_path"];
 };
 
+export type WorkspaceListScope =
+  | { readonly kind: "all" }
+  | { readonly kind: "allowlist"; readonly workspaceIds: readonly string[] };
+
 export interface WorkspaceRepo {
   create(data: WorkspaceCreateInput): Workspace;
   getById(id: string): Promise<Workspace | null>;
-  list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]>;
-  count(): Promise<number>;
+  list(page?: WorkspaceListPageOptions, scope?: WorkspaceListScope): Promise<readonly Workspace[]>;
+  count(scope?: WorkspaceListScope): Promise<number>;
   delete(id: string): void;
   updateRepoPath(id: string, repoPath: Workspace["repo_path"]): Promise<Workspace>;
   updateDefaultEngineBinding(id: string, bindingId: string | null): Workspace;
@@ -107,9 +111,21 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     }
   }
 
-  public async list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]> {
+  public async list(
+    page?: WorkspaceListPageOptions,
+    scope: WorkspaceListScope = { kind: "all" }
+  ): Promise<readonly Workspace[]> {
+    if (scope.kind === "allowlist") {
+      const allowedIds = normalizeAllowedWorkspaceIds(scope.workspaceIds);
+      if (allowedIds.length === 0) {
+        return [];
+      }
+      return this.listAllowedWorkspaces(allowedIds, page);
+    }
+
     try {
-      const rows = parseRows(page === undefined
+      const rows = parseRows(
+        page === undefined
           ? this.active().listStatement.all()
           : this.active().listPagedStatement.all(page.limit, page.offset),
         WorkspaceRowParser,
@@ -121,12 +137,43 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     }
   }
 
-  public async count(): Promise<number> {
+  public async count(scope: WorkspaceListScope = { kind: "all" }): Promise<number> {
+    if (scope.kind === "allowlist") {
+      const allowedIds = normalizeAllowedWorkspaceIds(scope.workspaceIds);
+      if (allowedIds.length === 0) {
+        return 0;
+      }
+      try {
+        const row = this.active().countByIdsStatement.get(JSON.stringify(allowedIds)) as CountRow | undefined;
+        return row === undefined ? 0 : Number(row.total);
+      } catch (error) {
+        throw new StorageError("QUERY_FAILED", "Failed to count workspaces.", error);
+      }
+    }
+
     try {
       const row = this.active().countStatement.get() as CountRow | undefined;
       return row === undefined ? 0 : Number(row.total);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to count workspaces.", error);
+    }
+  }
+
+  private listAllowedWorkspaces(
+    allowedIds: readonly string[],
+    page?: WorkspaceListPageOptions
+  ): readonly Workspace[] {
+    const allowedIdsJson = JSON.stringify(allowedIds);
+    try {
+      return parseRows(
+        page === undefined
+          ? this.active().listByIdsStatement.all(allowedIdsJson)
+          : this.active().listByIdsPagedStatement.all(allowedIdsJson, page.limit, page.offset),
+        WorkspaceRowParser,
+        "workspace row"
+      );
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to list workspaces.", error);
     }
   }
 
@@ -209,6 +256,12 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
       throw new StorageError("QUERY_FAILED", `Failed to update default engine class for workspace ${id}.`, error);
     }
   }
+}
+
+function normalizeAllowedWorkspaceIds(workspaceIds: readonly string[]): readonly string[] {
+  return Array.from(
+    new Set(workspaceIds.map((id) => id.trim()).filter((id) => id.length > 0))
+  );
 }
 
 const WorkspaceRowParser: RowParser<Workspace> = {

@@ -236,6 +236,7 @@ function createEngineBindingService(input: {
 function createDaemonCoreSupportServices(
   input: {
     readonly eventLogRepo: SqliteEventLogRepo;
+    readonly eventPublisher: EventPublisher;
     readonly runtimeNotifier: AlayaRuntimeNotifier;
   },
   runService: RunService
@@ -243,6 +244,7 @@ function createDaemonCoreSupportServices(
   return {
     soulApprovalService: createSoulApprovalService({
       eventLogRepo: input.eventLogRepo,
+      eventPublisher: input.eventPublisher,
       runLookup: async (runId) => await runService.getById(runId),
       runtimeNotifier: input.runtimeNotifier
     }),

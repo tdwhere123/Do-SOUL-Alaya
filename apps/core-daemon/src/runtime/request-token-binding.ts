@@ -81,6 +81,24 @@ export function isProcessSecretPatchRequest(method: string, path: string): boole
 
 export const WORKSPACE_TOKEN_DENIED_MESSAGE = "Workspace is not authorized for this token";
 
+export type WorkspaceGrantScope =
+  | { readonly kind: "all" }
+  | { readonly kind: "allowlist"; readonly workspaceIds: readonly string[] };
+
+export function resolveWorkspaceGrantScope(
+  grant: RequestTokenGrant | undefined
+): WorkspaceGrantScope {
+  if (grant === undefined || grant.workspaceIds === "*") {
+    return { kind: "all" };
+  }
+  return { kind: "allowlist", workspaceIds: grant.workspaceIds };
+}
+
+export function resolveRequestWorkspaceGrantScope(context: Context): WorkspaceGrantScope {
+  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
+  return resolveWorkspaceGrantScope(grant);
+}
+
 export function workspaceScopeAllows(
   grant: RequestTokenGrant,
   workspaceId: string

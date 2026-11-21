@@ -8,7 +8,10 @@ export interface WorkspaceStatements {
   readonly getByIdStatement: SqliteStatement;
   readonly listStatement: SqliteStatement;
   readonly listPagedStatement: SqliteStatement;
+  readonly listByIdsStatement: SqliteStatement;
+  readonly listByIdsPagedStatement: SqliteStatement;
   readonly countStatement: SqliteStatement;
+  readonly countByIdsStatement: SqliteStatement;
   readonly updateRepoPathStatement: SqliteStatement;
   readonly updateDefaultEngineBindingStatement: SqliteStatement;
   readonly updateDefaultEngineClassStatement: SqliteStatement;
@@ -22,9 +25,18 @@ export function prepareWorkspaceStatements(db: StorageDatabase): WorkspaceStatem
     listPagedStatement: db.connection.prepare(
       selectWorkspaceSql(undefined, "created", "paged")
     ),
+    listByIdsStatement: db.connection.prepare(selectWorkspaceSql("byIds", "created")),
+    listByIdsPagedStatement: db.connection.prepare(
+      selectWorkspaceSql("byIds", "created", "paged")
+    ),
     countStatement: db.connection.prepare(`
       SELECT COUNT(*) AS total
       FROM workspaces
+    `),
+    countByIdsStatement: db.connection.prepare(`
+      SELECT COUNT(*) AS total
+      FROM workspaces
+      WHERE ${WORKSPACE_WHERE_CLAUSES.byIds}
     `),
     updateRepoPathStatement: db.connection.prepare(updateWorkspaceColumnSql("repo_path")),
     updateDefaultEngineBindingStatement: db.connection.prepare(updateWorkspaceColumnSql("default_engine_binding")),
@@ -32,12 +44,13 @@ export function prepareWorkspaceStatements(db: StorageDatabase): WorkspaceStatem
   };
 }
 
-type WorkspaceWhereKey = "byId";
+type WorkspaceWhereKey = "byId" | "byIds";
 type WorkspaceOrderKey = "created";
 type WorkspaceSuffixKey = "limitOne" | "paged";
 
 const WORKSPACE_WHERE_CLAUSES: Readonly<Record<WorkspaceWhereKey, string>> = Object.freeze({
-  byId: "workspace_id = ?"
+  byId: "workspace_id = ?",
+  byIds: "workspace_id IN (SELECT value FROM json_each(?))"
 });
 
 const WORKSPACE_ORDER_BY: Readonly<Record<WorkspaceOrderKey, string>> = Object.freeze({
