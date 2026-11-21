@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe("MemoryService object-key materialization", () => {
-  it("persists gist-remainder Keys when a memory is created", async () => {
+  it.each([false, true])("persists gist-remainder keys on create with notify failure=%s", async (notifyFails) => {
     const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRecallRealStorage(
       (db) => databases.add(db)
     );
@@ -49,7 +49,9 @@ describe("MemoryService object-key materialization", () => {
       },
       eventLogRepo: new SqliteEventLogRepo(database),
       memoryEntryRepo,
-      runtimeNotifier: { notifyEntry: async () => undefined },
+      runtimeNotifier: { notifyEntry: async () => {
+        if (notifyFails) throw new Error("notification interrupted");
+      } },
       objectKeyWriter: createMemoryObjectKeyWriter({
         readEvidenceSources: (workspaceId, evidenceIds) =>
           readObjectKeyEvidenceSources(database, workspaceId, evidenceIds),
@@ -58,7 +60,7 @@ describe("MemoryService object-key materialization", () => {
       })
     });
 
-    await service.create({
+    const creation = service.create({
       created_by: "user_action",
       dimension: MemoryDimension.FACT,
       source_kind: SourceKind.USER,
@@ -71,6 +73,8 @@ describe("MemoryService object-key materialization", () => {
       run_id: REAL_SQLITE_TEST_RUN_ID,
       surface_id: null
     });
+    if (notifyFails) await expect(creation).rejects.toThrow("notification interrupted");
+    else await creation;
 
     const persisted = keys.listByOwner(REAL_SQLITE_TEST_WORKSPACE_ID, MEMORY_ID);
     expect(persisted.map((key) => key.surface)).toEqual(

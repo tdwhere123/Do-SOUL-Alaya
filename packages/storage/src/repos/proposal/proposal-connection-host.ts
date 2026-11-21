@@ -1,12 +1,11 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
-import { getEventLogWriter, insertEventLogEntry } from "../runtime/writes/event-log-writer.js";
+import { getEventLogWriter } from "../runtime/writes/event-log-writer.js";
+import { runSynchronousEventLogTransaction } from "../runtime/event-log/writes/synchronous-transaction.js";
 import { prepareProposalStatements, type ProposalStatements } from "./statements/sqlite-proposal-statements.js";
 
 export class ProposalConnectionHost implements ProposalStatements {
   private readonly statementHolder: RefreshableStatementHolder<ProposalStatements>;
-  private eventLogWriterCache: Parameters<typeof insertEventLogEntry>[0] | null = null;
-  private eventLogWriterConnectionVersion = -1;
 
   public constructor(private readonly db: StorageDatabase) {
     this.statementHolder = new RefreshableStatementHolder(db, prepareProposalStatements);
@@ -60,13 +59,7 @@ export class ProposalConnectionHost implements ProposalStatements {
     return this.activeStatements().findReviewerAssignmentStatement;
   }
 
-  public get updateResolutionStatement() {
-    return this.activeStatements().updateResolutionStatement;
-  }
 
-  public get updateResolutionWithIdentityStatement() {
-    return this.activeStatements().updateResolutionWithIdentityStatement;
-  }
 
   public get updatePendingResolutionStatement() {
     return this.activeStatements().updatePendingResolutionStatement;
@@ -116,15 +109,12 @@ export class ProposalConnectionHost implements ProposalStatements {
     return this.activeStatements().createSynthesisCapsuleStatement;
   }
 
-  public get eventLogWriter(): Parameters<typeof insertEventLogEntry>[0] {
-    return this.activeEventLogWriter();
+  public get eventLogWriter(): ReturnType<typeof getEventLogWriter> {
+    return getEventLogWriter(this.activeConnection());
   }
 
-  public transaction<T>(fn: () => T, options: { readonly immediate?: boolean } = {}): T {
-    // EventLog revision CAS shares the DB with the write-queue worker; default
-    // IMMEDIATE so SELECT MAX+INSERT cannot race a DEFERRED upgrade.
-    const txn = this.activeConnection().transaction(fn);
-    return options.immediate === false ? txn() : txn.immediate();
+  public transaction<T>(fn: () => T): T {
+    return runSynchronousEventLogTransaction(this.activeConnection(), fn);
   }
 
   private activeStatements(): ProposalStatements {
@@ -136,16 +126,4 @@ export class ProposalConnectionHost implements ProposalStatements {
     return this.db.connection;
   }
 
-  private activeEventLogWriter(): Parameters<typeof insertEventLogEntry>[0] {
-    this.activeConnection();
-    const connectionVersion = this.db.getConnectionVersion();
-    if (
-      this.eventLogWriterCache === null ||
-      this.eventLogWriterConnectionVersion !== connectionVersion
-    ) {
-      this.eventLogWriterCache = getEventLogWriter(this.db.connection);
-      this.eventLogWriterConnectionVersion = connectionVersion;
-    }
-    return this.eventLogWriterCache;
-  }
 }

@@ -135,8 +135,8 @@ export class MemoryWriteService {
       eventInput,
       assertSourceCurrent, persistSourceStatementDependency
     );
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
     this.persistObjectKeys(created);
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
 
     if (
       created.evidence_refs.length > 0 &&
@@ -314,7 +314,6 @@ export class MemoryWriteService {
       enqueueEnrichment
     );
 
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
     this.persistObjectKeys(updated);
     if (
       parsedFields.evidence_refs !== undefined &&
@@ -327,6 +326,7 @@ export class MemoryWriteService {
         runId: existing.run_id
       });
     }
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
     return updated;
   }
 

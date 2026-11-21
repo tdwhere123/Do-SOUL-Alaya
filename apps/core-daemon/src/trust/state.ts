@@ -82,15 +82,34 @@ export class TrustStateRecorderNotReady extends Error {
   }
 }
 
-export class TrustStateUnknownDeliveryError extends Error {
+export class TrustStateUnknownDeliveryError extends AlayaError {
   // invariant: unknown delivery and cross-workspace delivery mismatch share
   // the same public error class, so probing delivery_ids leaks no workspace
   // boundary information.
-  public readonly code = "NOT_FOUND" as const;
   public constructor(public readonly deliveryId: string) {
-    super(`Unknown delivery_id: ${deliveryId}`);
+    super("NOT_FOUND", `Unknown delivery_id: ${deliveryId}`);
     this.name = "TrustStateUnknownDeliveryError";
   }
+}
+
+interface UsageDeliveryScope {
+  readonly expectedWorkspaceId?: string;
+  readonly expectedAgentTarget?: string;
+  readonly expectedRunId?: string | null;
+}
+
+export function requireUsageDeliveryScope(
+  deliveryId: string,
+  delivery: Readonly<ContextDeliveryRecord> | null,
+  scope?: UsageDeliveryScope
+): Readonly<ContextDeliveryRecord> {
+  if (delivery === null ||
+      (scope?.expectedWorkspaceId !== undefined && delivery.workspace_id !== scope.expectedWorkspaceId) ||
+      (scope?.expectedAgentTarget !== undefined && delivery.agent_target !== scope.expectedAgentTarget) ||
+      (scope?.expectedRunId !== undefined && delivery.run_id !== scope.expectedRunId)) {
+    throw new TrustStateUnknownDeliveryError(deliveryId);
+  }
+  return delivery;
 }
 
 export class TrustStateUnverifiableRequiresDeliveryError extends Error {
@@ -204,16 +223,13 @@ export class TrustStateRecorder {
 
   public async recordUsage(
     input: Omit<UsageProofRecord, "audit_event_id">,
-    options?: Readonly<{
-      readonly expectedWorkspaceId?: string;
-      readonly expectedAgentTarget?: string;
-      readonly expectedRunId?: string;
-    }>
+    options?: UsageDeliveryScope
   ): Promise<UsageProofRecord> {
     this.assertReady();
 
-    const linkedDelivery = await this.resolveLinkedDelivery(
+    const linkedDelivery = requireUsageDeliveryScope(
       input.delivery_id,
+      await this.repo.findDeliveryById(input.delivery_id),
       options
     );
     const draftRecord = UsageProofRecordSchema.parse({
@@ -272,33 +288,6 @@ export class TrustStateRecorder {
       if (raced === undefined) throw error;
       return requireMatchingUsageReplay(raced, draftRecord);
     }
-  }
-
-  // Resolve the delivery this usage report attaches to and enforce the
-  // workspace boundary. A cross-workspace mismatch mirrors an unknown delivery
-  // so probes leak no boundary information.
-  private async resolveLinkedDelivery(
-    deliveryId: string,
-    expected: Readonly<{
-      readonly expectedWorkspaceId?: string;
-      readonly expectedAgentTarget?: string;
-      readonly expectedRunId?: string;
-    }> | undefined
-  ) {
-    const linkedDelivery = await this.repo.findDeliveryById(deliveryId);
-    if (linkedDelivery === null) {
-      throw new TrustStateUnknownDeliveryError(deliveryId);
-    }
-    if (
-      (expected?.expectedWorkspaceId !== undefined &&
-        linkedDelivery.workspace_id !== expected.expectedWorkspaceId) ||
-      (expected?.expectedAgentTarget !== undefined &&
-        linkedDelivery.agent_target !== expected.expectedAgentTarget) ||
-      (expected?.expectedRunId !== undefined && linkedDelivery.run_id !== expected.expectedRunId)
-    ) {
-      throw new TrustStateUnknownDeliveryError(deliveryId);
-    }
-    return linkedDelivery;
   }
 
   public async recordInstalled(agent_target: string): Promise<void> {

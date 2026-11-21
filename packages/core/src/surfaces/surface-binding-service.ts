@@ -56,6 +56,7 @@ export interface SurfaceBindingServiceSurfaceBindingRepoPort {
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecordView>[]>;
   updateState(
     bindingId: string,
+    workspaceId: string,
     bindingState: BindingStateType,
     updatedAt: string
   ): Readonly<SurfaceBindingRecordView>;
@@ -200,15 +201,18 @@ export class SurfaceBindingService {
     return await this.dependencies.surfaceBindingRepo.findByBindingId(parseObjectId(bindingId, "binding_id"));
   }
 
-  public async transitionBindingState(bindingId: string, newState: BindingStateType, reason: string, causedBy: string): Promise<Readonly<SurfaceBindingRecordView>> {
+  public async transitionBindingState(
+    bindingId: string, workspaceId: string, newState: BindingStateType, reason: string, causedBy: string
+  ): Promise<Readonly<SurfaceBindingRecordView>> {
     const parsedBindingId = parseObjectId(bindingId, "binding_id");
+    const parsedWorkspaceId = parseObjectId(workspaceId, "workspace_id");
     const parsedNewState = parseBindingState(newState);
     const parsedReason = parseReason(reason);
     const parsedCausedBy = parseCausedBy(causedBy);
 
     const existing = await this.dependencies.surfaceBindingRepo.findByBindingId(parsedBindingId);
 
-    if (existing === null) {
+    if (existing === null || existing.binding.workspace_id !== parsedWorkspaceId) {
       throw new CoreError("NOT_FOUND", "Surface binding not found");
     }
 
@@ -243,6 +247,7 @@ export class SurfaceBindingService {
       const updated = await this.requireEventPublisher().appendManyWithMutation([event], () =>
         this.dependencies.surfaceBindingRepo.updateState(
           existing.binding_id,
+          parsedWorkspaceId,
           parsedNewState,
           occurredAt
         )

@@ -230,7 +230,7 @@ export const fieldProofEffectParser: RowParser<FieldProofEffectRow> = {
       request_digest: readNonEmptyStringField(row, "request_digest"),
       workspace_id: readNonEmptyStringField(row, "workspace_id"),
       actor_id: readNonEmptyStringField(row, "actor_id"),
-      run_id: readNonEmptyStringField(row, "run_id"),
+      run_id: readNullableStringField(row, "run_id"),
       delivery_id: readNonEmptyStringField(row, "delivery_id"),
       action: readNonEmptyStringField(row, "action"),
       target: readNonEmptyStringField(row, "target"),

@@ -73,7 +73,7 @@ export function isFieldContractDigest(value: string): boolean {
 
 export function hashLabeledIdentity(
   label: string,
-  parts: readonly (string | number)[],
+  parts: readonly (string | number | null)[],
   sha256: FieldContractSha256
 ): string {
   return formatFieldContractDigest(sha256(JSON.stringify([label, ...parts])));
@@ -284,7 +284,7 @@ export function hashEffectRequestDigest(
     readonly schema_version: 2;
     readonly workspace_id: string;
     readonly actor_id: string;
-    readonly run_id: string;
+    readonly run_id: string | null;
     readonly delivery_id: string;
     readonly action: string;
     readonly target: string;

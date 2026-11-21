@@ -150,7 +150,10 @@ export interface AcceptedMemoryUpdateInput {
   readonly workspace_id: string;
   readonly proposed_changes: MemoryEntryMutableFields;
   readonly updated_at: string;
-  readonly caused_by: string;
+  readonly buildMemoryEvent: (memory: Readonly<MemoryEntry>) => ProposalResolutionEventInput;
+  readonly buildGreenRevocationEvent: (
+    memory: Readonly<MemoryEntry>, greenStatusId: string
+  ) => ProposalResolutionEventInput;
   // Optional baseline snapshot of memory_entry.updated_at captured by
   // the workflow's pre-transaction read. When provided, the
   // accept-and-apply transaction asserts that the live memory is still
@@ -165,6 +168,9 @@ export interface AcceptedPathRelationGovernanceInput {
   readonly path_id_on_create: string;
   readonly updated_at: string;
   readonly caused_by: string;
+  readonly buildEvent: (
+    relation: Readonly<PathRelation>, previous: Readonly<PathRelation> | null, runId: string | null
+  ) => ProposalResolutionEventInput;
 }
 
 // invariant: the durable side of the librarian/auditor synthesis review
@@ -173,13 +179,12 @@ export interface AcceptedPathRelationGovernanceInput {
 // candidate set, topic_key derived from `derived_from`) outside the
 // transaction; this input only carries the pre-built capsule plus the
 // proposal-resolve scope so the storage layer flips the proposal to accepted,
-// inserts the capsule row, and appends SOUL_SYNTHESIS_CREATED in ONE
-// transaction. caused_by attributes the resolve to `proposal_accept:<id>`.
+// inserts the capsule row, and appends the prepared audit in one transaction.
 // see also: apps/core-daemon/src/mcp-memory/proposal-workflow.ts synthesis_create branch
 export interface AcceptedSynthesisCreateInput {
   readonly workspace_id: string;
   readonly capsule: SynthesisCapsule;
-  readonly caused_by: string;
+  readonly event: ProposalResolutionEventInput;
 }
 
 // The dossier_ref values that route a pending proposal to the synthesis-create
@@ -258,18 +263,6 @@ export interface ProposalRepo {
   findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null>;
   assignReviewer(input: ProposalReviewerAssignmentInput): Promise<Readonly<ProposalReviewerAssignment>>;
   findReviewerAssignment(proposalId: string): Promise<Readonly<ProposalReviewerAssignment> | null>;
-  // reviewerIdentity is optional at the repo boundary so legacy callers
-  // (claim-promotion flows, fixtures) keep compiling, but every code path
-  // that should write
-  // resolution_state ∈ ('accepted','rejected') now passes it. The
-  // SqliteProposalRepo writes the column when present and leaves it
-  // untouched when omitted.
-  updateResolution(
-    proposalId: string,
-    state: ProposalResolutionState,
-    updatedAt: string,
-    reviewerIdentity?: string
-  ): Promise<Readonly<Proposal>>;
   updatePendingResolution(
     proposalId: string,
     state: ProposalResolutionState,

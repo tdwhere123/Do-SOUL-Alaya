@@ -273,9 +273,10 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     }
   }
 
-  public async deleteById(objectId: string): Promise<void> {
+  public async deleteById(objectId: string, workspaceId: string): Promise<void> {
     try {
-      this.activeConnection().prepare("DELETE FROM evidence_capsules WHERE object_id = ?").run(objectId);
+      this.activeConnection().prepare("DELETE FROM evidence_capsules WHERE object_id = ? AND workspace_id = ?")
+        .run(objectId, workspaceId);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to delete evidence capsule ${objectId}.`, error);
     }
@@ -487,22 +488,6 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     return await this.findByHealthPage(health, DEFAULT_EVIDENCE_PAGE);
   }
 
-  public async findByHealthAll(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]> {
-    const parsedHealth = parseEvidenceHealthState(health);
-
-    try {
-      return parseRows(
-        this.statements.findByHealthStatement.all(parsedHealth),
-        EvidenceCapsuleRowParser,
-        "evidence capsule row"
-      );
-    } catch (error) {
-      throw wrapEvidenceCapsuleQueryError(
-        `Failed to list all evidence capsules by health state ${parsedHealth}.`,
-        error
-      );
-    }
-  }
 
   public async findByHealthPage(
     health: EvidenceHealthState,

@@ -66,6 +66,16 @@ async function emit(mode: EmissionMode, f: Fixture, value: EmissionInput) {
 }
 
 describe.each<EmissionMode>(["standalone", "current transaction"])("Karma emission: %s", mode => {
+  it("rejects another workspace's memory before appending karma", async () => {
+    const f = await fixture();
+    const before = await f.memoryEntryRepo.findById(MEMORY_ID);
+    await expect(emit(mode, f, input({ workspaceId: "foreign-workspace" })))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(f.karmaEventRepo.findByObjectId(MEMORY_ID)).resolves.toEqual([]);
+    await expect(f.memoryEntryRepo.findById(MEMORY_ID)).resolves.toEqual(before);
+    expect(f.notifyEntry).not.toHaveBeenCalled();
+  });
+
   it.each([
     { label: "omitted defaults", overrides: {}, amount: 0.15, runId: null },
     { label: "explicit zero and run", overrides: { amount: 0, runId: "run-1" }, amount: 0, runId: "run-1" }

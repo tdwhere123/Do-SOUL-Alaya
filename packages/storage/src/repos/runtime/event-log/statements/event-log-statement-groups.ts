@@ -1,5 +1,5 @@
 import type { StorageDatabase } from "../../../../sqlite/db.js";
-import { EVENT_LOG_APPEND_SYNC_SQL, EVENT_LOG_SELECT_COLUMNS } from "./append-sql.js";
+import { EVENT_LOG_SELECT_COLUMNS } from "./append-sql.js";
 
 export interface SqliteStatement {
   run(...args: readonly unknown[]): { readonly changes: number };
@@ -11,7 +11,6 @@ type SqlDefinitionMap<T extends object> = { readonly [K in keyof T]: string };
 type StatementMap<T extends object> = { -readonly [K in keyof T]: SqliteStatement };
 
 export interface EventLogMutationStatements {
-  readonly appendStatement: SqliteStatement;
   readonly deleteByIdStatement: SqliteStatement;
 }
 
@@ -51,12 +50,7 @@ export interface EventLogGovernancePredicateStatements {
   readonly hasSecurityHitForTargetStatement: SqliteStatement;
 }
 
-export interface EventLogRevisionStatements {
-  readonly nextRevisionStatement: SqliteStatement;
-}
-
 const EVENT_LOG_MUTATION_SQL: SqlDefinitionMap<EventLogMutationStatements> = {
-  appendStatement: EVENT_LOG_APPEND_SYNC_SQL,
   deleteByIdStatement: "DELETE FROM event_log WHERE event_id = ?"
 };
 
@@ -341,14 +335,6 @@ const EVENT_LOG_GOVERNANCE_PREDICATE_SQL:
     `
   };
 
-const EVENT_LOG_REVISION_SQL: SqlDefinitionMap<EventLogRevisionStatements> = {
-  nextRevisionStatement: `
-      SELECT MAX(revision) AS max_revision
-      FROM event_log
-      WHERE entity_type = ? AND entity_id = ?
-    `
-};
-
 export function prepareEventLogMutationStatements(db: StorageDatabase): EventLogMutationStatements {
   return prepareStatementGroup(db, EVENT_LOG_MUTATION_SQL);
 }
@@ -373,10 +359,6 @@ export function prepareEventLogGovernancePredicateStatements(
   db: StorageDatabase
 ): EventLogGovernancePredicateStatements {
   return prepareStatementGroup(db, EVENT_LOG_GOVERNANCE_PREDICATE_SQL);
-}
-
-export function prepareEventLogRevisionStatements(db: StorageDatabase): EventLogRevisionStatements {
-  return prepareStatementGroup(db, EVENT_LOG_REVISION_SQL);
 }
 
 function prepareStatementGroup<T extends object>(

@@ -33,6 +33,7 @@ export interface SurfaceBindingRepo {
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecord>[]>;
   updateState(
     bindingId: string,
+    workspaceId: string,
     bindingState: BindingState,
     updatedAt: string
   ): Readonly<SurfaceBindingRecord>;
@@ -206,15 +207,17 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
 
   public updateState(
     bindingId: string,
+    workspaceId: string,
     bindingState: BindingState,
     updatedAt: string
   ): Readonly<SurfaceBindingRecord> {
     const parsedBindingId = parseNonEmptyString(bindingId, "binding id");
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
     const parsedBindingState = parseBindingState(bindingState);
     const parsedUpdatedAt = parseTimestamp(updatedAt);
 
     try {
-      const result = this.updateStateStatement.run(parsedBindingState, parsedUpdatedAt, parsedBindingId);
+      const result = this.updateStateStatement.run(parsedBindingState, parsedUpdatedAt, parsedBindingId, parsedWorkspaceId);
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Surface binding ${parsedBindingId} was not found.`);

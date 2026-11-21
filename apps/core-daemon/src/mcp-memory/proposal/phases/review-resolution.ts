@@ -114,7 +114,7 @@ async function acceptPrivacyErase(
       apply: (storedReviewEvents) => {
         mutationApplied = true;
         return [
-          ...privacyErase.applySynchronousResolutionMutation(storedReviewEvents),
+          ...privacyErase.applySynchronousResolutionMutation(storedReviewEvents, input.options.reviewerIdentity),
           ...(input.options.applySynchronousResolutionMutation?.() ?? [])
         ];
       }

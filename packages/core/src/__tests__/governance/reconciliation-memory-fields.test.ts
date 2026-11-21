@@ -1,20 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildProjectionMergeFields,
   buildUpdateFields,
   updateFieldsMatch
 } from "../../governance/reconciliation/reconciliation-memory-fields.js";
 import { createMemoryEntry } from "./reconciliation-service.test-support.js";
 
 describe("reconciliation memory field derivation", () => {
-  it("omits evidence_refs when the incoming ref is missing or blank", () => {
-    const existing = createMemoryEntry({ evidence_refs: ["evidence-old"] });
-    for (const incomingRef of [undefined, "", "   "]) {
-      const fields = buildUpdateFields(existing, "next", ["tag"], incomingRef, undefined);
-      expect(fields).toEqual({ content: "next", domain_tags: ["tag"] });
-      expect("evidence_refs" in fields).toBe(false);
-    }
-  });
 
   it("keeps the existing evidence_refs array identity when the incoming ref is already present", () => {
     const existing = createMemoryEntry({ evidence_refs: ["evidence-old", "evidence-shared"] });
@@ -34,13 +25,14 @@ describe("reconciliation memory field derivation", () => {
       event_time_start: "2019-01-01T00:00:00.000Z",
       time_precision: "year"
     });
-    const fields = buildUpdateFields(existing, "next", ["tag"], undefined, {
+    const fields = buildUpdateFields(existing, "next", ["tag"], "evidence-next", {
       event_time_start: null,
       time_source: "explicit"
     });
     expect(fields).toEqual({
       content: "next",
       domain_tags: ["tag"],
+      evidence_refs: [...existing.evidence_refs, "evidence-next"],
       event_time_start: null,
       time_source: "explicit"
     });
@@ -55,7 +47,7 @@ describe("reconciliation memory field derivation", () => {
       preference_category: "theme",
       preference_polarity: "negative"
     });
-    const fields = buildUpdateFields(existing, "next", ["preference"], undefined, {
+    const fields = buildUpdateFields(existing, "next", ["preference"], "evidence-next", {
       preference_subject: "operator",
       preference_object: "dark mode"
     });
@@ -69,73 +61,30 @@ describe("reconciliation memory field derivation", () => {
   });
 
   it("does not write preference keys when incoming preference values are all null or omitted", () => {
-    const fields = buildUpdateFields(createMemoryEntry(), "next", ["tag"], undefined, {
+    const existing = createMemoryEntry();
+    const fields = buildUpdateFields(existing, "next", ["tag"], "evidence-next", {
       preference_subject: null,
       event_time_start: "2024-01-01T00:00:00.000Z"
     });
     expect(fields).toEqual({
       content: "next",
       domain_tags: ["tag"],
+      evidence_refs: [...existing.evidence_refs, "evidence-next"],
       event_time_start: "2024-01-01T00:00:00.000Z"
     });
   });
 
-  it("never copies facet_tags into merge or replacement payloads", () => {
+  it("never copies facet_tags into update payloads", () => {
     const existing = createMemoryEntry({ facet_tags: [{ facet: "person", value: "alice" }] });
     const incoming = {
       projection_schema_version: 1,
       canonical_entities: ["alice"],
       facet_tags: [{ facet: "person", value: "bob" }]
     };
-    const merge = buildProjectionMergeFields(existing, incoming);
     const update = buildUpdateFields(existing, "next", ["tag"], "evidence-1", incoming);
-    expect(merge).not.toHaveProperty("facet_tags");
     expect(update).not.toHaveProperty("facet_tags");
   });
 
-  it("fills missing independent projection keys on merge without overwriting present values", () => {
-    const existing = createMemoryEntry({
-      event_time_start: "2019-01-01T00:00:00.000Z",
-      time_precision: null
-    });
-    expect(
-      buildProjectionMergeFields(existing, {
-        event_time_start: "2024-01-01T00:00:00.000Z",
-        time_precision: "year",
-        time_source: "explicit"
-      })
-    ).toEqual({
-      time_precision: "year",
-      time_source: "explicit"
-    });
-  });
-
-  it("merges only present non-null preference keys when the survivor has none", () => {
-    expect(
-      buildProjectionMergeFields(createMemoryEntry(), {
-        preference_subject: "operator",
-        preference_object: "dark mode",
-        preference_predicate: null
-      })
-    ).toEqual({
-      preference_subject: "operator",
-      preference_object: "dark mode"
-    });
-  });
-
-  it("does not assemble a preference profile from survivor and incoming fragments", () => {
-    const existing = createMemoryEntry({
-      preference_subject: "operator",
-      preference_predicate: "prefer"
-    });
-    expect(
-      buildProjectionMergeFields(existing, {
-        preference_object: "dark mode",
-        preference_category: "theme",
-        preference_polarity: "positive"
-      })
-    ).toEqual({});
-  });
 });
 
 describe("reconciliation memory field recovery equality", () => {
@@ -145,6 +94,7 @@ describe("reconciliation memory field recovery equality", () => {
       updateFieldsMatch(row, {
         content: "next",
         domain_tags: ["tag"],
+        evidence_refs: row.evidence_refs,
         projection_schema_version: null,
         event_time_start: null,
         canonical_entities: null
@@ -185,12 +135,4 @@ describe("reconciliation memory field recovery equality", () => {
     ).toBe(false);
   });
 
-  it("ignores evidence_refs on the row when the update payload omitted them", () => {
-    const row = createMemoryEntry({
-      content: "next",
-      domain_tags: ["tag"],
-      evidence_refs: ["evidence-old"]
-    });
-    expect(updateFieldsMatch(row, { content: "next", domain_tags: ["tag"] })).toBe(true);
-  });
 });

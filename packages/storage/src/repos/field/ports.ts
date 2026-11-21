@@ -154,7 +154,7 @@ export type FieldProofEffectRow = Readonly<{
   readonly request_digest: string;
   readonly workspace_id: string;
   readonly actor_id: string;
-  readonly run_id: string;
+  readonly run_id: string | null;
   readonly delivery_id: string;
   readonly action: string;
   readonly target: string;

@@ -19,7 +19,6 @@ export interface EvidenceCapsuleStatements {
   readonly findByWorkspaceIdStatement: SqliteStatement;
   readonly findByWorkspaceIdPagedStatement: SqliteStatement;
   readonly pageCapsuleOnlyRootsStatement: SqliteStatement;
-  readonly findByHealthStatement: SqliteStatement;
   readonly findByHealthPagedStatement: SqliteStatement;
   readonly updateHealthStatement: SqliteStatement;
   readonly createSearchProjectionStatement: SqliteStatement;
@@ -57,7 +56,6 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
       findEvidenceCapsuleSql("byWorkspace", "paged")
     ),
     pageCapsuleOnlyRootsStatement: db.connection.prepare(PAGE_CAPSULE_ONLY_ROOTS_SQL),
-    findByHealthStatement: db.connection.prepare(findEvidenceCapsuleSql("byHealth")),
     findByHealthPagedStatement: db.connection.prepare(
       findEvidenceCapsuleSql("byHealth", "paged")
     ),

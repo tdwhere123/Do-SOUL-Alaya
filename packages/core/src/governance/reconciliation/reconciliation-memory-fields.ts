@@ -24,7 +24,7 @@ const PROJECTION_FIELD_KEYS = [
   ...PREFERENCE_PROJECTION_FIELD_KEYS
 ] as const;
 
-// Merge-owned projection fields. Storage update also accepts creation-only
+// Update-owned projection fields. Storage update also accepts creation-only
 // `facet_tags`; do not add that column here to look consistent with the writer.
 export type ReconciliationMemoryProjectionFields = Pick<
   MemoryEntry,
@@ -34,53 +34,28 @@ export type ReconciliationMemoryProjectionFields = Pick<
 export type ReconciliationMemoryUpdateFields = {
   readonly content: string;
   readonly domain_tags: readonly string[];
-  readonly evidence_refs?: readonly string[];
+  readonly evidence_refs: readonly string[];
 } & Partial<ReconciliationMemoryProjectionFields>;
 
-type MutableProjectionMergeFields = {
+type MutableProjectionFields = {
   -readonly [K in keyof ReconciliationMemoryProjectionFields]?: ReconciliationMemoryProjectionFields[K];
 };
 
 function hasPreferenceProjection(
-  value: Readonly<MemoryEntry> | ReconciliationMemoryProjectionFields
+  value: ReconciliationMemoryProjectionFields
 ): boolean {
   return PREFERENCE_PROJECTION_FIELD_KEYS.some(
     (key) => value[key] !== undefined && value[key] !== null
   );
 }
 
-export function buildProjectionMergeFields(
-  existing: Readonly<MemoryEntry>,
-  incoming: ReconciliationMemoryProjectionFields | undefined
-): Partial<ReconciliationMemoryProjectionFields> {
-  if (incoming === undefined) {
-    return {};
-  }
-  const fields: MutableProjectionMergeFields = {};
-  for (const key of INDEPENDENT_PROJECTION_FIELD_KEYS) {
-    if (existing[key] === undefined || existing[key] === null) {
-      const value = incoming[key];
-      if (value !== undefined && value !== null) {
-        fields[key] = value as never;
-      }
-    }
-  }
-  if (!hasPreferenceProjection(existing)) {
-    for (const key of PREFERENCE_PROJECTION_FIELD_KEYS) {
-      const value = incoming[key];
-      if (value !== undefined && value !== null) fields[key] = value as never;
-    }
-  }
-  return fields;
-}
-
 function buildProjectionReplacementFields(
   incoming: ReconciliationMemoryProjectionFields | undefined
-): MutableProjectionMergeFields {
+): MutableProjectionFields {
   if (incoming === undefined) {
     return {};
   }
-  const fields: MutableProjectionMergeFields = {};
+  const fields: MutableProjectionFields = {};
   for (const key of INDEPENDENT_PROJECTION_FIELD_KEYS) {
     const value = incoming[key];
     if (value !== undefined) {
@@ -99,19 +74,16 @@ export function buildUpdateFields(
   existing: Readonly<MemoryEntry>,
   incomingContent: string,
   incomingDomainTags: readonly string[],
-  incomingEvidenceRef: string | undefined,
+  incomingEvidenceRef: string,
   incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
 ): ReconciliationMemoryUpdateFields {
-  const evidenceRefs =
-    incomingEvidenceRef !== undefined && incomingEvidenceRef.trim().length > 0
-      ? existing.evidence_refs.includes(incomingEvidenceRef)
-        ? existing.evidence_refs
-        : [...existing.evidence_refs, incomingEvidenceRef]
-      : undefined;
+  const evidenceRefs = existing.evidence_refs.includes(incomingEvidenceRef)
+    ? existing.evidence_refs
+    : [...existing.evidence_refs, incomingEvidenceRef];
   return {
     content: incomingContent,
     domain_tags: incomingDomainTags,
-    ...(evidenceRefs === undefined ? {} : { evidence_refs: evidenceRefs }),
+    evidence_refs: evidenceRefs,
     ...buildProjectionReplacementFields(incomingProjectionFields)
   };
 }
@@ -123,7 +95,7 @@ export function updateFieldsMatch(
   if (row.content !== fields.content || !sameStringMultiset(row.domain_tags, fields.domain_tags)) {
     return false;
   }
-  if (fields.evidence_refs !== undefined && !sameStringMultiset(row.evidence_refs, fields.evidence_refs)) {
+  if (!sameStringMultiset(row.evidence_refs, fields.evidence_refs)) {
     return false;
   }
   return PROJECTION_FIELD_KEYS.every(

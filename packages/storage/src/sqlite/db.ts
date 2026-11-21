@@ -17,24 +17,18 @@ import {
   assertRuntimeTemporalDatabaseReady,
   computeKnownMaxVersion,
   listMigrationFiles,
-  migrateLegacyPathRelationsToTemporalCandidate,
   resolveMigrationsDirectory,
   resolveTemporalDatabaseMode,
   type TemporalDatabaseMode
 } from "./temporal-cutover-gate.js";
-import {
-  TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION,
-  migrateVerifiedProjectionBindKey
-} from "./temporal-verified-bind-key.js";
+import { TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION } from "./temporal-verified-bind-key.js";
 import { bindEmbeddingOverlayIfPresent } from "./embedding-overlay-bind.js";
 import { restrictSqliteFileModes } from "./sqlite-file-modes.js";
 import { openReadOnlySqliteConnection, openSqliteConnection, SqliteConnectionCleanupError } from "./open-sqlite-connection.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-digest.js";
 import { registerUtcInstantComparison } from "./utc-instant-comparison.js";
-import { migrateRetainedSourceChunks } from "./retained-source-migration.js";
-import { migrateEmbeddingVectorValidity } from "./embedding-vector-validity-migration.js";
-import { rebuildSourceIndexLexicalDomains } from "../repos/source-index/lexical-domain.js";
+import { applySchemaMigration } from "./schema-migration.js";
 import { initializeObservableMutationGeneration } from "../repos/garden/indexed-recall-projection-schema.js";
 import { parseRows, type RowParser } from "../repos/shared/parse-row.js";
 import { diagnosticWarn } from "@do-soul/alaya-protocol";
@@ -59,7 +53,6 @@ const MAX_SQLITE_BUSY_TIMEOUT_MS = 2_147_483_647;
 const MEMORY_ENTRY_ENUM_CHECK_MIGRATION_VERSION = 14;
 const OBSERVATION_MEMORY_DIMENSION_MIGRATION_VERSION = 17;
 const SOURCE_HOST_OCCURRENCE_MIGRATION_VERSION = 24;
-const EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION = 15;
 
 const databaseCache = new LruCache<string, StorageDatabase>(MAX_DATABASE_CACHE_ENTRIES);
 
@@ -570,8 +563,7 @@ function applyMigrationIfPending(
   }
   const migrationSql = fs.readFileSync(path.join(migrationsDirectory, fileName), "utf8");
   try {
-    database.exec(migrationSql);
-    runDataMigrationIfPresent(database, version, temporalMode);
+    applySchemaMigration(database, version, temporalMode, migrationSql);
     statements.markAppliedStatement.run(version, new Date().toISOString());
   } catch (error) {
     if (error instanceof StorageError) throw error;
@@ -616,40 +608,6 @@ export function isUninitializedDatabaseFile(filename: string): boolean {
       try { database.close(); }
       catch (closeError) { throw new SqliteConnectionCleanupError(database, undefined, closeError); }
     }
-  }
-}
-
-const DATA_MIGRATIONS: Readonly<Partial<Record<
-  number,
-  (database: SqliteConnection, temporalMode: TemporalDatabaseMode) => void
->>> = {
-  [TEMPORAL_OFFLINE_MIGRATION_VERSION]: (database, temporalMode) => {
-    migrateLegacyPathRelationsToTemporalCandidate(database, {
-      selectionRequired: temporalMode === "candidate"
-    });
-  },
-  [TEMPORAL_VERIFIED_BIND_KEY_MIGRATION_VERSION]: (database) => {
-    migrateVerifiedProjectionBindKey(database);
-  },
-  13: migrateRetainedSourceChunks,
-  [EMBEDDING_VECTOR_VALIDITY_MIGRATION_VERSION]: migrateEmbeddingVectorValidity,
-  28: rebuildSourceIndexLexicalDomains
-};
-
-function runDataMigrationIfPresent(
-  database: SqliteConnection,
-  version: number,
-  temporalMode: TemporalDatabaseMode
-): void {
-  if (version === TEMPORAL_OFFLINE_MIGRATION_VERSION && temporalMode === "runtime") {
-    throw new StorageError(
-      "CONFLICT",
-      "Temporal relation migration is offline-only and cannot run in runtime mode."
-    );
-  }
-  const migrate = DATA_MIGRATIONS[version];
-  if (migrate !== undefined) {
-    migrate(database, temporalMode);
   }
 }
 

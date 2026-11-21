@@ -2,8 +2,9 @@ import { afterEach, expect, it } from "vitest";
 import type { EvidenceCapsule } from "@do-soul/alaya-protocol";
 import { SqliteEvidenceCapsuleRepo, SqliteMemoryEntryRepo, SqliteMemoryObjectKeyRepo,
   SqliteProposalRepo } from "@do-soul/alaya-storage";
+import { buildAcceptedGreenRevocationEvent, buildAcceptedMemoryEvent } from "../../../mcp-memory/proposal/phases/accepted-mutation-events.js";
 import { createDaemonMemoryObjectKeyWriter } from "../../../runtime/daemon/wiring/memory-object-key-writer.js";
-import { createMemoryEntry, createProposal, createRepo, createReviewEvents,
+import { acceptedMemoryEvents, createMemoryEntry, createProposal, createRepo, createReviewEvents,
   trackedDatabases } from "../../../../../../packages/storage/src/__tests__/repos/proposal/proposal-repo-fixture.js";
 
 const EVIDENCE_A = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -30,7 +31,10 @@ it("atomically replaces old object keys when an accepted review replaces evidenc
   await proposalRepo.acceptPendingMemoryUpdateWithEvents(proposal.proposal_id, "2026-03-21T03:00:00.000Z",
     createReviewEvents(proposal), { target_object_id: memory.object_id, workspace_id: "workspace-1",
       proposed_changes: { evidence_refs: [EVIDENCE_B] }, updated_at: "2026-03-21T03:00:00.000Z",
-      caused_by: "proposal_accept:test" }, { reviewerIdentity: "user:alice" });
+      buildMemoryEvent: (entry) => buildAcceptedMemoryEvent(entry, { evidence_refs: [EVIDENCE_B] }, "proposal_accept:test"),
+      buildGreenRevocationEvent: (entry, green) =>
+        buildAcceptedGreenRevocationEvent(entry, green, "proposal_accept:test", "2026-03-21T03:00:00.000Z")
+    }, { reviewerIdentity: "user:alice" });
   const surfaces = keys.listByOwner("workspace-1", memory.object_id).map(key => key.surface);
   expect(surfaces).toContain("Blue Bicycle");
   expect(surfaces).not.toContain("Golden Retriever");
@@ -47,7 +51,7 @@ it("does not accept a content change when the projection writer is unavailable",
   await expect(repo.acceptPendingMemoryUpdateWithEvents(proposal.proposal_id, "2026-03-21T03:00:00.000Z",
     createReviewEvents(proposal), { target_object_id: memory.object_id, workspace_id: "workspace-1",
       proposed_changes: { content: "changed" }, updated_at: "2026-03-21T03:00:00.000Z",
-      caused_by: "proposal_accept:test" }, { reviewerIdentity: "user:alice" }))
+      ...acceptedMemoryEvents(proposal.proposal_id, ["content"]) }, { reviewerIdentity: "user:alice" }))
     .rejects.toThrow(/projection writer/u);
   expect((await memoryRepo.findById(memory.object_id))?.content).toBe(memory.content);
   expect((await repo.findById(proposal.proposal_id))?.resolution_state).toBe("pending");

@@ -37,8 +37,6 @@ export interface ProposalReviewerStatements {
 }
 
 export interface ProposalResolutionStatements {
-  readonly updateResolutionStatement: SqliteStatement;
-  readonly updateResolutionWithIdentityStatement: SqliteStatement;
   readonly updatePendingResolutionStatement: SqliteStatement;
   readonly updatePendingResolutionWithIdentityStatement: SqliteStatement;
 }
@@ -185,16 +183,6 @@ const PROPOSAL_REVIEWER_SQL: SqlDefinitionMap<ProposalReviewerStatements> = {
 };
 
 const PROPOSAL_RESOLUTION_SQL: SqlDefinitionMap<ProposalResolutionStatements> = {
-  updateResolutionStatement: `
-      UPDATE proposals
-      SET resolution_state = ?, last_updated_at = ?
-      WHERE proposal_id = ?
-    `,
-  updateResolutionWithIdentityStatement: `
-      UPDATE proposals
-      SET resolution_state = ?, last_updated_at = ?, reviewer_identity = ?
-      WHERE proposal_id = ?
-    `,
   updatePendingResolutionStatement: `
       UPDATE proposals
       SET resolution_state = ?, last_updated_at = ?

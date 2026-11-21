@@ -37,7 +37,7 @@ export async function validateReportedRecallHits(
   deps: RecallUsageHandlerDependencies,
   request: SoulReportContextUsageRequest,
   workspaceId: string,
-  linkedDelivery: Readonly<ContextDeliveryRecord> | null
+  linkedDelivery: Readonly<ContextDeliveryRecord>
 ): Promise<void> {
   const usedObjects = resolveUsedObjects(request);
   validateUsedObjectTargets(usedObjects, workspaceId);
@@ -181,10 +181,9 @@ async function validateUsedEvidence(
 
 function validateUsedObjectsBelongToDelivery(
   request: SoulReportContextUsageRequest,
-  linkedDelivery: Readonly<ContextDeliveryRecord> | null,
+  linkedDelivery: Readonly<ContextDeliveryRecord>,
   usedObjects: readonly ReportedUsedObject[]
 ): void {
-  if (linkedDelivery === null) return;
   const deliveredIds = new Set(linkedDelivery.delivered_object_ids);
   for (const object of usedObjects) {
     const belongs = belongsToLinkedDelivery(

@@ -1,4 +1,4 @@
-import { FieldContractDigestSchema } from "@do-soul/alaya-protocol";
+import { FieldContractDigestSchema, isFieldContractDigest } from "@do-soul/alaya-protocol";
 import type { SqliteConnection } from "../../sqlite/db.js";
 import { readRecord, readStringField } from "../shared/parse-row.js";
 
@@ -49,16 +49,35 @@ export function dropLexicalDomain(connection: Pick<SqliteConnection, "exec" | "p
   }
 }
 
+export function dropWorkspaceLexicalDomains(connection: SqliteConnection, workspaceId: string): void {
+  const generations = connection.prepare(`
+    SELECT generation_id FROM source_index_lexical_generations WHERE workspace_id = ?
+  `).pluck().all(workspaceId);
+  for (const generation of generations) {
+    if (typeof generation === "string" && isFieldContractDigest(generation)) dropLexicalDomain(connection, generation);
+  }
+}
+
+export function pruneOrphanedLexicalDomains(connection: SqliteConnection): void {
+  const retained = new Set(connection.prepare("SELECT generation_id FROM source_index_lexical_generations").pluck().all());
+  for (const generation of installedLexicalDomains(connection)) {
+    if (!retained.has(generation)) dropLexicalDomain(connection, generation);
+  }
+}
+
+function installedLexicalDomains(connection: Pick<SqliteConnection, "prepare">): ReadonlySet<string> {
+  return new Set(connection.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
+    .map(raw => readStringField(readRecord(raw, "lexical domain table"), "name"))
+    .filter(isLexicalDomainTable).map(name => `sha256:${name.split("_")[2]}`));
+}
+
 /** Migration and the offline workspace-snapshot copier rebuild from the same projection authority.
  * Caller owns atomic publication (migration transaction or sealed offline copy). No native/source or
  * lifecycle state is changed. Ordinary query/preparation paths never call this whole-corpus entry. */
 export function rebuildSourceIndexLexicalDomains(connection: Pick<SqliteConnection, "exec" | "prepare">): void {
   // An offline slice may replace the entire workspace set. Remove its old domains as well as
   // rebuilding the new set, so absent generations leave neither orphan indexes nor stale triggers.
-  const obsolete = new Set(connection.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
-    .map(raw => readStringField(readRecord(raw, "lexical domain table"), "name"))
-    .filter(isLexicalDomainTable).map(name => `sha256:${name.split("_")[2]}`));
-  for (const generation of obsolete) dropLexicalDomain(connection, generation);
+  for (const generation of installedLexicalDomains(connection)) dropLexicalDomain(connection, generation);
   for (const raw of connection.prepare("SELECT workspace_id,generation_id FROM source_index_lexical_generations").all()) {
     const row = readRecord(raw, "lexical domain generation"), workspace = readStringField(row, "workspace_id");
     const generation = readStringField(row, "generation_id"), tables = lexicalDomainTables(generation);

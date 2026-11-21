@@ -5,6 +5,7 @@ import {
   MemoryDimension,
   MemoryGovernanceEventType,
   RevokeReason,
+  RuntimeGovernanceEventType,
   RetentionPolicy,
   ScopeClass,
   SourceKind,
@@ -13,6 +14,7 @@ import {
   VerifiedBy,
   type GreenStatus,
   type MemoryEntry,
+  type PathRelation,
   type Proposal,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
@@ -20,6 +22,48 @@ import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import { SqliteProposalRepo, type ProposalResolutionEventInput } from "../../../repos/proposal/index.js";
 
 export const trackedDatabases = new Set<ReturnType<typeof initDatabase>>();
+
+export function acceptedMemoryEvents(proposalId: string, updatedFields: readonly string[]) {
+  const envelope = (memory: Readonly<MemoryEntry>) =>
+    ({ workspace_id: memory.workspace_id, run_id: memory.run_id, caused_by: `proposal_accept:${proposalId}` });
+  return {
+    buildMemoryEvent: (memory: Readonly<MemoryEntry>): ProposalResolutionEventInput => ({
+      ...envelope(memory), event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED, entity_type: "memory_entry",
+      entity_id: memory.object_id, payload_json: {
+        object_id: memory.object_id, object_kind: memory.object_kind, workspace_id: memory.workspace_id,
+        run_id: memory.run_id, updated_fields: updatedFields
+      }
+    }),
+    buildGreenRevocationEvent: (memory: Readonly<MemoryEntry>, greenStatusId: string): ProposalResolutionEventInput => ({
+      ...envelope(memory), event_type: GreenGovernanceEventType.SOUL_GREEN_PIERCED, entity_type: "green_status",
+      entity_id: greenStatusId, payload_json: {
+        object_id: greenStatusId, target_object_id: memory.object_id, revoke_reason: RevokeReason.MAPPING_REVOKED,
+        workspace_id: memory.workspace_id, occurred_at: "2026-03-21T03:00:00.000Z"
+      }
+    })
+  };
+}
+
+export function acceptedPathEvent(relation: Readonly<PathRelation>, _previous: Readonly<PathRelation> | null,
+  runId: string | null): ProposalResolutionEventInput {
+  return {
+    event_type: RuntimeGovernanceEventType.PATH_RELATION_CREATED, entity_type: "path_relation",
+    entity_id: relation.path_id, workspace_id: relation.workspace_id, run_id: runId, caused_by: "test",
+    payload_json: { path_id: relation.path_id, workspace_id: relation.workspace_id,
+      relation_kind: relation.constitution.relation_kind, source_anchor_kind: relation.anchors.source_anchor.kind,
+      target_anchor_kind: relation.anchors.target_anchor.kind, initial_strength: relation.plasticity_state.strength,
+      governance_class: relation.legitimacy.governance_class, created_at: relation.created_at }
+  };
+}
+
+export function acceptedSynthesisEvent(capsule: SynthesisCapsule): ProposalResolutionEventInput {
+  return {
+    event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED, entity_type: "synthesis_capsule",
+    entity_id: capsule.object_id, workspace_id: capsule.workspace_id, run_id: capsule.run_id, caused_by: capsule.created_by,
+    payload_json: { object_id: capsule.object_id, object_kind: capsule.object_kind,
+      workspace_id: capsule.workspace_id, run_id: capsule.run_id }
+  };
+}
 
 export function createProposal(overrides: Partial<Proposal> = {}): Proposal {
   return {

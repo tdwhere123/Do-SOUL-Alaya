@@ -194,7 +194,7 @@ export interface McpMemoryToolHandlerDependencies {
       options?: Readonly<{
         readonly expectedWorkspaceId?: string;
         readonly expectedAgentTarget?: string;
-        readonly expectedRunId?: string;
+        readonly expectedRunId?: string | null;
       }>
     ): Promise<UsageProofRecord>;
     findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;

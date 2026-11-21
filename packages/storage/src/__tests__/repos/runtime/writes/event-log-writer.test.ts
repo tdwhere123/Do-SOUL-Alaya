@@ -54,9 +54,13 @@ describe("event-log writer", () => {
     const database = openWriterDb();
     const writer = getEventLogWriter(database.connection);
 
-    const first = insertEventLogEntry(writer, createRunEventDraft("run-1"));
-    const second = insertEventLogEntry(writer, createRunEventDraft("run-1"));
-    const otherEntity = insertEventLogEntry(writer, createRunEventDraft("run-2"));
+    expect(() => insertEventLogEntry(writer, createRunEventDraft("run-1")))
+      .toThrow("EventLog append requires an active transaction.");
+    const [first, second, otherEntity] = database.connection.transaction(() => [
+      insertEventLogEntry(writer, createRunEventDraft("run-1")),
+      insertEventLogEntry(writer, createRunEventDraft("run-1")),
+      insertEventLogEntry(writer, createRunEventDraft("run-2"))
+    ] as const).immediate();
 
     expect([first.revision, second.revision, otherEntity.revision]).toEqual([0, 1, 0]);
     const rows = database.connection

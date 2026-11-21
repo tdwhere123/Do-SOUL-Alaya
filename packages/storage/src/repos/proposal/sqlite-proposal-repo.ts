@@ -169,56 +169,6 @@ export class SqliteProposalRepo implements ProposalRepo {
   ): Promise<Readonly<ProposalReviewerAssignment> | null> {
     return await this.readQueries.findReviewerAssignment(proposalId);
   }
-  public async updateResolution(
-    proposalId: string,
-    state: ProposalResolutionState,
-    updatedAt: string,
-    reviewerIdentity?: string
-  ): Promise<Readonly<Proposal>> {
-    const parsedProposalId = parseProposalId(proposalId);
-    const parsedState = parseProposalResolutionState(state);
-    const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-    // Persist reviewer_identity through the legacy update path.
-    // Empty/whitespace identities are rejected;
-    // when omitted, the column is left untouched (back-compat for
-    // claim-promotion / auto-applied bankruptcy paths).
-    const parsedReviewerIdentity =
-      reviewerIdentity === undefined
-        ? undefined
-        : parseNonEmptyString(reviewerIdentity, "reviewer_identity");
-
-    try {
-      const result = this.connectionHost.transaction(() => {
-        this.assertResolutionSupported(parsedProposalId, parsedState);
-        return parsedReviewerIdentity === undefined
-          ? this.connectionHost.updateResolutionStatement.run(parsedState, parsedUpdatedAt, parsedProposalId)
-          : this.connectionHost.updateResolutionWithIdentityStatement.run(
-              parsedState,
-              parsedUpdatedAt,
-              parsedReviewerIdentity,
-              parsedProposalId
-            );
-      });
-
-      if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found.`);
-      }
-
-      const updated = await this.findById(parsedProposalId);
-
-      if (updated === null) {
-        throw new StorageError("NOT_FOUND", `Proposal ${parsedProposalId} was not found after update.`);
-      }
-
-      return updated;
-    } catch (error) {
-      if (error instanceof StorageError) {
-        throw error;
-      }
-
-      throw new StorageError("QUERY_FAILED", `Failed to update proposal ${parsedProposalId}.`, error);
-    }
-  }
 
   public async updatePendingResolution(
     proposalId: string,
@@ -385,7 +335,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     return {
       db: this.db,
       ...(this.materializeMemoryKeys === undefined ? {} : { materializeMemoryKeys: this.materializeMemoryKeys }),
-      transaction: (fn, options) => this.connectionHost.transaction(fn, options),
+      transaction: (fn) => this.connectionHost.transaction(fn),
       eventLogWriter: this.connectionHost.eventLogWriter,
       findByIdStatement: this.connectionHost.findByIdStatement,
       findMemoryEntryByIdStatement: this.connectionHost.findMemoryEntryByIdStatement,

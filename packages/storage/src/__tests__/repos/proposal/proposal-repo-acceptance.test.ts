@@ -13,10 +13,13 @@ import { SqliteGreenStatusRepo } from "../../../repos/health/green-status-repo.j
 import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
 import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { getEventLogWriter, insertEventLogEntry } from "../../../repos/runtime/writes/event-log-writer.js";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import type { PathRelationProposalPayload } from "../../../repos/proposal/types.js";
 
 import {
+  acceptedMemoryEvents,
+  acceptedPathEvent,
   countGreenPiercedEvents,
   countMemoryUpdatedEvents,
   countProposalEvents,
@@ -80,7 +83,8 @@ describe("SqliteProposalRepo acceptance workflows", () => {
         workspace_id: "workspace-1",
         path_id_on_create: "62222222-2222-4222-8222-222222222222",
         updated_at: "2026-03-21T03:00:00.000Z",
-        caused_by: `proposal_accept:${proposal.proposal_id}`
+        caused_by: `proposal_accept:${proposal.proposal_id}`,
+        buildEvent: acceptedPathEvent
       },
       { reviewerIdentity: "user:alice" }
     );
@@ -122,7 +126,8 @@ describe("SqliteProposalRepo acceptance workflows", () => {
           workspace_id: "workspace-1",
           path_id_on_create: "64444444-4444-4444-8444-444444444444",
           updated_at: "2026-03-21T03:00:00.000Z",
-          caused_by: `proposal_accept:${proposal.proposal_id}`
+          caused_by: `proposal_accept:${proposal.proposal_id}`,
+          buildEvent: acceptedPathEvent
         },
         { reviewerIdentity: "user:alice" }
       )
@@ -159,7 +164,8 @@ describe("SqliteProposalRepo acceptance workflows", () => {
         "2026-03-21T03:00:00.000Z", createReviewEvents(proposal), {
           target_object_id: proposal.derived_from!, workspace_id: "workspace-1",
           path_id_on_create: "62222222-2222-4222-8222-222222222222", updated_at: "2026-03-21T03:00:00.000Z",
-          caused_by: `proposal_accept:${proposal.proposal_id}`
+          caused_by: `proposal_accept:${proposal.proposal_id}`,
+          buildEvent: acceptedPathEvent
         }, { reviewerIdentity: "user:alice" })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
       await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({ resolution_state: "pending" });
       expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
@@ -191,20 +197,31 @@ describe("SqliteProposalRepo acceptance workflows", () => {
       proposed_changes: { content: "Use pnpm for workspace commands." }
     });
 
+    let lateAppend: Promise<unknown> | undefined;
+    const reviewEvents = createReviewEvents(proposal);
     const result = await repo.acceptPendingMemoryUpdateWithEvents(
       proposal.proposal_id,
       "2026-03-21T03:00:00.000Z",
-      createReviewEvents(proposal),
+      reviewEvents,
       {
         target_object_id: proposal.derived_from ?? "",
         workspace_id: "workspace-1",
         proposed_changes: { content: "Use pnpm for workspace commands." },
         updated_at: "2026-03-21T03:00:00.000Z",
-        caused_by: `proposal_accept:${proposal.proposal_id}`
+        ...acceptedMemoryEvents(proposal.proposal_id, ["content"])
       },
-      { reviewerIdentity: "user:alice" }
+      {
+        reviewerIdentity: "user:alice",
+        applySynchronousResolutionMutation: () => {
+          lateAppend = Promise.resolve().then(() => database.connection.transaction(() =>
+            insertEventLogEntry(getEventLogWriter(database.connection), reviewEvents[0]!)
+          ).immediate());
+          return [];
+        }
+      }
     );
 
+    await expect(lateAppend).rejects.toThrow("EventLog transaction callbacks must not continue asynchronously.");
     expect(result.proposal.resolution_state).toBe("accepted");
     expect(result.memory).toMatchObject({
       object_id: proposal.derived_from,
@@ -256,7 +273,7 @@ describe("SqliteProposalRepo acceptance workflows", () => {
         workspace_id: "workspace-1",
         proposed_changes: { evidence_refs: ["evidence-2"] },
         updated_at: "2026-03-21T03:00:00.000Z",
-        caused_by: `proposal_accept:${proposal.proposal_id}`
+        ...acceptedMemoryEvents(proposal.proposal_id, ["evidence_refs"])
       },
       { reviewerIdentity: "user:alice" }
     );
@@ -319,7 +336,7 @@ describe("SqliteProposalRepo acceptance workflows", () => {
           storage_tier: "cold"
         },
         updated_at: "2026-03-21T03:00:00.000Z",
-        caused_by: `proposal_accept:${proposal.proposal_id}`
+        ...acceptedMemoryEvents(proposal.proposal_id, ["storage_tier", "confidence", "retention_state"])
       },
       { reviewerIdentity: "user:alice" }
     );
@@ -385,7 +402,7 @@ describe("SqliteProposalRepo acceptance workflows", () => {
           workspace_id: "workspace-1",
           proposed_changes: { content: "Use yarn for workspace commands." },
           updated_at: "2026-03-21T03:00:00.000Z",
-          caused_by: `proposal_accept:${firstProposal.proposal_id}`
+          ...acceptedMemoryEvents(firstProposal.proposal_id, ["content"])
         },
         { reviewerIdentity: "user:alice" }
       )

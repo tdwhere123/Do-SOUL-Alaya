@@ -241,7 +241,7 @@ export function createReviewHandler(): McpMemoryToolHandler {
       countPendingSummaries: async () => 0,
       acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, events, memoryUpdate, options) => {
         expect(options?.reviewerIdentity).toBe("user:server-reviewer");
-        expect(memoryUpdate.caused_by).toBe(`proposal_accept:${proposal.proposal_id}`);
+        expect(memoryUpdate.buildMemoryEvent(createParityMemoryEntry()).caused_by).toBe(`proposal_accept:${proposal.proposal_id}`);
         expect(events.map((event) => event.caused_by)).toEqual([
           "user:server-reviewer",
           "user:server-reviewer",

@@ -1,5 +1,7 @@
 import type { SqliteConnection } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
+import { deleteGardenSemanticWorkspaceRows } from "../../garden/semantic-artifact-schema.js";
+import { dropWorkspaceLexicalDomains } from "../../source-index/lexical-domain.js";
 import { memoryPathTopologyDeletionSql } from "../statements/path-relation-sql.js";
 
 /**
@@ -71,58 +73,73 @@ export function cascadeDeleteRun(connection: SqliteConnection, runId: string): v
   }
 }
 
-/**
- * Deletes a workspace and all domain data scoped to it, wrapped in a single transaction.
- *
- * event_log is intentionally excluded — events are the permanent audit trail.
- *
- * Order:
- *   1. Tables without (or regardless of) FK constraints deleted by workspace_id.
- *   2. runs deleted by workspace_id (triggers signals cascade).
- *   3. workspaces deleted last (triggers FK CASCADE on engine_bindings, slots,
- *      conflict_matrix_edges, surface_*, cross_cutting_permissions,
- *      orphan_radar, project_mapping_anchors,
- *      path_relations, path_graph_snapshots, bootstrapping_records,
- *      drift_leases).
- *
- * extension_descriptors is intentionally excluded — it holds process-wide
- * registry entries (e.g. MCP providers, builtin tools) that outlive a single
- * workspace and are keyed by descriptor_id rather than workspace_id.
- */
-export function cascadeDeleteWorkspace(connection: SqliteConnection, workspaceId: string): void {
-  const deleteMemoryEntries = connection.prepare("DELETE FROM memory_entries WHERE workspace_id = ?");
-  const deleteEvidenceCapsules = connection.prepare("DELETE FROM evidence_capsules WHERE workspace_id = ?");
-  const deleteSynthesisCapsules = connection.prepare("DELETE FROM synthesis_capsules WHERE workspace_id = ?");
-  const deleteClaimForms = connection.prepare("DELETE FROM claim_forms WHERE workspace_id = ?");
-  const deleteProposals = connection.prepare("DELETE FROM proposals WHERE workspace_id = ?");
-  const deleteKarmaEvents = connection.prepare("DELETE FROM karma_events WHERE workspace_id = ?");
-  const deleteGreenStatuses = connection.prepare("DELETE FROM green_statuses WHERE workspace_id = ?");
-  const deleteHealthJournal = connection.prepare("DELETE FROM health_journal WHERE workspace_id = ?");
-  const deleteFiles = connection.prepare("DELETE FROM files WHERE workspace_id = ?");
-  // runs has a non-cascade FK → workspaces; must delete runs before workspace row.
-  const deleteRuns = connection.prepare("DELETE FROM runs WHERE workspace_id = ?");
-  const deleteWorkspace = connection.prepare("DELETE FROM workspaces WHERE workspace_id = ?");
+// Delete source owners before clearing SourceIndex: their delete triggers
+// advance the epoch. The text and projection triggers also clean their FTS rows.
+const WORKSPACE_OWNED_ROWS = [
+  "memory_entries",
+  "evidence_capsules",
+  "synthesis_capsules",
+  "claim_forms",
+  "proposals",
+  "karma_events",
+  "green_statuses",
+  "health_journal",
+  "health_issue_groups",
+  "files",
+  "trust_context_delivery",
+  "garden_embedding_backfill_runs",
+  "garden_tasks",
+  "host_session_sweeps",
+  "host_session_planning",
+  "host_session_tail_boundaries",
+  "host_session_rounds",
+  "host_session_messages",
+  "host_session_containers",
+  "privacy_dependency_quarantine",
+  "preservation_capsule_revisions",
+  "recall_routing_key_owners",
+  "relation_assertion_quarantine",
+  "source_statement_relation_pending",
+  "source_statement_relation_vectors",
+  "retained_source_chunks",
+  "source_records",
+  "source_record_active_evidence_refs",
+  "source_index_lexical_progress",
+  "source_index_lexical_projections",
+  "source_index_lexical_targets",
+  "source_index_lexical_selections",
+  "source_index_lexical_generations",
+  "source_index_vectors",
+  "source_index_windows",
+  "source_index_text",
+  "source_index_targets",
+  "source_index_dependencies",
+  "source_index_roots",
+  "source_index_selections",
+  "source_index_generations",
+  "source_index_invalidations",
+  "source_index_epochs",
+  "runs",
+  "workspaces"
+] as const;
 
+/** Delete workspace data in one transaction and retain its immutable EventLog. */
+export function cascadeDeleteWorkspace(connection: SqliteConnection, workspaceId: string): void {
   try {
     connection.transaction(() => {
-      deleteMemoryEntries.run(workspaceId);
-      deleteEvidenceCapsules.run(workspaceId);
-      deleteSynthesisCapsules.run(workspaceId);
-      deleteClaimForms.run(workspaceId);
-      deleteProposals.run(workspaceId);
-      deleteKarmaEvents.run(workspaceId);
-      deleteGreenStatuses.run(workspaceId);
-      deleteHealthJournal.run(workspaceId);
-      deleteFiles.run(workspaceId);
-      // Delete runs before workspace row — signals cascade via FK ON DELETE CASCADE.
-      deleteRuns.run(workspaceId);
-      // Delete workspace last — FK CASCADE handles engine_bindings, slots,
-      // conflict_matrix_edges, surface_*, cross_cutting_permissions,
-      // orphan_radar, project_mapping_anchors,
-      // path_relations, path_graph_snapshots, bootstrapping_records,
-      // drift_leases.
-      deleteWorkspace.run(workspaceId);
-    })();
+      deleteGardenSemanticWorkspaceRows(connection, "task_dependencies", workspaceId);
+      dropWorkspaceLexicalDomains(connection, workspaceId);
+      connection.prepare(`
+        DELETE FROM garden_embedding_backfill_objects
+        WHERE task_id IN (SELECT task_id FROM garden_embedding_backfill_runs WHERE workspace_id = ?)
+      `).run(workspaceId);
+      connection.prepare("DELETE FROM reconciliation_leases WHERE lease_key = ?").run(workspaceId);
+      for (const table of WORKSPACE_OWNED_ROWS) {
+        connection.prepare(`DELETE FROM ${table} WHERE workspace_id = ?`).run(workspaceId);
+      }
+      // Observable-mutation triggers update Garden's cursor while rows are deleted.
+      deleteGardenSemanticWorkspaceRows(connection, "projections", workspaceId);
+    }).immediate();
   } catch (error) {
     throw new StorageError("QUERY_FAILED", `Failed to cascade delete workspace ${workspaceId}.`, error);
   }

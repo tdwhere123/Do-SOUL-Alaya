@@ -1,6 +1,8 @@
 import {
   EffectRequestSchema,
   MemoryGovernanceEventType,
+  SoulReviewCompletedPayloadSchema,
+  TransitionCausedBy,
   PROOF_EFFECT_OPERATOR_ID,
   PROOF_EFFECT_OPERATOR_VERSION,
   hashEffectGovernanceFrontier,
@@ -34,15 +36,21 @@ export function createPrivacyEffectLookup(erase: Readonly<{
   };
 }
 
-export function authorizePrivacyErase(input: Readonly<{
-  readonly store: EffectDecisionStore;
-  readonly lookup: PrivacyEffectLookup;
-  readonly storedReviewEvents: readonly EventLogEntry[];
+type PrivacyReviewAuthority = Readonly<{
   readonly proposalId: string;
+  readonly proposalRuntimeId: string;
   readonly workspaceId: string;
+  readonly reviewerIdentity: string;
+  readonly runId: string | null;
   readonly targetObjectId: string;
   readonly reviewedAt: string;
   readonly createError: (code: "NEEDS_CONTEXT", message: string) => Error;
+}>;
+
+export function authorizePrivacyErase(input: PrivacyReviewAuthority & Readonly<{
+  readonly store: EffectDecisionStore;
+  readonly lookup: PrivacyEffectLookup;
+  readonly storedReviewEvents: readonly EventLogEntry[];
 }>): readonly ProposalResolutionEventInput[] {
   const authorityEvent = findAuthorityEvent(input);
   const decision = decidePrivacyErase(input, authorityEvent);
@@ -53,44 +61,40 @@ export function authorizePrivacyErase(input: Readonly<{
   return [buildEffectAuditEventInput(decision)];
 }
 
-function findAuthorityEvent(input: Readonly<{
+function findAuthorityEvent(input: PrivacyReviewAuthority & Readonly<{
   readonly storedReviewEvents: readonly EventLogEntry[];
-  readonly proposalId: string;
-  readonly workspaceId: string;
-  readonly createError: (code: "NEEDS_CONTEXT", message: string) => Error;
-}>): EventLogEntry & { readonly run_id: string; readonly caused_by: string } {
+}>): EventLogEntry {
   const event = input.storedReviewEvents.find((candidate) =>
     candidate.event_type === MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED &&
     candidate.entity_type === "proposal" && candidate.entity_id === input.proposalId &&
-    candidate.workspace_id === input.workspaceId && candidate.run_id !== null &&
-    candidate.caused_by !== null
+    candidate.workspace_id === input.workspaceId && candidate.run_id === input.runId &&
+    candidate.caused_by === input.reviewerIdentity
   );
-  if (event === undefined || event.run_id === null || event.caused_by === null) {
-    throw input.createError(
-      "NEEDS_CONTEXT",
-      "Privacy erase requires a run-bound durable review authority event."
-    );
+  const review = SoulReviewCompletedPayloadSchema.safeParse(event?.payload_json);
+  if (event === undefined || !review.success ||
+      review.data.object_id !== input.proposalRuntimeId ||
+      review.data.workspace_id !== input.workspaceId || review.data.run_id !== input.runId ||
+      review.data.from_state !== "pending" || review.data.to_state !== "accepted" ||
+      review.data.caused_by !== TransitionCausedBy.REVIEW ||
+      review.data.reason_code !== "privacy_erase_accepted" || review.data.occurred_at !== input.reviewedAt) {
+    throw input.createError("NEEDS_CONTEXT", "Privacy erase requires a bound durable reviewer approval.");
   }
-  return event as EventLogEntry & { readonly run_id: string; readonly caused_by: string };
+  return event;
 }
 
 function decidePrivacyErase(
-  input: Readonly<{
+  input: PrivacyReviewAuthority & Readonly<{
     readonly lookup: PrivacyEffectLookup;
-    readonly workspaceId: string;
-    readonly proposalId: string;
-    readonly targetObjectId: string;
-    readonly reviewedAt: string;
   }>,
-  authorityEvent: EventLogEntry & { readonly run_id: string; readonly caused_by: string }
+  authorityEvent: EventLogEntry
 ): EffectDecisionReceipt {
   const proofs = privacyProofs(input, authorityEvent);
   const witnesses = proofs.map((proof) => proofWitness(proof, authorityEvent.event_id));
   const request = EffectRequestSchema.parse({
     schema_version: 2,
     workspace_id: input.workspaceId,
-    actor_id: authorityEvent.caused_by,
-    run_id: authorityEvent.run_id,
+    actor_id: input.reviewerIdentity,
+    run_id: input.runId,
     delivery_id: input.proposalId,
     action: "erase",
     target: input.targetObjectId,
@@ -116,13 +120,8 @@ function decidePrivacyErase(
 }
 
 function privacyProofs(
-  input: Readonly<{
-    readonly workspaceId: string;
-    readonly proposalId: string;
-    readonly targetObjectId: string;
-    readonly reviewedAt: string;
-  }>,
-  event: EventLogEntry & { readonly run_id: string; readonly caused_by: string }
+  input: PrivacyReviewAuthority,
+  event: EventLogEntry
 ): readonly ProofRecord[] {
   const base = {
     workspace_id: input.workspaceId,
@@ -135,7 +134,7 @@ function privacyProofs(
   } as const;
   return [
     { ...base, id: proofId("actor_authority", input, event), kind: "actor_authority",
-      actor_id: event.caused_by, run_id: event.run_id, delivery_id: input.proposalId },
+      actor_id: input.reviewerIdentity, run_id: input.runId, delivery_id: input.proposalId },
     { ...base, id: proofId("confirmation", input, event), kind: "confirmation" }
   ];
 }

@@ -88,7 +88,7 @@ export interface EvidenceServiceEvidenceCapsuleRepoPort {
       .EvidenceOsfSemanticCompletenessReceipt>,
     sourceProvenance?: boolean
   ): Readonly<EvidenceCapsule>;
-  deleteById(objectId: string): Promise<void>;
+  deleteById(objectId: string, workspaceId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByRunIdPage?(

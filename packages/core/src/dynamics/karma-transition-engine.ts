@@ -78,7 +78,7 @@ export class KarmaTransitionEngine {
     // (daemon); this ordering-safe, non-atomic path serves fakes lacking the sync ports.
     const plan = await this.computeKarmaTransitionPlanFromParsed(parsedEvent, context);
     const applied = await this.applyKarmaTransitionPlan(plan);
-    await this.auditKarmaTransition(applied, plan);
+    await this.buildKarmaTransitionAuditEntries(applied, plan);
     this.scheduleGreenReevaluation(applied.updated);
   }
 
@@ -190,19 +190,12 @@ export class KarmaTransitionEngine {
     return { updated, revived };
   }
 
-  public async computeKarmaTransitionPlan(
-    event: KarmaEvent,
-    context?: KarmaTransitionContext
-  ): Promise<KarmaTransitionPlan> {
-    return this.computeKarmaTransitionPlanFromParsed(parseKarmaEventInput(event), context);
-  }
-
   private async computeKarmaTransitionPlanFromParsed(
     parsedEvent: Readonly<KarmaEvent>,
     context?: KarmaTransitionContext
   ): Promise<KarmaTransitionPlan> {
     const memory = await this.deps.memoryRepo.findById(parsedEvent.object_id);
-    if (memory === null) {
+    if (memory === null || memory.workspace_id !== parsedEvent.workspace_id) {
       throw new CoreError("NOT_FOUND", `Memory entry not found: ${parsedEvent.object_id}`);
     }
     // add own amount: this event is inserted later, so match baseline create-then-sum.
@@ -229,7 +222,7 @@ export class KarmaTransitionEngine {
       });
     }
     const memory = memoryRepo.findByIdSync(parsedEvent.object_id);
-    if (memory === null) {
+    if (memory === null || memory.workspace_id !== parsedEvent.workspace_id) {
       throw new CoreError("NOT_FOUND", `Memory entry not found: ${parsedEvent.object_id}`);
     }
     const karmaSum = karmaEventRepo.sumByObjectIdSync(parsedEvent.object_id) + parsedEvent.amount;
@@ -243,7 +236,7 @@ export class KarmaTransitionEngine {
     };
   }
 
-  public async applyKarmaTransitionPlan(plan: KarmaTransitionPlan): Promise<KarmaTransitionApplyResult> {
+  private async applyKarmaTransitionPlan(plan: KarmaTransitionPlan): Promise<KarmaTransitionApplyResult> {
     await this.deps.karmaEventRepo.create(plan.parsedEvent);
     const updated = await this.deps.memoryRepo.updateDynamics(
       plan.memory.object_id,
@@ -258,13 +251,6 @@ export class KarmaTransitionEngine {
     );
     const revived = await this.reviveDormantMemoryFromKarma(plan.memory, plan.parsedEvent, plan.transition.now);
     return { updated, revived };
-  }
-
-  public async auditKarmaTransition(
-    applyResult: KarmaTransitionApplyResult,
-    plan: KarmaTransitionPlan
-  ): Promise<EventLogEntry[]> {
-    return await this.buildKarmaTransitionAuditEntries(applyResult, plan);
   }
 
   public computeKarmaTransition(

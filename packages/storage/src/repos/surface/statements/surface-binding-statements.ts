@@ -35,7 +35,7 @@ export function prepareSurfaceBindingStatements(db: StorageDatabase): SurfaceBin
     updateStateStatement: db.connection.prepare(`
       UPDATE surface_bindings
       SET binding_state = ?, updated_at = ?
-      WHERE binding_id = ?
+      WHERE binding_id = ? AND workspace_id = ?
     `),
     findDetachableBySurfaceIdStatement: db.connection.prepare(
       selectSurfaceBindingSql("detachableBySurfaceId", "created")

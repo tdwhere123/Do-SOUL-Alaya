@@ -547,20 +547,6 @@ describe("SqliteProposalRepo", () => {
     await expect(repo.findPendingByRunId("run-404")).resolves.toBeNull();
   });
 
-  it("updates proposal resolution state", async () => {
-    const { repo } = createRepo();
-    const proposal = createProposal();
-    await repo.create({ proposal, workspace_id: "workspace-1", run_id: "run-1", target_object_kind: "memory_entry" });
-
-    const updated = await repo.updateResolution(
-      proposal.proposal_id,
-      "accepted",
-      "2026-03-21T03:00:00.000Z"
-    );
-
-    expect(updated.resolution_state).toBe("accepted");
-    expect(updated.last_updated_at).toBe("2026-03-21T03:00:00.000Z");
-  });
 
   it("updates pending proposal resolution only once", async () => {
     const { repo } = createRepo();

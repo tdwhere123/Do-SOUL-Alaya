@@ -246,7 +246,7 @@ describe("mcp memory tool handler wiring", () => {
       },
       context
     });
-    expect(unresolved.ok).toBe(true);
+    expect(unresolved).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
   });
 
   it("uses delivered_objects as the canonical used object list", async () => {

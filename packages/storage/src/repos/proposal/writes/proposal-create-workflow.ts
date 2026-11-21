@@ -40,7 +40,7 @@ export interface ProposalCreateWorkflowHost extends Pick<
   "createStatement" | "findPendingByDedupeKeyStatement" | "findByIdStatement" | "assignReviewerStatement"
 > {
   readonly eventLogWriter: ProposalEventLogWriter;
-  transaction<T>(fn: () => T, options?: { readonly immediate?: boolean }): T;
+  transaction<T>(fn: () => T): T;
 }
 
 interface ParsedProposalCreateRequest {
@@ -157,7 +157,7 @@ export class ProposalCreateWorkflow {
           events: storedEvents,
           status: "created" as const
         });
-      }, { immediate: true });
+      });
     } catch (error) {
       const existing = findPendingProposalByDedupeKey(this.host, parsedDedupeKey);
       if (isUniqueConstraintError(error) && existing !== null) {

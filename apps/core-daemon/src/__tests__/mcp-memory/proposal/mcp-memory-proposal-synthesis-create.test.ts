@@ -128,26 +128,8 @@ function createHarness(options: {
           throw new Error("missing proposal");
         }
         const storedEvents = storeEvents(resolutionEvents);
-        // The atomic storage method appends SOUL_SYNTHESIS_CREATED itself; the
-        // fake records the capsule insert + that event so the test can assert the
-        // capsule landed and the event followed the resolve events.
         capsules.push(synthesisCreate.capsule);
-        const synthesisEvent = storeEvents([
-          {
-            event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED,
-            entity_type: "synthesis_capsule",
-            entity_id: synthesisCreate.capsule.object_id,
-            workspace_id: synthesisCreate.capsule.workspace_id,
-            run_id: synthesisCreate.capsule.run_id,
-            caused_by: synthesisCreate.capsule.created_by,
-            payload_json: {
-              object_id: synthesisCreate.capsule.object_id,
-              object_kind: synthesisCreate.capsule.object_kind,
-              workspace_id: synthesisCreate.capsule.workspace_id,
-              run_id: synthesisCreate.capsule.run_id
-            }
-          }
-        ])[0]!;
+        const synthesisEvent = storeEvents([synthesisCreate.event])[0]!;
         const updated = {
           ...existing.proposal,
           resolution_state: ProposalResolutionState.ACCEPTED,

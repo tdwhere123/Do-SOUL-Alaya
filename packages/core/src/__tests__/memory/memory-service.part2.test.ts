@@ -147,7 +147,7 @@ it("persists projection-only updates through the production service boundary", a
         time_precision: "day",
         time_source: "explicit"
       },
-      "reconciliation_projection_merge"
+      "reviewed_update"
     );
 
     expect(evidenceFindByIdSpy).not.toHaveBeenCalled();
@@ -184,7 +184,7 @@ it("persists canonical_entities and records it as an updated field", async () =>
     await service.update(
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       { canonical_entities: ["alice", "berlin"] },
-      "reconciliation_projection_merge"
+      "reviewed_update"
     );
 
     expect(repoUpdateSpy).toHaveBeenCalledWith(
@@ -215,7 +215,7 @@ it.each([
     await service.update(
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       update,
-      "reconciliation_projection_merge"
+      "reviewed_update"
     );
 
     expect(repoUpdateSpy).toHaveBeenCalledWith(
