@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   closeCachedDatabase,
+  detachEmbeddingOverlay,
   EMBEDDING_OVERLAY_BIND_FILENAME,
   initDatabase,
   SqliteClaimElectionLeaseRepo,
@@ -622,6 +623,7 @@ describe("workspace slice install and daemon reopen", () => {
     const live = initDatabase({ filename });
     try {
       live.connection.pragma("foreign_keys = ON");
+      detachEmbeddingOverlay(live.connection);
       unlinkSync(overlayPath);
       let caught: unknown;
       try {

@@ -1,4 +1,5 @@
 import { statSync } from "node:fs";
+import path from "node:path";
 import {
   inspectTemporalProjectionSelection,
   openReadOnlyDatabase
@@ -143,15 +144,38 @@ function checkDatabaseExists(
     statSync(dbPath);
     return { status: "exists" };
   } catch (error) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { readonly code?: unknown }).code
-        : undefined;
-    if (code === "ENOENT") {
-      return { status: "missing" };
+    if (readFsErrorCode(error) === "ENOENT") {
+      return checkMissingDatabaseAncestors(dbPath);
     }
     return { status: "error", error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function checkMissingDatabaseAncestors(
+  dbPath: string
+): { readonly status: "missing" } | { readonly status: "error"; readonly error: string } {
+  // Windows statSync reports ENOENT rather than ENOTDIR when an ancestor is a regular file.
+  for (let current = path.dirname(path.resolve(dbPath)); ; ) {
+    try {
+      if (!statSync(current).isDirectory()) {
+        return { status: "error", error: `ENOTDIR: parent path is not a directory, stat '${dbPath}'` };
+      }
+      return { status: "missing" };
+    } catch (error) {
+      if (readFsErrorCode(error) !== "ENOENT") {
+        return { status: "error", error: error instanceof Error ? error.message : String(error) };
+      }
+      const parent = path.dirname(current);
+      if (parent === current) return { status: "missing" };
+      current = parent;
+    }
+  }
+}
+
+function readFsErrorCode(error: unknown): unknown {
+  return typeof error === "object" && error !== null && "code" in error
+    ? (error as { readonly code?: unknown }).code
+    : undefined;
 }
 
 function isConflictLlmRawKeyOnly(env: NodeJS.ProcessEnv): boolean {

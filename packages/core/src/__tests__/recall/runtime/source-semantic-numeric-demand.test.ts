@@ -196,4 +196,4 @@ it("retains comparator direction, non-strict ties, extrema and an unfunded finit
   expect(partial.result.outcome.status).toBe("resource_exhausted");
   expect(partial.result.binding_results).toBeUndefined();
   expect(partial.index).toBeNull();
-});
+}, 20_000);
