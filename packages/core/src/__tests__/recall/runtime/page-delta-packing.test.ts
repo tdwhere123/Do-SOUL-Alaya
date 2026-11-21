@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   ORDINARY_NATIVE_FIELD_RESULT_VERSION,
   SoulMemorySearchResponseSchema,
+  SoulMemorySearchResponseWireSchema,
   sourceDisclosure,
   sourceRecallTarget,
   type HostDependencyExposure,
   type SourceDeliveryBoundaries
 } from "@do-soul/alaya-protocol";
+import { BoundedIndexPayload } from "../../../recall/runtime/index-payload.js";
 import {
   captureIndexPreviews,
   captureIndexSourceMetadata
@@ -545,13 +547,77 @@ describe("Page-1 fixed-fragment Delta + Next packing", () => {
     expect(literalWire.results).toHaveLength(2);
     expect(Array.isArray(literalWire.results[0]!.source_disclosure)).toBe(true);
     expect(Array.isArray(literalWire.results[1]!.source_disclosure)).toBe(true);
+    expect(SoulMemorySearchResponseWireSchema.safeParse({
+      ...omittedWire.wire,
+      index: {
+        ...omittedWire.wire.index!,
+        representation: { ...omittedWire.wire.index!.representation, disclosure_codec: "literal" }
+      }
+    }).success).toBe(false);
+    expect(SoulMemorySearchResponseWireSchema.safeParse({
+      ...omittedWire.wire,
+      index: {
+        ...omittedWire.wire.index!,
+        representation: {
+          schema_version: omittedWire.wire.index!.representation.schema_version,
+          policy: omittedWire.wire.index!.representation.policy,
+          page_budget: omittedWire.wire.index!.representation.page_budget,
+          identity_tie_break: omittedWire.wire.index!.representation.identity_tie_break
+        }
+      }
+    }).success).toBe(false);
 
-    // 4. Framing work spent during Next is never restored into the outer fit allowance.
+    // 4. Next refuses to extend when dependency reader or authorized scopes are absent.
+    const noDepReaderRoot: MockRoot = { id: "no-dep-reader", body: unknownDepBody, messages: [400, 900, 2900] };
+    const noDepReaderPage = runConditionalFieldRecallWithReceipt(
+      makeRequest(makeReaders([noDepReaderRoot], { payloadRange: () => ({ start_byte: 0, end_byte: 400 }) }), {
+        budget: defaultBudget({ page_budget: 1 })
+      })
+    );
+    expect(noDepReaderPage.index.entries[0]!.target).toMatchObject({
+      span: { content_start: 0, content_end: 400, content_complete: false }
+    });
+    const noScopeReaders = makeReaders([{
+      ...noDepReaderRoot,
+      dependency: span => ({
+        status: "complete",
+        roots: [{ occurrence_id: "occ-m2", utf8_span: [span[0], span[1]], dependencies: [] }],
+        prerequisites: []
+      })
+    }], { payloadRange: () => ({ start_byte: 0, end_byte: 400 }) });
+    const noScopePayload = new BoundedIndexPayload({
+      readers: noScopeReaders,
+      workspaceId: WS,
+      authorizedScopes: undefined,
+      asOf: CLOCK,
+      remainingMemoryBytes: 1_000_000,
+      manifestationFor: () => "excerpt"
+    });
+    noScopePayload.finalize(noDepReaderPage.index.entries, 100);
+    expect(noScopePayload.extendNextMessageBoundary({
+      entry: noDepReaderPage.index.entries[0]!,
+      residualBytes: 800,
+      availableWork: 100,
+      framingReserve: 10,
+      retentionBytes: 0
+    })).toEqual({ extendedBytes: 0, spentWork: 0 });
+
+    // 5. Framing work spent during Next is never restored into the outer fit allowance.
     let heavyNextCalls = 0;
+    const heavyRoot: MockRoot = {
+      id: "heavy-next",
+      body: unknownDepBody,
+      messages: [400, 900, 2900],
+      dependency: span => ({
+        status: "complete",
+        roots: [{ occurrence_id: "occ-m2", utf8_span: [span[0], span[1]], dependencies: [] }],
+        prerequisites: []
+      })
+    };
     const heavyReaders: ObserverReaders = {
-      ...makeReaders([{ id: "heavy-next", body: unknownDepBody, messages: [400, 900, 2900] }]),
+      ...makeReaders([heavyRoot]),
       sourceRoot: input => {
-        const base = makeReaders([{ id: "heavy-next", body: unknownDepBody, messages: [400, 900, 2900] }]).sourceRoot!(input);
+        const base = makeReaders([heavyRoot]).sourceRoot!(input);
         if ((input.offset ?? 0) > 0) {
           heavyNextCalls += 1;
           return { ...base, nativeWork: 8 };

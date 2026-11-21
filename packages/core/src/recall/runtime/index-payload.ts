@@ -359,6 +359,7 @@ export class BoundedIndexPayload {
     const reader = this.input.readers.sourceRoot;
     if (span === undefined || span.content_complete !== false || span.retained_extent !== "body"
       || span.original_complete !== true || existingPreview === undefined || reader === undefined
+      || this.input.readers.sourceDependencies === undefined || this.input.authorizedScopes === undefined
       || boundaries?.status !== "available"
       || (!boundaries.spans.some(s => s.purpose === "message")
         && !(boundaries.spans.length === 0 && boundaries.first_end_offset !== undefined))) {
@@ -418,7 +419,7 @@ export class BoundedIndexPayload {
     retentionBytes: number
   ): Readonly<{ safe: boolean; work: number }> {
     if (this.input.readers.sourceDependencies === undefined || this.input.authorizedScopes === undefined) {
-      return { safe: true, work: 0 };
+      return { safe: false, work: 0 };
     }
     const depRead = this.input.readers.sourceDependencies({
       target,

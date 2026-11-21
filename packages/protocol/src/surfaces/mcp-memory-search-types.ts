@@ -454,11 +454,21 @@ export const SoulMemorySearchResponseWireSchema = z
   })
   .strict()
   .superRefine((response, context) => {
+    const deltaAllowed = response.index === undefined
+      || response.index.representation.disclosure_codec === "page_delta";
     let anchor: SourceDisclosure | undefined;
     for (let index = 0; index < response.results.length; index++) {
       const row = response.results[index]!;
       const slot = row.source_disclosure;
       if (slot === undefined) continue;
+      if (!deltaAllowed && !Array.isArray(slot)) {
+        context.addIssue({
+          code: "custom",
+          path: ["results", index, "source_disclosure"],
+          message: "source disclosure delta requires representation.disclosure_codec === 'page_delta'"
+        });
+        return;
+      }
       if (anchor === undefined && !Array.isArray(slot)) {
         context.addIssue({
           code: "custom",
