@@ -13,8 +13,6 @@ export const VITEST_PROJECTS = [
   "@do-soul/alaya-engine-gateway",
   "@do-soul/alaya-eval",
   "@do-soul/alaya-core-daemon",
-  "@do-soul/alaya-inspector",
-  "@do-soul/alaya-inspector-web",
   "@do-soul/alaya-bench-runner"
 ];
 
@@ -68,14 +66,6 @@ export const PROJECT_COVERAGE = {
   "@do-soul/alaya-core-daemon": {
     include: "apps/core-daemon/src/**",
     statements: 75, lines: 76, functions: 81, branches: 66
-  },
-  "@do-soul/alaya-inspector": {
-    include: "apps/inspector/src/**",
-    statements: 77, lines: 80, functions: 87, branches: 60
-  },
-  "@do-soul/alaya-inspector-web": {
-    include: "apps/inspector/web/src/**",
-    statements: 79, lines: 80, functions: 82, branches: 66
   },
   "@do-soul/alaya-bench-runner": {
     include: "apps/bench-runner/src/**",

@@ -36,8 +36,6 @@ import {
   type McpMemoryToolHandlerDependencies
 } from "../../../mcp-memory/tool/tool-handler.js";
 
-import { createInspectorApp } from "../../../../../inspector/src/runtime/app.js";
-
 import {
   reviewerArgs,
   ReviewParitySurfaces,
@@ -55,7 +53,7 @@ describe("proposal review error parity", () => {
 
   it("returns identical VALIDATION envelope when validateUpdate rejects (e.g. archived memory)", async () => {
     const message = "Cannot update archived memory entry mem-1.";
-    const { mcp, inspector, cli } = await runReviewParityScenario(() =>
+    const { mcp, http, cli } = await runReviewParityScenario(() =>
       createErrorReviewHandler({ kind: "validate_update_rejected", message })
     );
 
@@ -63,8 +61,8 @@ describe("proposal review error parity", () => {
     expect(mcp.error.code).toBe("VALIDATION");
     expect(mcp.error.message).toBe("Invalid request.");
 
-    expect(inspector.body.error?.code).toBe(mcp.error.code);
-    expect(inspector.body.error?.message).toBe(mcp.error.message);
+    expect(http.body.error?.code).toBe(mcp.error.code);
+    expect(http.body.error?.message).toBe(mcp.error.message);
 
     expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
     expect(cli.stderr).toContain("VALIDATION");

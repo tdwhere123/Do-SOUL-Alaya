@@ -153,8 +153,7 @@ function localEnvBooleanDialectKey(sourceLine) {
 function isAcceptedResidualEnvBooleanKey(key) {
   return (
     key.startsWith("ALAYA_EXP_") ||
-    key === "ALAYA_BENCH_RECALL_PACKET_TRACE" ||
-    key === "ALAYA_BUILD_INSPECTOR_WEB"
+    key === "ALAYA_BENCH_RECALL_PACKET_TRACE"
   );
 }
 
@@ -185,8 +184,7 @@ function assertDialectScannerCatchesLocalReaders() {
   }
   const mustAccept = [
     'enabled: env.ALAYA_EXP_COHERENCE_EDGES === "1"',
-    'input.effectiveEnv.ALAYA_BENCH_RECALL_PACKET_TRACE === "1"',
-    'process.env.ALAYA_BUILD_INSPECTOR_WEB === "0"'
+    'input.effectiveEnv.ALAYA_BENCH_RECALL_PACKET_TRACE === "1"'
   ];
   for (const sample of mustAccept) {
     const key = localEnvBooleanDialectKey(sample);

@@ -634,7 +634,7 @@ function checkWorkspaceInventory({ root, policy, errors }) {
 
 function discoverWorkspaceDirectories(root) {
   const directories = [];
-  for (const globRoot of ["packages", "apps", "apps/inspector"]) {
+  for (const globRoot of ["packages", "apps"]) {
     const topDirectory = path.join(root, globRoot);
     if (!existsSync(topDirectory)) continue;
     directories.push(...listImmediateDirectories(topDirectory));

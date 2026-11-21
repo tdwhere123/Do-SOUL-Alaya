@@ -37,7 +37,6 @@ import {
 import { resolveGardenComputeStatus } from "./support/garden-compute-status.js";
 import { readBuildInfo } from "../runtime/daemon/support/build-info.js";
 import { createInstallCommand } from "./install/install.js";
-import { createInspectCommand } from "./inspect/inspect.js";
 import { createUpdateCommand } from "./update.js";
 import { defaultRecallPathPlasticityLookupTelemetry } from "../garden/path-plasticity/path-plasticity-runtime.js";
 import { createOperationCommandSpecs } from "./operations/operations.js";
@@ -303,10 +302,6 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
     recallUtilizationService: runtime.services.recallUtilizationService
   }));
   bridge.registerSubcommand(createInstallCommand());
-  bridge.registerSubcommand(createInspectCommand({
-    getRequestToken: () => runtime.requestProtection.requestToken,
-    startDaemonServer: async (options) => await runtime.startHttpServer(options)
-  }));
   bridge.registerSubcommand(createUpdateCommand());
 }
 

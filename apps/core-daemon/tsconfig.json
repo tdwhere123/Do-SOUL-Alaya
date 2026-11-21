@@ -10,9 +10,9 @@
     { "path": "../../packages/cjk-segmentation" },
     { "path": "../../packages/core" },
     { "path": "../../packages/engine-gateway" },
+    { "path": "../../packages/eval" },
     { "path": "../../packages/protocol" },
     { "path": "../../packages/soul" },
-    { "path": "../../packages/storage" },
-    { "path": "../inspector" }
+    { "path": "../../packages/storage" }
   ]
 }

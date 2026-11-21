@@ -100,20 +100,6 @@
         "scripts/*.sh"
       ],
       "project": ["src/**/*.ts", "bin/**/*.mjs", "scripts/**/*.{mjs,sh}", "tsconfig.json"]
-    },
-    "apps/inspector": {
-      "entry": ["src/app.ts", "src/server.ts", "src/__tests__/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tsconfig.json"]
-    },
-    "apps/inspector/web": {
-      "entry": [
-        "src/main.tsx",
-        "src/**/*.test.ts",
-        "src/**/*.test.tsx",
-        "vite.config.ts",
-        "vitest.config.ts"
-      ],
-      "project": ["src/**/*.{ts,tsx}", "*.ts", "tsconfig*.json"]
     }
   }
 }

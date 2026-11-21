@@ -36,8 +36,6 @@ import {
   type McpMemoryToolHandlerDependencies
 } from "../../../mcp-memory/tool/tool-handler.js";
 
-import { createInspectorApp } from "../../../../../inspector/src/runtime/app.js";
-
 import {
   reviewerArgs,
   ReviewParitySurfaces,
@@ -53,8 +51,8 @@ import {
 
 describe("proposal review error parity", () => {
 
-  it("returns identical NOT_FOUND envelope across MCP, Inspector HTTP, and CLI when proposal_id is unknown", async () => {
-    const { mcp, inspector, cli } = await runReviewParityScenario(() =>
+  it("returns identical NOT_FOUND envelope across MCP, daemon HTTP, and CLI when proposal_id is unknown", async () => {
+    const { mcp, http, cli } = await runReviewParityScenario(() =>
       createErrorReviewHandler({ kind: "proposal_not_found" })
     );
 
@@ -63,9 +61,9 @@ describe("proposal review error parity", () => {
     const expectedMessage = "Proposal not found.";
     expect(mcp.error.message).toBe(expectedMessage);
 
-    expect(inspector.body.error?.code).toBe(mcp.error.code);
-    expect(inspector.body.error?.message).toBe(mcp.error.message);
-    expect([404, 400]).toContain(inspector.status);
+    expect(http.body.error?.code).toBe(mcp.error.code);
+    expect(http.body.error?.message).toBe(mcp.error.message);
+    expect([404, 400]).toContain(http.status);
 
     expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
     expect(cli.stderr).toContain("NOT_FOUND");

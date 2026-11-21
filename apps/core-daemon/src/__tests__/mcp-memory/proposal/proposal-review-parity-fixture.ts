@@ -37,12 +37,6 @@ import {
   type McpMemoryToolHandlerDependencies
 } from "../../../mcp-memory/tool/tool-handler.js";
 
-import { createInspectorApp } from "../../../../../inspector/src/runtime/app.js";
-import {
-  INSPECTOR_SESSION_COOKIE,
-  INSPECTOR_VITEST_SESSION_ID
-} from "../../../../../inspector/src/launch/launch-session-store.js";
-
 export const reviewerArgs = {
   proposal_id: "prop-1",
   verdict: "accept",
@@ -51,7 +45,7 @@ export const reviewerArgs = {
   reviewer_token: "review-token"
 } as const;
 
-// Error-shape parity across MCP / Inspector HTTP / CLI must cover the
+// Error-shape parity across MCP / daemon HTTP / CLI must cover the
 // failure path, not just successful review. These cases drive each
 // surface through the same workflow with an injected failure and assert
 // error.code + error.message identity. Per-surface transport severity
@@ -60,7 +54,7 @@ export const reviewerArgs = {
 
 export interface ReviewParitySurfaces {
   readonly mcp: { readonly ok: false; readonly error: { readonly code: string; readonly message: string } };
-  readonly inspector: { readonly status: number; readonly body: { readonly error?: { readonly code?: string; readonly message?: string } } };
+  readonly http: { readonly status: number; readonly body: { readonly error?: { readonly code?: string; readonly message?: string } } };
   readonly cli: { readonly exitCode: number; readonly stderr: string; readonly json: unknown };
 }
 
@@ -96,40 +90,21 @@ export async function runReviewParityScenario(
       } as unknown as ProposalRouteServices
     }
   });
-  const inspectorApp = createInspectorApp({
-    token: "inspector-token",
-    workspaceId: "ws1",
-    daemonUrl: "http://daemon.local",
-    env: {
-      ALAYA_REQUEST_TOKEN: "daemon-request-token",
-      ALAYA_REVIEWER_TOKEN: "review-token",
-      ALAYA_REVIEWER_IDENTITY: "user:server-reviewer"
+  const httpResponse = await daemonApp.request("/workspaces/ws1/proposals/prop-1/review", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-request-token": "daemon-request-token",
+      "x-alaya-desktop": "1"
     },
-    fetchImpl: async (input, init) => {
-      const url = new URL(String(input));
-      return await daemonApp.request(`${url.pathname}${url.search}`, {
-        method: init?.method,
-        headers: init?.headers,
-        body: init?.body
-      });
-    }
+    body: JSON.stringify({
+      verdict: reviewerArgs.verdict,
+      reason: reviewerArgs.reason,
+      reviewer_identity: reviewerArgs.reviewer_identity,
+      reviewer_token: reviewerArgs.reviewer_token
+    })
   });
-  const inspectorResponse = await inspectorApp.request(
-    "/api/proposals/ws1/prop-1/review",
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        cookie: `${INSPECTOR_SESSION_COOKIE}=${INSPECTOR_VITEST_SESSION_ID}`
-      },
-      body: JSON.stringify({
-        verdict: reviewerArgs.verdict,
-        reason: reviewerArgs.reason,
-        reviewer_identity: "user:server-reviewer"
-      })
-    }
-  );
-  const inspectorBody = (await inspectorResponse.json()) as ReviewParitySurfaces["inspector"]["body"];
+  const httpBody = (await httpResponse.json()) as ReviewParitySurfaces["http"]["body"];
 
   const cliCommand = createReviewCommand({
     handler: buildHandler(),
@@ -148,7 +123,7 @@ export async function runReviewParityScenario(
 
   return {
     mcp: mcpEnvelope,
-    inspector: { status: inspectorResponse.status, body: inspectorBody },
+    http: { status: httpResponse.status, body: httpBody },
     cli: {
       exitCode: cliResult.exitCode,
       stderr: cliStderrChunks.join(""),

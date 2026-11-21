@@ -36,8 +36,6 @@ import {
   type McpMemoryToolHandlerDependencies
 } from "../../../mcp-memory/tool/tool-handler.js";
 
-import { createInspectorApp } from "../../../../../inspector/src/runtime/app.js";
-
 import {
   reviewerArgs,
   ReviewParitySurfaces,
@@ -54,7 +52,7 @@ import {
 describe("proposal review error parity", () => {
 
   it("returns identical VALIDATION envelope when the proposal is already accepted", async () => {
-    const { mcp, inspector, cli } = await runReviewParityScenario(() =>
+    const { mcp, http, cli } = await runReviewParityScenario(() =>
       createErrorReviewHandler({ kind: "already_resolved" })
     );
 
@@ -62,8 +60,8 @@ describe("proposal review error parity", () => {
     expect(mcp.error.code).toBe("VALIDATION");
     expect(mcp.error.message).toContain("already accepted");
 
-    expect(inspector.body.error?.code).toBe(mcp.error.code);
-    expect(inspector.body.error?.message).toBe(mcp.error.message);
+    expect(http.body.error?.code).toBe(mcp.error.code);
+    expect(http.body.error?.message).toBe(mcp.error.message);
 
     expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
     expect(cli.stderr).toContain("VALIDATION");

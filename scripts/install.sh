@@ -39,8 +39,6 @@
 # The required local ONNX runtime is installed with dependencies. Provision its
 # model artifacts explicitly before use:
 #   node "$ALAYA_HOME/scripts/fetch-local-embedding-model.mjs"
-# Inspector SPA is compiled by `pnpm build` unless ALAYA_BUILD_INSPECTOR_WEB=0
-# and apps/inspector/web/dist/index.html already exists.
 #
 # Path admission is sourced by uninstall.sh. curl|bash stdin leaves
 # BASH_SOURCE empty and must still run the installer body below.
@@ -361,6 +359,5 @@ info "Next steps:"
 info "  alaya doctor          # verify runtime"
 info "  alaya install         # configure the local runtime"
 info "  alaya attach codex    # preview agent attachment; follow the confirmation instructions"
-info "  alaya inspect --open  # open the Memory Inspector UI"
 info ""
 info "Uninstall: ALAYA_CONFIG_DIR='${LIVE_CONFIG_DIR}' bash ${ALAYA_HOME}/scripts/uninstall.sh   (add --purge to remove '${LIVE_CONFIG_DIR}'; .bak is kept unless --remove-bak)"

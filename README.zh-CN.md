@@ -7,7 +7,7 @@
 # Do-SOUL Alaya
 
 面向 CLI 编码 agent 的本地优先记忆平面（`@do-soul/alaya-*`）。
-只有 MCP 和 CLI。没有对话 UI，没有遥测。
+只有 MCP（`stdio`）、CLI 和 loopback Daemon HTTP JSON API。没有 GUI、TUI 或 SPA，没有遥测。
 
 仓库内的当前事实以 handbook 为准。本 README 不声称 recall 已完整落地，
 也不发布 KPI。

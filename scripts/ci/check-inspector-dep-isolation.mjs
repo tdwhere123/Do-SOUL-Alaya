@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Inspector SPA deps (React/Vite) must stay in apps/inspector/web only — not in
-// daemon hot-path packages that ship to CLI/MCP runtime.
+// UI/DOM/Vite packages must not appear in workspace manifests. protocol
+// stays zod-only (invariant 1) with no CJK segmentation dependency.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-const INSPECTOR_WEB_ONLY = new Set([
+const FORBIDDEN_UI_PACKAGES = new Set([
   "react",
   "react-dom",
   "vite",
@@ -23,7 +23,6 @@ const INSPECTOR_WEB_ONLY = new Set([
 const HOT_PATH_MANIFESTS = [
   "apps/core-daemon/package.json",
   "apps/bench-runner/package.json",
-  "apps/inspector/package.json",
   "packages/core/package.json",
   "packages/storage/package.json",
   "packages/soul/package.json",
@@ -46,7 +45,7 @@ for (const rel of HOT_PATH_MANIFESTS) {
       continue;
     }
     for (const name of Object.keys(deps)) {
-      if (INSPECTOR_WEB_ONLY.has(name)) {
+      if (FORBIDDEN_UI_PACKAGES.has(name)) {
         violations.push(`${rel} ${section} -> ${name}`);
       }
     }
@@ -54,7 +53,7 @@ for (const rel of HOT_PATH_MANIFESTS) {
 }
 
 if (violations.length > 0) {
-  console.error("Inspector SPA dependencies leaked into hot-path packages:");
+  console.error("UI/DOM/Vite dependencies leaked into workspace packages:");
   for (const line of violations) {
     console.error(`  - ${line}`);
   }
@@ -80,22 +79,4 @@ for (const section of protocolDepSections) {
   }
 }
 
-const inspectorManifests = ["apps/inspector/package.json", "apps/inspector/web/package.json"];
-for (const rel of inspectorManifests) {
-  const pkg = JSON.parse(readFileSync(path.join(repoRoot, rel), "utf8"));
-  const inspectorDeps = {
-    ...(pkg.dependencies ?? {}),
-    ...(pkg.devDependencies ?? {}),
-    ...(pkg.optionalDependencies ?? {}),
-    ...(pkg.peerDependencies ?? {})
-  };
-  if (
-    inspectorDeps["@node-rs/jieba"] !== undefined ||
-    inspectorDeps["@do-soul/alaya-cjk-segmentation"] !== undefined
-  ) {
-    console.error(`${rel} must not depend on native CJK segmentation`);
-    process.exit(1);
-  }
-}
-
-console.log("check-inspector-dep-isolation: ok (React/Vite deps confined to apps/inspector/web; protocol zod-only)");
+console.log("check-inspector-dep-isolation: ok (no UI/DOM/Vite workspace deps; protocol zod-only)");

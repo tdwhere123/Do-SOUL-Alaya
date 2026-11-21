@@ -71,7 +71,6 @@
     "@do-soul/alaya-core": "workspace:*",
     "@do-soul/alaya-engine-gateway": "workspace:*",
     "@do-soul/alaya-eval": "workspace:*",
-    "@do-soul/alaya-inspector": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@do-soul/alaya-soul": "workspace:*",
     "@do-soul/alaya-storage": "workspace:*",

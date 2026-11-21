@@ -6,7 +6,7 @@ Hard rules that always win. Implementation details live in code.
 
 1. `packages/protocol` is the domain leaf package (`zod` only).
 1a. `packages/graph-algorithms` is dependency-free pure algorithms (`BottleneckHypergraph`, max-min, temporal helpers); no domain types, EventLog, or storage contracts.
-1b. `packages/cjk-segmentation` owns `@node-rs/jieba` (`protocol` + `@node-rs/jieba` only). `core` and `storage` consume it as a dependency; Protocol, Inspector, and browser barrels never import it, and no package duplicates `@node-rs/jieba`.
+1b. `packages/cjk-segmentation` owns `@node-rs/jieba` (`protocol` + `@node-rs/jieba` only). `core` and `storage` consume it as a dependency; Protocol never imports it, and no package duplicates `@node-rs/jieba`.
 2. Domain types live in `@do-soul/alaya-protocol`; do not redefine business types locally.
 3. `apps/core-daemon` is the composition root; `packages/*` never import `apps/*`.
 4. `packages/core` owns business transitions and never depends on `packages/engine-gateway`.
@@ -38,13 +38,13 @@ Hard rules that always win. Implementation details live in code.
 
 ## Surface and SemVer
 
-21. **No agent-frontend GUI or conversation TUI.** Memory Inspector is loopback memory-domain tooling only—never a chat UI or direct durable write path.
+21. **No agent-frontend GUI, conversation TUI, or SPA.** Alaya surfaces are MCP (`stdio`), CLI, and loopback Daemon HTTP JSON API.
 21a. Public copy describes Alaya as a **memory plane** for CLI agents.
 21b. `reviewer_identity` binds server-side when `ALAYA_REVIEWER_TOKEN` and `ALAYA_REVIEWER_IDENTITY` are set; otherwise operator-attested.
 22. MCP stdio and CLI fallback (`alaya tools call`) share one runtime contract.
 23. Attach/profile changes require preview and explicit confirmation.
-24. CLI verbs (`attach`, `backup`, `detach`, `doctor`, `export`, `import`, `inspect`, `install`, `mcp`, `review`, `source-grounding-defers`, `source-index-lexical`, `status`, `temporal-cutover`, `tools`, `update`) follow §21–§23 and `docs/handbook/architecture.md` `## Surface Classification`.
-25. **SemVer contract:** Public schemas across MCP tools (`packages/engine-gateway/src/provider/soul-tool-specs.ts`, `packages/protocol/src/surfaces/mcp-types.ts`), EventLog payloads (`packages/protocol/src/events/*`), and runtime config (`packages/protocol/src/config/app-config.ts`) follow SemVer (Patch = internal/bug/perf; Minor = strictly additive; Major = breaking or semantic redefinition). Consumer MCP `tools/list` profiles may omit host-only tools (`soul.interpretation`) while preserving host/CLI/Inspector parity.
+24. CLI verbs (`attach`, `backup`, `detach`, `doctor`, `export`, `import`, `install`, `mcp`, `review`, `source-grounding-defers`, `source-index-lexical`, `status`, `temporal-cutover`, `tools`, `update`) follow §21–§23 and `docs/handbook/architecture.md` `## Surface Classification`.
+25. **SemVer contract:** Public schemas across MCP tools (`packages/engine-gateway/src/provider/soul-tool-specs.ts`, `packages/protocol/src/surfaces/mcp-types.ts`), EventLog payloads (`packages/protocol/src/events/*`), and runtime config (`packages/protocol/src/config/app-config.ts`) follow SemVer (Patch = internal/bug/perf; Minor = strictly additive; Major = breaking or semantic redefinition). Consumer MCP `tools/list` profiles may omit host-only tools (`soul.interpretation`) while preserving host/CLI parity.
 
 ## Scope, Concurrency, and Governance
 
@@ -53,4 +53,4 @@ Hard rules that always win. Implementation details live in code.
 31. **Single-Source Concurrency:** serialized read-modify-write runs in one SQLite transaction with storage-level CAS.
 32–34. `docs/handbook/` owns maintained contracts (`recall.md` owns live Recall); `docs/archive/` never overrides the handbook.
 35. **Garden world-claim output is `draft` only:** active governance gates on `claim_status in {active, contested, winner}`.
-36. **Active world-claim promotion requires a typed EventLog resolution (§21b):** inline `soul.resolve` (`EventPublisher` + SQLite CAS) or out-of-band `soul.propose_memory_update` + `soul.review_memory_proposal` (Inspector originates proposals here only).
+36. **Active world-claim promotion requires a typed EventLog resolution (§21b):** inline `soul.resolve` (`EventPublisher` + SQLite CAS) or out-of-band `soul.propose_memory_update` + `soul.review_memory_proposal`.

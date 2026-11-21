@@ -14,7 +14,6 @@ packages/soul              SOUL kernel, Garden, heuristics via protocol ports
 packages/engine-gateway    Provider transport/settled-attempt and MCP tool bridge
 packages/eval              Offline evaluation schemas, gates, metrics
 apps/core-daemon           Composition root, workers, stdio MCP, daemon HTTP/CLI
-apps/inspector             Local loopback memory-management UI
 apps/bench-runner          Offline benchmark harness
 ```
 
@@ -31,9 +30,9 @@ apps/bench-runner          Offline benchmark harness
 
 ## Surface Classification
 
-- **MCP (`stdio`):** Primary agent surface (`consumer` profile omits host-only `soul.interpretation` from `tools/list`; `host` profile, CLI, and Inspector keep full catalog). Daemon HTTP is not an MCP server.
+- **MCP (`stdio`):** Primary agent surface (`consumer` profile omits host-only `soul.interpretation` from `tools/list`; `host` profile and CLI keep full catalog). Daemon HTTP is not an MCP server.
 - **CLI (`bin/alaya.mjs`):** Shares runtime contract with MCP (`alaya tools call`); `import` and `temporal-cutover` run pre-bootstrap under exclusive leases.
-- **Memory Inspector:** Loopback-only UI (`127.0.0.1:5174` -> daemon `127.0.0.1:5173`; manual Vite SPA `5175`), auto-session restricted to `127.0.0.1`/`::1`/`localhost` (refusing `127.0.0.2`). Never a chat UI or direct durable write path.
+- **Daemon HTTP JSON API:** Loopback operator/tooling API (`127.0.0.1` or Unix socket). No GUI, conversation TUI, or SPA.
 - **Daemon transport & auth:** Loopback HTTP (`127.0.0.1`) or Unix socket (`ALAYA_DAEMON_SOCKET`); plaintext remote TCP HTTP is rejected (`server-options.ts`). HTTP fails closed without `ALAYA_REQUEST_TOKEN`. Process env overrides config-dir `.env` per key. No SSE/WebSocket stream.
 
 ## Runtime Write Model

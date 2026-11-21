@@ -69,17 +69,6 @@ describe("cjk-segmentation owner", () => {
     );
     expect(readPackageDependencies("packages/core/package.json")["@node-rs/jieba"]).toBeUndefined();
     expect(readPackageDependencies("packages/storage/package.json")["@node-rs/jieba"]).toBeUndefined();
-    const inspectorDepSections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
-    expect(
-      readPackageDependencies("apps/inspector/web/package.json", inspectorDepSections)[
-        "@do-soul/alaya-cjk-segmentation"
-      ]
-    ).toBeUndefined();
-    expect(
-      readPackageDependencies("apps/inspector/package.json", inspectorDepSections)[
-        "@do-soul/alaya-cjk-segmentation"
-      ]
-    ).toBeUndefined();
     expect(protocolRoot).not.toHaveProperty("bindCjkRunSegmenter");
   });
 });

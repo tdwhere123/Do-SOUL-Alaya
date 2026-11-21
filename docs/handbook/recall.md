@@ -28,7 +28,7 @@ Source records, navigation observations, conditional support (`Q`, `H_s`, `C`), 
 
 - **Page-1 fixed-fragment `Delta + Next`:** `BoundedIndexPayload` clips at coarsest structural boundary (`message` > `line` > UTF-8 prefix) under UTF-8 `max_total_tokens` (2,000 B default). Stage 1 (`Delta`) keeps literal virtual-page fragment boundaries invariant and widens prefix `j` via `sourceDisclosureFieldByteSavings` (`disclosure_codec: "page_delta"`, charging omitted-payload placeholder bytes); Stage 2 (`Next`) extends incomplete `source_record` `"body"` slots to the next complete `"message"` boundary only when prerequisite dependency checks pass. Non-`page_delta` wire envelopes reject delta slots. Later partial `evidence_variant.condition` entries defer intact to the next page when they fit a fresh page.
 - **`member_index` & `soul.open_pointer`:** First-page `member_index` lists <= 32 roots (remaining pool, <= 6 Soft 1-hop structural neighbors post-fit, then 3-way interleaved overflow across lexical / raw-passage / statement-key lanes). Callers pass `source_target` (workspace/kind/span omitted; echoed `kind: "source_evidence"` stripped) with `start_offset` and `byte_budget <= 65536`.
-- **`soul.interpretation`:** Host/CLI/Inspector surface only (omitted from default consumer MCP `tools/list`).
+- **`soul.interpretation`:** Host/CLI surface only (omitted from default consumer MCP `tools/list`).
 
 ## Source Index Window Representations
 
