@@ -1,8 +1,18 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import { resolveDefaultBenchHistoryRoot } from "../packages/eval/dist/index.js";
 
 // Baseline-diff degradation gate. Works uniformly across the four bench
 // surfaces (public / public-multiturn / public-crossquestion / public-locomo):
@@ -16,7 +26,7 @@ const KNOWN_BENCHES = new Set([
 ]);
 
 const args = parseArgs(process.argv.slice(2));
-const historyRoot = args["history-root"] ?? resolveDefaultBenchHistoryRoot();
+const historyRoot = args["history-root"] ?? loadDefaultHistoryRoot();
 const benchName = args.bench ?? "public";
 const backlogPath = args.backlog ?? path.join(historyRoot, "degradation-backlog.md");
 const thresholdPp = Number.parseFloat(args["threshold-pp"] ?? "5");
@@ -39,40 +49,48 @@ if (delta === null || delta > -thresholdPp) {
 }
 
 const marker = `bench-degradation:auto ${benchName}/${latest.slug}`;
-const original = existsSync(backlogPath) ? readFileSync(backlogPath, "utf8") : [
-  "# Benchmark degradation backlog", "", "**Next available number**: `#BL-001`",
-  "", "## Open Issues", "", "No open `#BL-*` issues at this time.", ""
-].join("\n");
-if (original.includes(marker)) {
-  emitJsonAndExit({ action: "noop", reason: "already_recorded", slug: latest.slug, delta });
-}
+mkdirSync(path.dirname(backlogPath), { recursive: true });
+const lockPath = `${backlogPath}.lock`;
+withExclusiveLock(lockPath, () => {
+  const original = existsSync(backlogPath) ? readFileSync(backlogPath, "utf8") : [
+    "# Benchmark degradation backlog", "", "**Next available number**: `#BL-001`",
+    "", "## Open Issues", "", "No open `#BL-*` issues at this time.", ""
+  ].join("\n");
+  if (original.includes(marker)) {
+    emitJson({ action: "noop", reason: "already_recorded", slug: latest.slug, delta });
+    return;
+  }
 
-const issueNumber = readNextIssueNumber(original);
-const nextIssueNumber = issueNumber + 1;
-const issueId = `#BL-${String(issueNumber).padStart(3, "0")}`;
-const nextIssueId = `#BL-${String(nextIssueNumber).padStart(3, "0")}`;
-const issue = renderIssue({
-  issueId,
-  benchName,
-  slug: latest.slug,
-  delta,
-  thresholdPp,
-  archivePath: path.resolve(historyRoot, benchName, latest.slug),
-  payload: latest.payload,
-  marker
+  const issueNumber = readNextIssueNumber(original);
+  const nextIssueNumber = issueNumber + 1;
+  const issueId = formatIssueId(issueNumber);
+  const nextIssueId = formatIssueId(nextIssueNumber);
+  const issue = renderIssue({
+    issueId,
+    benchName,
+    slug: latest.slug,
+    delta,
+    thresholdPp,
+    archivePath: path.resolve(historyRoot, benchName, latest.slug),
+    payload: latest.payload,
+    marker
+  });
+
+  let updated = original.replace(
+    /\*\*Next available number\*\*: `#BL-\d{3,}`/,
+    `**Next available number**: \`${nextIssueId}\``
+  );
+  updated = insertOpenIssue(updated, issue);
+  writeFileSync(backlogPath, updated, "utf8");
+  emitJson({ action: "opened", issue: issueId, slug: latest.slug, delta });
 });
 
-let updated = original.replace(
-  /\*\*Next available number\*\*: `#BL-\d{3}`/,
-  `**Next available number**: \`${nextIssueId}\``
-);
-updated = insertOpenIssue(updated, issue);
-mkdirSync(path.dirname(backlogPath), { recursive: true });
-writeFileSync(backlogPath, updated, "utf8");
-emitJsonAndExit({ action: "opened", issue: issueId, slug: latest.slug, delta });
+function emitJson(payload) {
+  writeFileSync(1, `${JSON.stringify(payload)}\n`, "utf8");
+}
 
 function emitJsonAndExit(payload) {
-  writeFileSync(1, `${JSON.stringify(payload)}\n`, "utf8");
+  emitJson(payload);
   process.exit(0);
 }
 
@@ -91,6 +109,12 @@ function parseArgs(argv) {
     }
   }
   return out;
+}
+
+function loadDefaultHistoryRoot() {
+  // Keep the eval dist import off the --history-root path used by tests.
+  const require = createRequire(import.meta.url);
+  return require("../packages/eval/dist/index.js").resolveDefaultBenchHistoryRoot();
 }
 
 function readLatestPayload(root, bench) {
@@ -114,20 +138,50 @@ function readLatestPayload(root, bench) {
     slug = slugs.at(-1) ?? null;
   }
   if (slug === null) return null;
-  const kpiPath =
-    kpiRelPath === null
-      ? path.join(benchRoot, slug, "kpi.json")
-      : path.join(benchRoot, kpiRelPath);
+  const kpiPath = resolveContainedKpiPath(root, benchRoot, slug, kpiRelPath);
   if (!existsSync(kpiPath)) return null;
   return { slug, payload: JSON.parse(readFileSync(kpiPath, "utf8")) };
+}
+
+function resolveContainedKpiPath(historyRoot, benchRoot, slug, kpiRelPath) {
+  if (kpiRelPath === null) {
+    return path.join(benchRoot, slug, "kpi.json");
+  }
+  const historyResolved = path.resolve(historyRoot);
+  if (
+    kpiRelPath.includes("\0")
+    || path.isAbsolute(kpiRelPath)
+    || kpiRelPath.split(/[\\/]/u).includes("..")
+  ) {
+    throw new Error(`kpi_path escapes repository root: ${kpiRelPath}`);
+  }
+  const resolved = path.resolve(benchRoot, kpiRelPath);
+  assertInsideRoot(historyResolved, resolved, kpiRelPath);
+  if (existsSync(historyResolved)) {
+    const realRoot = realpathSync(historyResolved);
+    const probe = existsSync(resolved) ? realpathSync(resolved) : resolved;
+    assertInsideRoot(realRoot, probe, kpiRelPath);
+  }
+  return resolved;
+}
+
+function assertInsideRoot(root, candidate, kpiRelPath) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`kpi_path escapes repository root: ${kpiRelPath}`);
+  }
 }
 
 function readNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function formatIssueId(issueNumber) {
+  return `#BL-${String(issueNumber).padStart(3, "0")}`;
+}
+
 function readNextIssueNumber(markdown) {
-  const match = markdown.match(/\*\*Next available number\*\*: `#BL-(\d{3})`/);
+  const match = markdown.match(/\*\*Next available number\*\*: `#BL-(\d{3,})`/);
   if (match === null) {
     throw new Error("backlog next issue number marker not found");
   }
@@ -187,4 +241,23 @@ function insertOpenIssue(markdown, issue) {
 
 function formatPp(value) {
   return value.toFixed(1);
+}
+
+function withExclusiveLock(lockPath, fn) {
+  let fd;
+  try {
+    fd = openSync(lockPath, "wx");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+      console.error(`backlog lock exists: ${lockPath}`);
+      process.exit(1);
+    }
+    throw error;
+  }
+  try {
+    fn();
+  } finally {
+    closeSync(fd);
+    unlinkSync(lockPath);
+  }
 }
