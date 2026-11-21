@@ -1,18 +1,37 @@
 import { createHash } from "node:crypto";
-import { expect } from "vitest";
+import { afterEach, expect, vi } from "vitest";
 import {
   sourceIndexProfileId, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
-  type SourceIndexConfiguration, type SourceIndexScopeAdmission
+  type SourceIndexConfiguration, type SourceIndexQueryResources, type SourceIndexScopeAdmission
 } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import {
-  WORKSPACE, captureDocuments, configuration, fieldSha256, publishSource, type Fixture
+  WORKSPACE, captureDocuments, configuration, fieldSha256, fixture, publishSource, type Fixture
 } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 
 export const QUERY_BUDGET = { work_units: 2_000_000, memory_bytes: 8 * 1024 * 1024 };
+export const ZERO_RESOURCES: SourceIndexQueryResources = {
+  work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown"
+};
 export const NAVIGATION = "needle";
 export const admitScope: SourceIndexScopeAdmission = () => "admitted";
 export const digest = (text: string) => `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
+
+export function registerAcquisitionEnvironments(
+  isolation?: { readonly violations: readonly unknown[] }
+): () => Fixture {
+  const environments: Fixture[] = [];
+  afterEach(() => {
+    if (isolation !== undefined) expect(isolation.violations).toEqual([]);
+    vi.restoreAllMocks();
+    for (const environment of environments.splice(0)) environment.database.close();
+  });
+  return () => {
+    const environment = fixture();
+    environments.push(environment);
+    return environment;
+  };
+}
 
 export type RootSpec = Readonly<{
   id: string; body: string; vectors: readonly (readonly number[])[];

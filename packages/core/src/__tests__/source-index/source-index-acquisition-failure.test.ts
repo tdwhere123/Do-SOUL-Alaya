@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import(
     "../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
@@ -11,28 +11,15 @@ import {
   type SourceIndexVectorRead
 } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
-import { fieldSha256, fixture, type Fixture } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { fieldSha256 } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import {
-  AXIS_ROOTS, admitScope, expectBounded, publishIndex, query, queryInput
+  AXIS_ROOTS, ZERO_RESOURCES, admitScope, expectBounded, publishIndex, query, queryInput,
+  registerAcquisitionEnvironments
 } from "./source-index-acquisition-fixture.js";
 
 const UNKNOWN_COST = "acquisition_failed_unknown_additional_cost";
-const ZERO_RESOURCES: SourceIndexQueryResources = {
-  work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown"
-};
-const environments: Fixture[] = [];
-afterEach(() => {
-  expect(isolation.violations).toEqual([]);
-  vi.restoreAllMocks();
-  for (const environment of environments.splice(0)) environment.database.close();
-});
+const setup = registerAcquisitionEnvironments(isolation);
 afterAll(() => { isolation.restore(); });
-
-function setup() {
-  const environment = fixture();
-  environments.push(environment);
-  return environment;
-}
 function digest(label: string) {
   return `sha256:${createHash("sha256").update(label, "utf8").digest("hex")}`;
 }

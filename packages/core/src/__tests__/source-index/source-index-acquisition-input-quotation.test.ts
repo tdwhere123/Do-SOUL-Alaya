@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, it, vi } from "vitest";
+import { afterAll, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import(
     "../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
@@ -6,24 +6,17 @@ const isolation = await vi.hoisted(async () => {
 });
 import {
   sourceIndexProfileId, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
-  type SourceIndexAcquisitionInput, type SourceIndexQueryRepository, type SourceIndexQueryResources
+  type SourceIndexAcquisitionInput, type SourceIndexQueryRepository
 } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
-import { configuration, fieldSha256, fixture, type Fixture }
+import { configuration, fieldSha256 }
   from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import {
-  admitScope, digest, expectBounded, NAVIGATION, publishIndex, query, queryInput
+  NAVIGATION, ZERO_RESOURCES, admitScope, digest, expectBounded, publishIndex, query, queryInput,
+  registerAcquisitionEnvironments
 } from "./source-index-acquisition-fixture.js";
 
-const ZERO_RESOURCES: SourceIndexQueryResources = {
-  work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown"
-};
-const environments: Fixture[] = [];
-afterEach(() => {
-  expect(isolation.violations).toEqual([]);
-  vi.restoreAllMocks();
-  for (const environment of environments.splice(0)) environment.database.close();
-});
+const setup = registerAcquisitionEnvironments(isolation);
 afterAll(() => { isolation.restore(); });
 
 function emptyRepository(): SourceIndexQueryRepository {
@@ -74,8 +67,7 @@ it("quotes unavailable and available input capture against admitted execution wi
   expect(unavailableRun.completion).not.toBe("complete");
   expect(availableRun.completion).not.toBe("complete");
 
-  const environment = fixture();
-  environments.push(environment);
+  const environment = setup();
   publishIndex(environment);
   const discovered = query(environment, queryInput(), admitScope);
   const discoveredQuote = quoteOf(queryInput());

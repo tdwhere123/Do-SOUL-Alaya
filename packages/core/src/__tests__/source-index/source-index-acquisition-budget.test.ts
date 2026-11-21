@@ -1,26 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   SourceSemanticResourceLedger, type SourceIndexAcquisitionInput, type SourceIndexQueryResources,
   type SourceSemanticResourceBudget
 } from "@do-soul/alaya-protocol";
 import { SqliteFieldSourceRecordRepo } from "../../../../storage/src/repos/field/source-repo.js";
 import {
-  WORKSPACE, captureDocuments, configuration, fixture, publishSource, type Fixture
+  WORKSPACE, captureDocuments, configuration, publishSource, type Fixture
 } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import {
-  QUERY_BUDGET, admitScope, digest, expectBounded, expectMetadataOnly, publishIndex, query, queryInput
+  QUERY_BUDGET, admitScope, digest, expectBounded, expectMetadataOnly, publishIndex, query, queryInput,
+  registerAcquisitionEnvironments
 } from "./source-index-acquisition-fixture.js";
 
-const environments: Fixture[] = [];
-afterEach(() => {
-  vi.restoreAllMocks();
-  for (const environment of environments.splice(0)) environment.database.close();
-});
-function setup() {
-  const environment = fixture();
-  environments.push(environment);
-  return environment;
-}
+const setup = registerAcquisitionEnvironments();
 type NativeCall = { phase: "lexical" | "vector" | "admission"; budget: SourceSemanticResourceBudget;
   resources: SourceIndexQueryResources; status: string };
 

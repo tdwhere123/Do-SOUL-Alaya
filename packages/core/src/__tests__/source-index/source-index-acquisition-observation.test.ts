@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import(
     "../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
@@ -7,22 +7,13 @@ const isolation = await vi.hoisted(async () => {
 afterAll(() => { isolation.restore(); });
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import type { SourceIndexAcquisitionFact } from "../../source-index/acquisition-observation.js";
-import { configuration, fixture, type Fixture } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { configuration } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import {
-  AXIS_ROOTS, admitScope, expectBounded, expectMetadataOnly, publishIndex, query, queryInput
+  AXIS_ROOTS, admitScope, expectBounded, expectMetadataOnly, publishIndex, query, queryInput,
+  registerAcquisitionEnvironments
 } from "./source-index-acquisition-fixture.js";
 
-const environments: Fixture[] = [];
-afterEach(() => {
-  expect(isolation.violations).toEqual([]);
-  vi.restoreAllMocks();
-  for (const environment of environments.splice(0)) environment.database.close();
-});
-function setup() {
-  const environment = fixture();
-  environments.push(environment);
-  return environment;
-}
+const setup = registerAcquisitionEnvironments(isolation);
 function collect() {
   const facts: SourceIndexAcquisitionFact[] = [];
   return { facts, observer: (capture: () => SourceIndexAcquisitionFact, kind: SourceIndexAcquisitionFact["kind"]) => {
