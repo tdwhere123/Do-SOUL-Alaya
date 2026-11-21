@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   AlayaError, canonicalJson, SoulMemorySearchRequestSchema, SoulMemorySearchResponseSchema,
-  type SoulMemorySearchResponse
+  SoulMemorySearchResponseWireSchema, type SoulMemorySearchResponse
 } from "@do-soul/alaya-protocol";
 import { currentBenchScope, refuseBenchWorkAfterCancel, trackBenchOperation } from "../../../harness/daemon-task.js";
 import { callMcpTool, readBenchMcpToolOutput, type BenchMcpToolCapture } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
@@ -254,11 +254,13 @@ function admitCapturedPublicMembership(input: Readonly<{
     if (error instanceof AlayaError && (error.code === "CANCELLED" || error.code === "CONFLICT")) throw error;
     return membershipPage({ ...failed, envelope: envelope.data });
   }
-  const output = SoulMemorySearchResponseSchema.safeParse(generic);
-  if (!output.success) return membershipPage({ ...failed, envelope: envelope.data });
-  if (canonicalJson(output.data) !== canonicalJson(generic)) {
+  const wire = SoulMemorySearchResponseWireSchema.safeParse(generic);
+  if (!wire.success) return membershipPage({ ...failed, envelope: envelope.data });
+  if (canonicalJson(wire.data) !== canonicalJson(generic)) {
     throw new AlayaError("CONFLICT", "public output cannot be normalized during ordinary entry admission");
   }
+  const output = SoulMemorySearchResponseSchema.safeParse(wire.data);
+  if (!output.success) return membershipPage({ ...failed, envelope: envelope.data });
   return bindPublicExposure({
     ordinal: input.ordinal, request: input.request, frame: input.frame, envelope: envelope.data,
     output: freezeOrdinaryArtifact(SoulMemorySearchResponseSchema, output.data),

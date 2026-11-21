@@ -15,6 +15,10 @@ export const TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION = [
   ...READ_TOOL_RESTRICTIONS,
   "Published server instructions and tool definitions above are unmodified; this restriction is host diagnostic policy, not a rewrite of guidance."
 ].join(" ");
+export const TEXT_MCP_CONSUMER_CATALOG_SCOPED_RESTRICTION = [
+  ...READ_TOOL_RESTRICTIONS,
+  "Published server instructions and consumer tool definitions above are unmodified (host-only soul.interpretation omitted); this restriction is host diagnostic policy, not a rewrite of guidance."
+].join(" ");
 export const TEXT_MCP_PLAIN_QUERY_RESTRICTION = [
   ...READ_TOOL_RESTRICTIONS,
   "The displayed Recall instructions and schema reflect the plain-query capability profile."

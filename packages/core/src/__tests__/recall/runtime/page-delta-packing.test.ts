@@ -283,7 +283,8 @@ describe("Page-1 fixed-fragment Delta + Next packing", () => {
           },
           status: "partial",
           utf8_span: [0, b1],
-          content_span: [0, 0]
+          content_span: [0, 0],
+          dependencies: []
         }]
       })
     };
@@ -425,5 +426,111 @@ describe("Page-1 fixed-fragment Delta + Next packing", () => {
     expect(() => runConditionalFieldRecallWithReceipt(makeRequest(makeReaders(roots), {
       delivery_budget: { max_total_tokens: 2_000, max_encoded_bytes: 64 }
     }))).toThrow("Recall output budget cannot carry its required public envelope");
+  });
+
+  it("handles bounded narrower reprojection, rejects unknown dependencies, preserves omitted fragments, respects literal codec, and never restores framing work", () => {
+    // 1. Bounded narrower reprojection returning fewer entries than widened.j must not crash.
+    const eightRoots: MockRoot[] = Array.from({ length: 8 }, (_, idx) => {
+      const m1 = `needle r${idx} ${"a".repeat(330)}`;
+      return { id: `b-${idx}`, body: m1, messages: [Buffer.byteLength(m1)] };
+    });
+    const tightReprojReq = makeRequest(makeReaders(eightRoots), {
+      budget: defaultBudget({ page_budget: 10, work_units: 260, finalization_reserve: 10 })
+    });
+    const tightRes = runConditionalFieldRecallWithReceipt(tightReprojReq);
+    expect(tightRes.index.entries.length).toBeLessThanOrEqual(8);
+
+    // 2. Next rejects occurrences with unknown (undefined) prerequisite declarations.
+    const m1 = `needle prompt ${"p".repeat(386)}`; // 400 B
+    const m2 = `reply ${"r".repeat(494)}`;         // 500 B
+    const m3 = `tail ${"t".repeat(1995)}`;         // 2000 B
+    const unknownDepBody = `${m1}${m2}${m3}`;
+    const unknownDepRoot: MockRoot = {
+      id: "unknown-dep",
+      body: unknownDepBody,
+      messages: [400, 900, 2900],
+      dependency: span => ({
+        status: "unknown",
+        roots: [{ occurrence_id: "occ-m2", utf8_span: [span[0], span[1]] }],
+        prerequisites: []
+      })
+    };
+    const unknownDepPage = runConditionalFieldRecallWithReceipt(
+      makeRequest(makeReaders([unknownDepRoot], {
+        payloadRange: () => ({ start_byte: 0, end_byte: 400 })
+      }), { budget: defaultBudget({ page_budget: 1 }) })
+    );
+    expect(unknownDepPage.index.entries[0]!.target).toMatchObject({
+      span: { content_start: 0, content_end: 400, content_complete: false }
+    });
+
+    // 3. Omitted middle fragment (payload_available: false) never silently materializes bytes under Delta packing,
+    // and encodeRecallPageResponse respects explicit disclosure_codec: "literal".
+    const probeEnc = encodeEnvelope(
+      makeRequest(makeReaders([{ id: "probe", body: "x", messages: [] }])),
+      runConditionalFieldRecallWithReceipt(makeRequest(makeReaders([{ id: "probe", body: "x", messages: [] }])))
+    );
+    const discBytes = Buffer.byteLength(JSON.stringify({ source_disclosure: probeEnc.results[0]!.source_disclosure }));
+    const omittedHead = `needle ${"h".repeat(Math.max(1, 2_000 - 2 * discBytes - 7))}`;
+    const omittedMid = "mid twenty byte text";
+    const omittedTail = "end twenty byte text";
+    const omittedMidRoots: MockRoot[] = [
+      { id: "om-0", body: omittedHead, messages: [] },
+      { id: "om-1", body: omittedMid, messages: [] },
+      { id: "om-2", body: omittedTail, messages: [] }
+    ];
+    const omittedReq = makeRequest(makeReaders(omittedMidRoots));
+    const omittedExec = runConditionalFieldRecallWithReceipt(omittedReq);
+    const omittedWire = encodeEnvelope(omittedReq, omittedExec);
+    expect(omittedWire.results).toHaveLength(3);
+    expect(omittedWire.results[1]?.payload_available).toBe(false);
+    expect(omittedWire.results[1]?.content_preview).toBe("[payload omitted]");
+    expect(omittedWire.results[1]?.target).toMatchObject({
+      span: { content_start: 0, content_end: 0, content_complete: false }
+    });
+    const literalReq = makeRequest(makeReaders(omittedMidRoots.slice(1)));
+    const literalExec = runConditionalFieldRecallWithReceipt(literalReq);
+    const literalIndex = {
+      ...literalExec.index,
+      representation: { ...literalExec.index.representation, disclosure_codec: "literal" as const }
+    };
+    const literalPreviews = captureIndexPreviews(literalIndex, literalReq.readers, WS);
+    const literalMeta = captureIndexSourceMetadata(literalExec.index);
+    const literalResults = encodeIndexResults(literalIndex, literalPreviews, 2_000, literalMeta);
+    const literalWire = encodeRecallPageResponse({
+      delivery_id: "delivery_literal",
+      index: literalIndex,
+      results: literalResults,
+      active_constraints: [],
+      active_constraints_count: null,
+      degradation_reason: null
+    });
+    expect(literalWire.results).toHaveLength(2);
+    expect(Array.isArray(literalWire.results[0]!.source_disclosure)).toBe(true);
+    expect(Array.isArray(literalWire.results[1]!.source_disclosure)).toBe(true);
+
+    // 4. Framing work spent during Next is never restored into the outer fit allowance.
+    let heavyNextCalls = 0;
+    const heavyReaders: ObserverReaders = {
+      ...makeReaders([{ id: "heavy-next", body: unknownDepBody, messages: [400, 900, 2900] }]),
+      sourceRoot: input => {
+        const base = makeReaders([{ id: "heavy-next", body: unknownDepBody, messages: [400, 900, 2900] }]).sourceRoot!(input);
+        if ((input.offset ?? 0) > 0) {
+          heavyNextCalls += 1;
+          return { ...base, nativeWork: 8 };
+        }
+        return base;
+      }
+    };
+    let observedFitAllowance: number | undefined;
+    runConditionalFieldRecallWithReceipt(makeRequest(heavyReaders, {
+      budget: defaultBudget({ page_budget: 10, work_units: 70, finalization_reserve: 5 }),
+      observe_page_attempt: capture => {
+        observedFitAllowance ??= capture().allowance.work_units;
+      }
+    }));
+    if (heavyNextCalls > 0 && observedFitAllowance !== undefined) {
+      expect(observedFitAllowance).toBeLessThan(70);
+    }
   });
 });

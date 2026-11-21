@@ -1,8 +1,8 @@
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { buildProviderChatRequestBody } from "@do-soul/alaya-engine-gateway";
 import {
-  TEXT_MCP_ACTION_PROTOCOL, TEXT_MCP_ALLOWED_READ_TOOLS, TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION,
-  TEXT_MCP_PLAIN_QUERY_RESTRICTION, TEXT_MCP_SCRIPTED_MODEL, isAllowedTextMcpReadTool,
+  TEXT_MCP_ACTION_PROTOCOL, TEXT_MCP_ALLOWED_READ_TOOLS, TEXT_MCP_CONSUMER_CATALOG_SCOPED_RESTRICTION,
+  TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION, TEXT_MCP_PLAIN_QUERY_RESTRICTION, TEXT_MCP_SCRIPTED_MODEL, isAllowedTextMcpReadTool,
   type TextMcpCallerCapabilityProfile, type TextMcpDecodedAction,
   type TextMcpEncodedRequest, type TextMcpLiveSurface
 } from "./contract.js";
@@ -53,7 +53,10 @@ export function encodeTextMcpRequest(input: Readonly<{
     canonicalJson(surface.tools),
     "DIAGNOSTIC_RESTRICTION:",
     input.caller_capability_profile === "plain_query"
-      ? TEXT_MCP_PLAIN_QUERY_RESTRICTION : TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION,
+      ? TEXT_MCP_PLAIN_QUERY_RESTRICTION
+      : surface === input.surface
+        ? TEXT_MCP_CONSUMER_DIAGNOSTIC_RESTRICTION
+        : TEXT_MCP_CONSUMER_CATALOG_SCOPED_RESTRICTION,
     "TEXT_ACTION_PROTOCOL:",
     TEXT_MCP_ACTION_PROTOCOL
   ].join("\n");

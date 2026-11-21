@@ -1,6 +1,7 @@
 import {
   SourceSemanticResourceExhausted,
   SourceSemanticResourceLedger,
+  canonicalIndexEntryIdentity,
   sourceDisclosureFieldByteSavings,
   type InformationIndex,
   type MemorySearchResult,
@@ -91,8 +92,14 @@ export function prepareInitialPageDeltaPacking<TCandidate extends PackableMember
     return { candidate: withStage1Spend(candidate), packed: false };
   }
 
-  if (widened.j < candidate.index.entries.length) {
+  const originalEntries = candidate.index.entries;
+  if (widened.j < originalEntries.length) {
     candidate = projectAtWidth(postStage1Work + candidate.framing, candidate.payload.remainingMemoryBytes, widened.j);
+    if (candidate.index.entries.length !== widened.j
+      || candidate.index.entries.some((entry, idx) =>
+        canonicalIndexEntryIdentity(entry) !== canonicalIndexEntryIdentity(originalEntries[idx]!))) {
+      return { candidate, packed: false };
+    }
   } else {
     candidate = withStage1Spend(candidate);
   }
@@ -100,7 +107,10 @@ export function prepareInitialPageDeltaPacking<TCandidate extends PackableMember
   const restoreFragments = candidate.payload.snapshotDeliveredFragments(candidate.index.entries);
   for (let i = 0; i < widened.j; i++) {
     const frag = partitioned.fragments[i]!;
-    if (frag.payload_available !== true) continue;
+    if (frag.payload_available !== true) {
+      candidate.payload.omitDeliveredFragment(candidate.index.entries[i]!);
+      continue;
+    }
     candidate.payload.lockDeliveredFragment(
       candidate.index.entries[i]!,
       frag.content_preview,
@@ -116,7 +126,7 @@ export function prepareInitialPageDeltaPacking<TCandidate extends PackableMember
     cost,
     remainingWorkFields
   });
-  if (widened.j === partitioned.firstVirtualWidth && !nextOutcome.anyNextExtended) {
+  if (widened.j === partitioned.firstVirtualWidth && !nextOutcome.anyNextExtended && widened.totalSavings === 0) {
     restoreFragments();
     return { candidate: nextOutcome.candidate, packed: false };
   }
@@ -221,11 +231,12 @@ function partitionVirtualLiteralPages(
 function selectWidenedDeltaPrefix(
   fragments: readonly MemorySearchResult[],
   maxTotalTokens: number
-): Readonly<{ j: number; residualBytes: number }> {
+): Readonly<{ j: number; residualBytes: number; totalSavings: number }> {
   let anchorDisclosure: SourceDisclosure | undefined;
   let cumulativeBytes = 0;
   let j = 0;
   let profiledUsedBytes = 0;
+  let totalSavings = 0;
   for (let i = 0; i < fragments.length; i++) {
     const frag = fragments[i]!;
     let savings = 0;
@@ -238,8 +249,9 @@ function selectWidenedDeltaPrefix(
     cumulativeBytes = nextUsed;
     j = i + 1;
     profiledUsedBytes = cumulativeBytes;
+    totalSavings += savings;
   }
-  return { j, residualBytes: Math.max(0, maxTotalTokens - profiledUsedBytes) };
+  return { j, residualBytes: Math.max(0, maxTotalTokens - profiledUsedBytes), totalSavings };
 }
 
 function runResidualNextCompletions<TCandidate extends PackableMembershipCandidate>(params: Readonly<{
@@ -290,10 +302,12 @@ function runResidualNextCompletions<TCandidate extends PackableMembershipCandida
     if (failed) break;
   }
 
-  const remainingPostStage2 = Math.max(0, currentWork - candidate.framing);
+  const nextFraming = Math.min(candidate.framing, currentWork);
+  const remainingPostStage2 = currentWork - nextFraming;
   return {
     candidate: {
       ...candidate,
+      framing: nextFraming,
       retained: { ...candidate.retained, ...remainingWorkFields(candidate.retained, remainingPostStage2) }
     },
     anyNextExtended

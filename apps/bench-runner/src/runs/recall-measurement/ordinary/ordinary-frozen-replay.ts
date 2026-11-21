@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";
 import { authorizedScopesFromAdmission } from "@do-soul/alaya-core";
 import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
-import { AlayaError, SoulMemorySearchRequestSchema, SoulMemorySearchResponseSchema,
+import { AlayaError, SoulMemorySearchRequestSchema, SoulMemorySearchResponseSchema, SoulMemorySearchResponseWireSchema,
   canonicalJson, canonicalIndexEntryIdentity, sameRecallTarget, indexEntryObjectKind, sourceEvidenceRootTarget,
   type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { readBenchMcpToolOutput } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
@@ -150,8 +150,9 @@ function admitRawOutput(page: OrdinaryRecallQueryRow["pages"][number]): SoulMemo
   check(equal(page.public_call.request, { name: "soul.recall", arguments: page.request }), "ordinary raw request mismatch");
   check(equal(page.public_call.response, page.envelope), "ordinary raw envelope/clock mismatch");
   const generic = readBenchMcpToolOutput("soul.recall", page.public_call.response);
-  const output = SoulMemorySearchResponseSchema.parse(generic);
-  check(equal(output, generic), "ordinary raw output cannot be normalized");
+  const wire = SoulMemorySearchResponseWireSchema.parse(generic);
+  check(equal(wire, generic), "ordinary raw output cannot be normalized");
+  const output = SoulMemorySearchResponseSchema.parse(wire);
   check(equal(page.output, output), "ordinary decoded output differs from raw MCP output");
   check(page.response_state === "success", "ordinary response state differs from raw MCP output");
   return output;

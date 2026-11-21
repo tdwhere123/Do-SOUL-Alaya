@@ -17,8 +17,9 @@ export function encodeRecallPageResponse(input: Readonly<{
   degradation_reason: import("@do-soul/alaya-protocol").SoulMemorySearchDegradationReason | null;
   member_index?: readonly import("@do-soul/alaya-protocol").RecallMemberIndexLine[];
 }>): SoulMemorySearchResponseWire {
+  const usePageDelta = input.index.representation.disclosure_codec === "page_delta";
   let anchorDisclosure: SourceDisclosure | undefined;
-  const results = input.results.map(row => {
+  const results = !usePageDelta ? input.results : input.results.map(row => {
     if (row.source_disclosure === undefined) return row;
     const encoded = encodePageSourceDisclosure(row.source_disclosure, anchorDisclosure);
     anchorDisclosure ??= row.source_disclosure;

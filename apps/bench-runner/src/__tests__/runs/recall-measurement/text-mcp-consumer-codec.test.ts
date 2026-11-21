@@ -257,6 +257,22 @@ it("strips soul.interpretation from caller_coordinates and plain_query surfaces 
   };
   expect(projectLiveSurfaceForCaller(consumerSurface, "caller_coordinates")).toBe(consumerSurface);
   expect(projectLiveSurfaceForCaller(consumerSurface, undefined)).toBe(consumerSurface);
+
+  const encodedScoped = encodeTextMcpRequest({
+    surface: hostSurface,
+    query: "Which project?",
+    events: [],
+    caller_capability_profile: "caller_coordinates"
+  });
+  expect(encodedScoped.systemPrompt).toContain("(host-only soul.interpretation omitted)");
+
+  const encodedUnmodified = encodeTextMcpRequest({
+    surface: consumerSurface,
+    query: "Which project?",
+    events: [],
+    caller_capability_profile: "caller_coordinates"
+  });
+  expect(encodedUnmodified.systemPrompt).toContain("Published server instructions and tool definitions above are unmodified;");
 });
 
 it("projects duplicate CallToolResult text envelopes to a single structuredContent copy without mutating the audit envelope", () => {

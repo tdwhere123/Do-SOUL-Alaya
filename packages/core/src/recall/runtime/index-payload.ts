@@ -1,4 +1,5 @@
 import {
+  HOST_DEPENDENCY_EXPOSURE_LIMIT,
   MemoryDimension,
   ScopeClass,
   canonicalJson,
@@ -277,6 +278,23 @@ export class BoundedIndexPayload {
       return;
     }
     rememberPreview(this.previews, cacheKey, objectId, contentPreview);
+  }
+
+  public omitDeliveredFragment(entry: IndexEntry): void {
+    const cacheKey = indexEntryCacheKey(entry);
+    const objectId = indexMemoryObjectId(entry);
+    forgetPreview(this.previews, cacheKey, objectId);
+    if (entry.target.kind === "source_evidence") {
+      const rootKey = sourceEvidenceRootKey(entry.target);
+      const existing = this.deliveredSpans.get(rootKey) ?? entry.target.span;
+      if (existing !== undefined) {
+        this.deliveredSpans.set(rootKey, {
+          ...existing,
+          content_end: existing.content_start,
+          content_complete: false
+        });
+      }
+    }
   }
 
   public snapshotDeliveredFragments(entries: readonly IndexEntry[]): () => void {
@@ -709,23 +727,39 @@ function nextExtensionDependenciesSafe(
   contentStart: number,
   nextEnd: number
 ): boolean {
-  if (exposure.roots.length === 0) return false;
-  if (exposure.roots.some(r => r.utf8_span[0] < contentStart || r.utf8_span[1] > nextEnd)) return false;
-  if (exposure.prerequisites.some(p => p.status !== "delivered" && p.status !== "partial")) return false;
-  if (exposure.prerequisites.some(p =>
-    (p.reference !== undefined && (p.reference.root_id !== target.root_id || p.reference.source_version !== target.source_version))
-    || (p.utf8_span !== undefined && (p.utf8_span[0] < contentStart || p.utf8_span[1] > nextEnd)))) {
+  if (exposure.status === "unknown" || exposure.roots.length === 0
+    || exposure.prerequisites.length >= HOST_DEPENDENCY_EXPOSURE_LIMIT) {
     return false;
   }
-  for (const rootOcc of exposure.roots) {
-    for (const ref of rootOcc.dependencies ?? []) {
-      if (ref.root_id !== target.root_id || ref.source_version !== target.source_version) return false;
+  if (exposure.roots.some(r => r.dependencies === undefined
+    || r.utf8_span[0] < contentStart || r.utf8_span[1] > nextEnd)) {
+    return false;
+  }
+  if (exposure.prerequisites.some(p => (p.status !== "delivered" && p.status !== "partial")
+    || p.dependencies === undefined
+    || p.reference === undefined
+    || p.reference.root_id !== target.root_id
+    || p.reference.source_version !== target.source_version
+    || p.reference.content_digest !== target.content_digest
+    || p.utf8_span === undefined
+    || p.utf8_span[0] < contentStart
+    || p.utf8_span[1] > nextEnd)) {
+    return false;
+  }
+  const verifyRefs = (refs: readonly NonNullable<typeof exposure.roots[number]["dependencies"]>[number][]): boolean => {
+    for (const ref of refs) {
+      if (ref.root_id !== target.root_id || ref.source_version !== target.source_version
+        || ref.content_digest !== target.content_digest) {
+        return false;
+      }
       const refKey = canonicalJson(ref);
       const prereq = exposure.prerequisites.find(p => p.reference !== undefined && canonicalJson(p.reference) === refKey);
       const rootMatch = exposure.roots.find(r => r.occurrence_id === ref.occurrence_id);
       const depSpan = prereq?.utf8_span ?? rootMatch?.utf8_span;
       if (depSpan === undefined || depSpan[0] < contentStart || depSpan[1] > nextEnd) return false;
     }
-  }
-  return true;
+    return true;
+  };
+  return exposure.roots.every(rootOcc => verifyRefs(rootOcc.dependencies!))
+    && exposure.prerequisites.every(prereq => verifyRefs(prereq.dependencies!));
 }
