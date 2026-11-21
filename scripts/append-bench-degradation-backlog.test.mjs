@@ -138,6 +138,43 @@ test("rejects kpi_path traversal and symlink escapes outside the history root", 
   }
 });
 
+test("omitted kpi_path validates the slug and uses the same archive containment check", () => {
+  const parent = mkdtempSync(path.join(tmpdir(), "alaya-backlog-slug-"));
+  const root = path.join(parent, "history");
+  try {
+    const backlogPath = path.join(root, "backlog.md");
+    mkdirSync(root, { recursive: true });
+    writeBacklog(backlogPath, "#BL-001");
+    writeFailingRun(root, slugA);
+    writeFileSync(path.join(root, "public", "latest-run.json"), JSON.stringify({ slug: slugA }));
+    const opened = run(root, backlogPath);
+    assert.equal(opened.status, 0, opened.stderr);
+    assert.equal(JSON.parse(opened.stdout).issue, "#BL-001");
+
+    writeFileSync(path.join(root, "public", "latest-run.json"), JSON.stringify({ slug: "../etc" }));
+    const traversal = run(root, backlogPath);
+    assert.notEqual(traversal.status, 0);
+    assert.match(`${traversal.stderr}\n${traversal.stdout}`, /invalid latest-run slug/);
+
+    writeFailingRun(root, slugB);
+    const outsideDir = path.join(parent, "outside");
+    mkdirSync(outsideDir);
+    const outsideKpi = path.join(outsideDir, "kpi.json");
+    writeFileSync(
+      outsideKpi,
+      JSON.stringify({ diff_vs_previous: { r_at_5_delta_pp: -12 }, kpi: {} })
+    );
+    rmSync(path.join(root, "public", slugB, "kpi.json"));
+    symlinkSync(outsideKpi, path.join(root, "public", slugB, "kpi.json"));
+    writeFileSync(path.join(root, "public", "latest-run.json"), JSON.stringify({ slug: slugB }));
+    const linked = run(root, backlogPath);
+    assert.notEqual(linked.status, 0);
+    assert.match(`${linked.stderr}\n${linked.stdout}`, /kpi_path escapes repository root/);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test("exclusive backlog lockfile rejects a concurrent writer", () => {
   const root = mkdtempSync(path.join(tmpdir(), "alaya-backlog-lock-"));
   try {

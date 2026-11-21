@@ -148,7 +148,7 @@ function loadWitnessRows(dbPath, workspaceFilter) {
     return withEventLog(dbPath, (db) => {
       const rows = [];
       for (const workspaceId of listWorkspaceIds(db, workspaceFilter)) {
-        rows.push(...readWorkspaceWitnessRows(db, workspaceId));
+        for (const row of readWorkspaceWitnessRows(db, workspaceId)) rows.push(row);
       }
       return rows;
     });

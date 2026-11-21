@@ -87,7 +87,7 @@ export function solveMaxMinField(input: MaxMinInput): MaxMinResult {
     changedValues
   );
   return {
-    values: relaxed.values,
+    values: bindTrustedTop(relaxed.values, top),
     changedValues,
     retainedTransitions,
     get remainingWorklist() { return [...relaxed.workQueue]; },
@@ -101,6 +101,17 @@ function uniqueNodeIds(nodeIds: readonly string[]): readonly string[] {
   return [...new Set(nodeIds)];
 }
 
+function trustedTop(values: PersistentStringMap<number>): number | undefined {
+  const bound = (values as PersistentStringMap<number> & { readonly top?: unknown }).top;
+  return typeof bound === "number" && Number.isSafeInteger(bound) ? bound : undefined;
+}
+
+function bindTrustedTop(values: PersistentStringMap<number>, top: number): PersistentStringMap<number> {
+  if (trustedTop(values) === top) return values;
+  Object.defineProperty(values, "top", { value: top, configurable: true, enumerable: false, writable: false });
+  return values;
+}
+
 function initialValues(
   nodeIds: Readonly<{ has(key: string): boolean }>,
   seeds: ReadonlyMap<string, number>,
@@ -108,8 +119,13 @@ function initialValues(
   priorValues: ReadonlyMap<string, number> | undefined,
   changedValues: Map<string, number>
 ): PersistentStringMap<number> {
-  let values = priorValues instanceof PersistentStringMap ? priorValues : new PersistentStringMap<number>();
-  for (const [nodeId, value] of priorValues instanceof PersistentStringMap ? [] : priorValues ?? []) {
+  const bound = priorValues instanceof PersistentStringMap ? trustedTop(priorValues) : undefined;
+  if (bound !== undefined && bound !== top) {
+    throw new RangeError(`max-min trusted state top ${bound} disagrees with ${top}`);
+  }
+  const reuse = priorValues instanceof PersistentStringMap && bound === top;
+  let values = reuse ? priorValues : new PersistentStringMap<number>();
+  for (const [nodeId, value] of reuse ? [] : priorValues ?? []) {
     if (!nodeIds.has(nodeId)) continue;
     const grade = requireGrade(value, top);
     const current = values.get(nodeId);

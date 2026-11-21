@@ -176,7 +176,7 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
     coverageRows: association.coverage, agreedSet: new Set(agreed),
     marginalSet: new Set(marginal.filter((id): id is string => id !== null)),
     slotDominated: new Int8Array(head.length).fill(-1),
-    preservingRank: preserveHeadMatching(head, n, rows.coverage) };
+    preservingRank: preserveHeadMatching(head, n, rows.coverageMask) };
   const tryPlace: TryPlace = (incoming, column, veto = false) => {
     if (!placeWitness(placement, incoming, column, veto)) return false;
     placed.add(incoming);
@@ -211,26 +211,28 @@ function rankWitnessRows(association: StatementAssociation, pool: readonly strin
     .sort((left, right) => coverage(right, column)! - coverage(left, column)! || posMap.get(left)! - posMap.get(right)!));
   const marginal = ranks.map(row => row[0] ?? null);
   const match = n >= 2 ? matchQuantileAssignment(uniquePool, posMap, ranks, marginal, n) : null;
-  return { rootRow, coverage, possible, ranks, marginal, match };
+  const masks = new Int32Array(uniquePool.length);
+  for (let i = 0; i < uniquePool.length; i++) {
+    let mask = 0;
+    for (let column = 0; column < n; column++) if (coverage(uniquePool[i]!, column) !== null) mask |= 1 << column;
+    masks[i] = mask;
+  }
+  const coverageMask = (id: string): number => {
+    const pos = posMap.get(id);
+    return pos === undefined ? 0 : masks[pos]!;
+  };
+  return { rootRow, coverage, possible, ranks, marginal, match, coverageMask };
 }
 
-function preserveHeadMatching(head: readonly string[], n: number, coverage: (id: string, column: number) => number | null) {
+function preserveHeadMatching(head: readonly string[], n: number, coverageMask: (id: string) => number) {
   let currentRank: number | undefined;
-  const masks = new Map<string, number>();
-  const coverageMask = (id: string): number => {
-    const prior = masks.get(id);
-    if (prior !== undefined) return prior;
-    let mask = 0;
-    for (let column = 0; column < n; column++) if (coverage(id, column) !== null) mask |= 1 << column;
-    masks.set(id, mask);
-    return mask;
-  };
-  return (slot: number, incoming: string): boolean => {
+  const nextRank = (slot: number, incoming: string): number => {
     currentRank ??= headMatchingRank(head, n, coverageMask);
-    const next = headMatchingRank(head.map((id, index) => index === slot ? incoming : id), n, coverageMask);
-    if (next < currentRank) return false;
-    currentRank = next;
-    return true;
+    return headMatchingRank(head.map((id, index) => index === slot ? incoming : id), n, coverageMask);
+  };
+  return {
+    canPreserveHeadMatching: (slot: number, incoming: string): boolean => nextRank(slot, incoming) >= currentRank!,
+    commitHeadSwap: (slot: number, incoming: string): void => { currentRank = nextRank(slot, incoming); }
   };
 }
 
@@ -261,17 +263,19 @@ function placeWitness(placement: WitnessPlacement, incoming: string, column: num
     }
     const dominated = slotDominated[slot] === 1;
     if (veto) unprotected.push({ slot, occupant, occCov, dominated });
-    else if (dominated && preservingRank(slot, incoming)) {
+    else if (dominated && preservingRank.canPreserveHeadMatching(slot, incoming)) {
       swapHeadTail(head, tail, tailRows, slotDominated, rootRow, slot, at);
+      preservingRank.commitHeadSwap(slot, incoming);
       return true;
     }
   }
   if (!veto) return false;
   const chosen = unprotected.find(s => s.dominated
     && !unprotected.some(o => o.slot !== s.slot && vetoesVictim(o, s, n, possible))
-    && preservingRank(s.slot, incoming));
+    && preservingRank.canPreserveHeadMatching(s.slot, incoming));
   if (chosen === undefined) return false;
   swapHeadTail(head, tail, tailRows, slotDominated, rootRow, chosen.slot, at);
+  preservingRank.commitHeadSwap(chosen.slot, incoming);
   return true;
 }
 

@@ -50,7 +50,7 @@ export function nativeSourceReaders(readers: ObserverReaders, captured: NativeSo
         rowsRead: 0, bytesRead: 0, truncated: false, committedThrough: input.afterCursor };
       if (readers.sourceRoot === undefined) return { ...empty, unavailable: true };
       const pin = parseSourceStream(input.afterCursor);
-      const offset = pin === undefined ? Number(input.afterCursor) : Number(pin.afterCursor) - 1;
+      const offset = pin === undefined ? frozenNominationOffset(input.afterCursor) : Number(pin.afterCursor) - 1;
       if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("Invalid frozen source nomination cursor");
       const target = roots === undefined ? nominations?.[offset]?.source.target : roots[offset];
       if (pin !== undefined && (target === undefined || pin.kind !== target.root_kind || pin.rootId !== target.root_id
@@ -78,4 +78,12 @@ export function nativeSourceReaders(readers: ObserverReaders, captured: NativeSo
         committedThrough: retry ? input.afterCursor : String(offset + 1) };
     }
   };
+}
+
+function frozenNominationOffset(afterCursor: string | null): number {
+  if (afterCursor === null) return 0;
+  if (!/^(?:0|[1-9]\d*)$/u.test(afterCursor)) throw new TypeError("Invalid frozen source nomination cursor");
+  const offset = Number(afterCursor);
+  if (!Number.isSafeInteger(offset)) throw new TypeError("Invalid frozen source nomination cursor");
+  return offset;
 }

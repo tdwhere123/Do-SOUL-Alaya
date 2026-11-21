@@ -57,6 +57,7 @@ export function statementEventIntervals(text: string, sessionDay: number): reado
     const [year, month0, day] = parts(match), ms = validDay(year!, month0!, day!);
     if (ms !== null) push(ms, ms);
   }
+  takeChineseSpecificity(text, sessionDay, overlaps, consume, push);
   const terms = new Set<string>();
   for (const match of temporalTermMatches(text)) {
     if (overlaps(match)) continue;
@@ -87,4 +88,42 @@ export function statementEventIntervals(text: string, sessionDay: number): reado
     if (amount !== null) { const window = resolveRelativeTemporalWindow({ kind: "offset", unit, amount: -amount }, sessionDay); push(window.startMs, window.endMs); }
   }
   return out;
+}
+
+/** Most specific Chinese calendar and relative-week spans first, so a day is not eaten by its month or week. */
+function takeChineseSpecificity(
+  text: string, sessionDay: number,
+  overlaps: (match: RegExpMatchArray) => boolean, consume: (match: RegExpMatchArray) => void,
+  push: (startMs: number, endMs: number) => void
+): void {
+  const take = (pattern: RegExp, bind: (match: RegExpMatchArray) => void) => {
+    for (const match of text.matchAll(pattern)) {
+      if (overlaps(match)) continue;
+      consume(match);
+      bind(match);
+    }
+  };
+  take(/(\d{4})年(\d{1,2})月(\d{1,2})[日号]/gu, match => {
+    const ms = validDay(+match[1]!, +match[2]! - 1, +match[3]!);
+    if (ms !== null) push(ms, ms);
+  });
+  take(/(\d{4})年(\d{1,2})月/gu, match => {
+    const month = +match[2]!;
+    if (month >= 1 && month <= 12) push(Date.UTC(+match[1]!, month - 1, 1), Date.UTC(+match[1]!, month, 0));
+  });
+  take(/(\d{4})年/gu, match => { push(Date.UTC(+match[1]!, 0, 1), Date.UTC(+match[1]!, 11, 31)); });
+  take(/(上|下|这)(周|星期|礼拜)([日天一二三四五六])/gu, match => {
+    const weekday = (["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const)[
+      "日一二三四五六".indexOf(match[3] === "天" ? "日" : match[3]!)
+    ];
+    if (weekday === undefined) return;
+    const weekOffset = match[1] === "上" ? -1 : match[1] === "下" ? 1 : 0;
+    const window = resolveRelativeTemporalWindow({ kind: "weekday", weekday, weekOffset }, sessionDay);
+    push(window.startMs, window.endMs);
+  });
+  take(/(上|下|这)周/gu, match => {
+    const amount = match[1] === "上" ? -1 : match[1] === "下" ? 1 : 0;
+    const window = resolveRelativeTemporalWindow({ kind: "offset", unit: "week", amount }, sessionDay);
+    push(window.startMs, window.endMs);
+  });
 }

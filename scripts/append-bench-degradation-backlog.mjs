@@ -144,25 +144,30 @@ function readLatestPayload(root, bench) {
 }
 
 function resolveContainedKpiPath(historyRoot, benchRoot, slug, kpiRelPath) {
-  if (kpiRelPath === null) {
-    return path.join(benchRoot, slug, "kpi.json");
-  }
+  const relative = kpiRelPath ?? slugKpiRelPath(slug);
   const historyResolved = path.resolve(historyRoot);
   if (
-    kpiRelPath.includes("\0")
-    || path.isAbsolute(kpiRelPath)
-    || kpiRelPath.split(/[\\/]/u).includes("..")
+    relative.includes("\0")
+    || path.isAbsolute(relative)
+    || relative.split(/[\\/]/u).includes("..")
   ) {
-    throw new Error(`kpi_path escapes repository root: ${kpiRelPath}`);
+    throw new Error(`kpi_path escapes repository root: ${relative}`);
   }
-  const resolved = path.resolve(benchRoot, kpiRelPath);
-  assertInsideRoot(historyResolved, resolved, kpiRelPath);
+  const resolved = path.resolve(benchRoot, relative);
+  assertInsideRoot(historyResolved, resolved, relative);
   if (existsSync(historyResolved)) {
     const realRoot = realpathSync(historyResolved);
     const probe = existsSync(resolved) ? realpathSync(resolved) : resolved;
-    assertInsideRoot(realRoot, probe, kpiRelPath);
+    assertInsideRoot(realRoot, probe, relative);
   }
   return resolved;
+}
+
+function slugKpiRelPath(slug) {
+  if (typeof slug !== "string" || !/^[a-z0-9][a-z0-9._-]*$/iu.test(slug)) {
+    throw new Error(`invalid latest-run slug: ${slug}`);
+  }
+  return `${slug}/kpi.json`;
 }
 
 function assertInsideRoot(root, candidate, kpiRelPath) {

@@ -22,6 +22,19 @@ describe("persistent max-min resumption", () => {
     expect([...prior.workQueue]).toEqual([]);
   });
 
+  it("rejects a trusted prior whose bound top disagrees with the call", () => {
+    const input: MaxMinInput = {
+      nodeIds: ["a"], bottom: 0, top: 1000, seeds: new Map([["a", 900]]), transitions: []
+    };
+    const prior = solveMaxMinField(input);
+    expect(prior.values.get("a")).toBe(900);
+    expect(() => solveMaxMinField({ ...input, top: 100, seeds: new Map(), priorValues: prior.values }))
+      .toThrow(RangeError);
+    const resumed = solveMaxMinField({ ...input, seeds: new Map(), priorValues: prior.values });
+    expect(resumed.values.get("a")).toBe(900);
+    expect(resumed.values).toBe(prior.values);
+  });
+
   it.each([NaN, -1, 1001])("rejects grade %s in the solver and maintainer", grade => {
     const input: MaxMinInput = { nodeIds: ["a", "b"], bottom: 0, top: 1000, seeds: new Map(), transitions: [] };
     const seeds = new Map([["a", grade]]);

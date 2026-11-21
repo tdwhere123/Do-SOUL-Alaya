@@ -50,6 +50,9 @@ jobs:
 
       - name: Peel tag to commit SHA
         id: identity
+        env:
+          TRIGGER_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           TAG="${RELEASE_TAG}"
@@ -60,6 +63,14 @@ jobs:
           COMMIT_SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
           if [[ ! "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "FATAL: expected 40-hex commit SHA, got ${COMMIT_SHA}"
+            exit 1
+          fi
+          if [[ "$COMMIT_SHA" != "$TRIGGER_SHA" ]]; then
+            if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              echo "FATAL: github.sha ${TRIGGER_SHA} != peeled refs/tags/${TAG}^{commit} ${COMMIT_SHA}; dispatch with --ref refs/tags/${TAG} so OIDC provenance, tested commit, tarball, and release tag are identical"
+            else
+              echo "FATAL: peeled tag commit ${COMMIT_SHA} != github.sha ${TRIGGER_SHA} (tag moved between trigger and resolve)"
+            fi
             exit 1
           fi
           {
