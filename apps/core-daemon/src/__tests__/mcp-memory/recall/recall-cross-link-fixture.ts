@@ -1,5 +1,5 @@
 import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, vi } from "vitest";
 
 import {
   EdgeProposalService,
@@ -41,15 +41,15 @@ import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handle
 
 import { createTrustStateRecorder } from "../../../trust/state.js";
 
-const databases = new Set<StorageDatabase>();
+export const databases = new Set<StorageDatabase>();
 
-const MEM_A = "11111111-aaaa-4aaa-8aaa-000000000001";
+export const MEM_A = "11111111-aaaa-4aaa-8aaa-000000000001";
 
-const MEM_B = "11111111-aaaa-4aaa-8aaa-000000000002";
+export const MEM_B = "11111111-aaaa-4aaa-8aaa-000000000002";
 
-const MEM_C = "11111111-aaaa-4aaa-8aaa-000000000003";
+export const MEM_C = "11111111-aaaa-4aaa-8aaa-000000000003";
 
-async function createHarness(
+export async function createHarness(
   memoryIds: readonly string[],
   options: {
     readonly realEdgeProposals?: boolean;
@@ -218,16 +218,16 @@ async function createHarness(
   };
 }
 
-type ReportHarness = Pick<Awaited<ReturnType<typeof createHarness>>, "handler">;
+export type ReportHarness = Pick<Awaited<ReturnType<typeof createHarness>>, "handler">;
 
-async function reportUsed(
+export async function reportUsed(
   harness: ReportHarness,
   usedObjectIds: readonly string[]
 ) {
   return await reportUsage(harness, "used", usedObjectIds);
 }
 
-async function reportUsage(
+export async function reportUsage(
   harness: ReportHarness,
   usageState: "used" | "skipped" | "not_applicable",
   usedObjectIds: readonly string[]
@@ -249,7 +249,7 @@ async function reportUsage(
   });
 }
 
-function createMemoryEntry(objectId: string): MemoryEntry {
+export function createMemoryEntry(objectId: string): MemoryEntry {
   return {
     object_id: objectId,
     object_kind: "memory_entry",
@@ -283,7 +283,7 @@ function createMemoryEntry(objectId: string): MemoryEntry {
   };
 }
 
-function createRecallCandidate(objectId: string): RecallCandidate {
+export function createRecallCandidate(objectId: string): RecallCandidate {
   return {
     object_id: objectId,
     object_kind: "memory_entry",
@@ -305,28 +305,3 @@ afterEach(() => {
   databases.clear();
 });
 
-describe("recall usage: report_context_usage(used) does not mint ungoverned RECALLS", () => {
-
-  it("does not queue ungoverned RECALLS proposals from a used report", async () => {
-    const harness = await createHarness([MEM_A, MEM_B, MEM_C], { realEdgeProposals: true });
-
-    await reportUsed(harness, [MEM_A, MEM_B]);
-
-    expect(await harness.pathRelationRepo.findByWorkspace("workspace-1")).toEqual([]);
-    expect(harness.edgeProposalRepo.listPending("workspace-1")).toEqual([]);
-    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
-  });
-});
-
-describe("recall usage: legacy graph edge behavior stays disconnected", () => {
-
-  it("records the report without invoking a throwing graph edge port", async () => {
-    const harness = await createHarness([MEM_A, MEM_B]);
-    harness.graphEdgePort.createEdge.mockRejectedValueOnce(new Error("edge db down"));
-
-    const result = await reportUsed(harness, [MEM_A, MEM_B]);
-
-    expect(result).toMatchObject({ ok: true });
-    expect(harness.graphEdgePort.createEdge).not.toHaveBeenCalled();
-  });
-});

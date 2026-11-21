@@ -1,39 +1,14 @@
-import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
-
+import { expect, vi } from "vitest";
 import {
-  GardenRole,
   GardenTaskKind,
-  GardenTier,
-  HealthEventKind,
-  type ConsolidationCyclePlan,
-  type ConsolidationCycleResult,
   type GardenTaskDescriptor,
   type GardenTaskResult,
-  type GardenTierValue,
-  type PathRelation
+  type GardenTierValue
 } from "@do-soul/alaya-protocol";
-
-import {
-  ConsolidationExecutor,
-  ConsolidationPlanner,
-  EmbeddingBackfillPartialFailureError
-} from "@do-soul/alaya-core";
-
 import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
 
-import {
-  createConsolidationCapableConnection,
-  createDormantPath,
-  createGardenDataPorts,
-  createRuntimeInput,
-  type GardenRuntimeInput
-} from "./runtime-fixture.js";
-
 const hoisted = vi.hoisted(() => {
-  const schedulers: Array<{
-    queue: GardenTaskDescriptor[];
-    completions: GardenTaskResult[];
-  }> = [];
+  const schedulers: Array<FakeGardenScheduler> = [];
   const tierOrder: Record<GardenTierValue, number> = {
     tier_0: 0,
     tier_1: 1,
@@ -134,9 +109,14 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
 
 import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
-type CapturedScheduler = (typeof hoisted.schedulers)[number];
+export type CapturedScheduler = (typeof hoisted.schedulers)[number];
+export type GardenRuntime = ReturnType<typeof createGardenRuntime>;
 
-function currentScheduler(): CapturedScheduler {
+export function resetSchedulers(): void {
+  hoisted.schedulers.splice(0, hoisted.schedulers.length);
+}
+
+export function currentScheduler(): CapturedScheduler {
   const scheduler = hoisted.schedulers[0];
   if (scheduler === undefined) {
     throw new Error("GardenScheduler was not constructed.");
@@ -144,7 +124,7 @@ function currentScheduler(): CapturedScheduler {
   return scheduler;
 }
 
-function getService(runtime: ReturnType<typeof createGardenRuntime>, name: string): BackgroundServiceConfig {
+export function getService(runtime: GardenRuntime, name: string): BackgroundServiceConfig {
   const services = (runtime.backgroundManager as unknown as {
     readonly services: readonly BackgroundServiceConfig[];
   }).services;
@@ -155,13 +135,13 @@ function getService(runtime: ReturnType<typeof createGardenRuntime>, name: strin
   return service;
 }
 
-async function enqueueMaintenanceTick(runtime: ReturnType<typeof createGardenRuntime>): Promise<void> {
+export async function enqueueMaintenanceTick(runtime: GardenRuntime): Promise<void> {
   await getService(runtime, "Janitor").task();
   await getService(runtime, "Auditor").task();
   await getService(runtime, "Librarian").task();
 }
 
-async function drainScheduler(runtime: ReturnType<typeof createGardenRuntime>): Promise<void> {
+export async function drainScheduler(runtime: GardenRuntime): Promise<void> {
   const scheduler = currentScheduler();
   const schedulerService = getService(runtime, "GardenScheduler");
 
@@ -172,79 +152,7 @@ async function drainScheduler(runtime: ReturnType<typeof createGardenRuntime>): 
   expect(scheduler.queue).toHaveLength(0);
 }
 
-function plasticityTasks(scheduler: CapturedScheduler): readonly GardenTaskDescriptor[] {
+export function plasticityTasks(scheduler: CapturedScheduler): readonly GardenTaskDescriptor[] {
   return scheduler.queue.filter((task) => task.task_kind === GardenTaskKind.PATH_PLASTICITY_UPDATE);
 }
 
-describe("garden runtime path plasticity queue", () => {
-
-  beforeEach(() => {
-    hoisted.schedulers.splice(0, hoisted.schedulers.length);
-  });
-
-  it("records a default-workspace Garden pass when no workspaces exist yet", async () => {
-    const healthJournalAppend = vi.fn(async () => undefined);
-    const runtime = createGardenRuntime(createRuntimeInput({
-      healthJournalRepo: {
-        append: healthJournalAppend
-      } as unknown as GardenRuntimeInput["healthJournalRepo"],
-      workspaceRepo: {
-        list: vi.fn(async () => [])
-      } as unknown as GardenRuntimeInput["workspaceRepo"]
-    }));
-
-    await runtime.runBackgroundPass();
-
-    expect(healthJournalAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event_kind: HealthEventKind.GARDEN_BACKLOG,
-        workspace_id: "default",
-        summary: "Garden background pass completed"
-      })
-    );
-  });
-
-  it("prioritizes Auditor evidence staleness by path verification bias", async () => {
-    const revokeOrder: string[] = [];
-    const gardenDataPorts = createGardenDataPorts({
-      evidenceCheckPort: {
-        findMemoriesWithStaleEvidence: vi.fn(async () => [
-          { memory_entry_id: "memory-low", stale_evidence_refs: ["evidence-1"] },
-          { memory_entry_id: "memory-high", stale_evidence_refs: ["evidence-2"] }
-        ])
-      },
-      // Only revokeGreen is exercised here; createGardenDataPorts spreads
-      // this over full greenMaintenancePort defaults, so the partial
-      // override is completed at runtime.
-      greenMaintenancePort: {
-        revokeGreen: vi.fn((memoryId: string) => {
-          revokeOrder.push(memoryId);
-          return { affected: 1 };
-        })
-      } as unknown as GardenRuntimeInput["gardenDataPorts"]["greenMaintenancePort"]
-    });
-    const runtime = createGardenRuntime(
-      createRuntimeInput({
-        gardenDataPorts,
-        pathRelationRepo: {
-          findActive: vi.fn(async () => []),
-        findActiveAll: vi.fn(async () => []),
-          findByAnchors: vi.fn(async (_workspaceId: string, anchors: readonly { readonly object_id: string }[]) =>
-            anchors.some((anchor) => anchor.object_id === "memory-high")
-              ? [
-                  {
-                    lifecycle: { status: "active" },
-                    effect_vector: { verification_bias: 0.9 }
-                  }
-                ]
-              : [])
-        } as unknown as GardenRuntimeInput["pathRelationRepo"]
-      })
-    );
-
-    await getService(runtime, "Auditor").task();
-    await getService(runtime, "GardenScheduler").task();
-
-    expect(revokeOrder).toEqual(["memory-high", "memory-low"]);
-  });
-});

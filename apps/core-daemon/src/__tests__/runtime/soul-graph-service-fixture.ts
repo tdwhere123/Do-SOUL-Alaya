@@ -1,11 +1,3 @@
-import { describe, expect, it } from "vitest";
-
-import {
-  classifySoulGraphOriginKind,
-  createSoulGraphService,
-  deriveDomainTagSummary
-} from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
-
 import { MemoryGovernanceEventType, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
 
 import type {
@@ -17,20 +9,20 @@ import type {
 // invariant: keep this test-local row-shape alias aligned with the daemon's
 // runtime memory-entry rows so fixture records match findByWorkspaceId output.
 // see also: apps/core-daemon/src/runtime/daemon-runtime-support.ts:MemoryEntryRecord
-type MemoryEntryRecord = Awaited<ReturnType<SqliteMemoryEntryRepo["findByWorkspaceId"]>>[number];
+export type MemoryEntryRecord = Awaited<ReturnType<SqliteMemoryEntryRepo["findByWorkspaceId"]>>[number];
 
-type SoulGraphProposalRepo = Pick<
+export type SoulGraphProposalRepo = Pick<
   ProposalRepo,
   "findPendingSummaries" | "countPending" | "countPendingMemoryTargetEdges"
 >;
 
-function emptyEventLogRepo() {
+export function emptyEventLogRepo() {
   return {
     queryByWorkspaceAndType: async () => []
   };
 }
 
-function createMemory(overrides: {
+export function createMemory(overrides: {
   readonly object_id: string;
   readonly content?: string;
   readonly domain_tags: readonly string[];
@@ -62,7 +54,7 @@ function createMemory(overrides: {
   };
 }
 
-function createPathRelation(overrides: {
+export function createPathRelation(overrides: {
   readonly path_id: string;
   readonly source_object_id: string;
   readonly target_object_id: string;
@@ -104,7 +96,7 @@ function createPathRelation(overrides: {
   };
 }
 
-function createMemoryUpdatedEvent(memoryId: string): EventLogEntry {
+export function createMemoryUpdatedEvent(memoryId: string): EventLogEntry {
   return {
     event_id: `event-${memoryId}`,
     event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
@@ -125,51 +117,3 @@ function createMemoryUpdatedEvent(memoryId: string): EventLogEntry {
   };
 }
 
-describe("deriveDomainTagSummary", () => {
-  it("returns just the count when members is empty", () => {
-    expect(deriveDomainTagSummary([])).toBe("0 memories");
-  });
-
-  it("collapses a uniform bucket to 'all: <label>' so the same string is not repeated", () => {
-    const sameContent = "Codex memory recall shard (2026-04-12)";
-    const members = Array.from({ length: 226 }, (_, i) =>
-      createMemory({ object_id: `chunk-${i}`, content: sameContent, domain_tags: [] })
-    );
-    const summary = deriveDomainTagSummary(members as unknown as readonly MemoryEntryRecord[]);
-    expect(summary).toMatch(/^226 memories · all: Codex memory recall shard/);
-    // Two raw "Codex memory recall shard" occurrences in a row would be the
-    // pre-dedupe regression (one from "all:" prefix, one from a duplicated
-    // sample slot). Assert the phrase appears exactly once.
-    const occurrences = (summary.match(/Codex memory recall shard/g) ?? []).length;
-    expect(occurrences).toBe(1);
-  });
-
-  it("lists distinct labels and surfaces a +N more variants tail when heterogeneous", () => {
-    const members = [
-      createMemory({ object_id: "a", content: "Alpha topic line", domain_tags: [] }),
-      createMemory({ object_id: "b", content: "Bravo topic line", domain_tags: [] }),
-      createMemory({ object_id: "c", content: "Charlie topic line", domain_tags: [] }),
-      createMemory({ object_id: "d", content: "Delta topic line", domain_tags: [] }),
-      createMemory({ object_id: "e", content: "Echo topic line", domain_tags: [] })
-    ];
-    const summary = deriveDomainTagSummary(members as unknown as readonly MemoryEntryRecord[]);
-    expect(summary).toMatch(/^5 memories · /);
-    expect(summary).toContain("Alpha topic line");
-    expect(summary).toContain("Bravo topic line");
-    expect(summary).toContain("Charlie topic line");
-    expect(summary).toMatch(/\+2 more variants$/);
-    expect(summary).not.toContain("Delta topic line");
-    expect(summary).not.toContain("Echo topic line");
-  });
-
-  it("uses singular 'variant' when exactly one is hidden", () => {
-    const members = [
-      createMemory({ object_id: "a", content: "Alpha topic line", domain_tags: [] }),
-      createMemory({ object_id: "b", content: "Bravo topic line", domain_tags: [] }),
-      createMemory({ object_id: "c", content: "Charlie topic line", domain_tags: [] }),
-      createMemory({ object_id: "d", content: "Delta topic line", domain_tags: [] })
-    ];
-    const summary = deriveDomainTagSummary(members as unknown as readonly MemoryEntryRecord[]);
-    expect(summary).toMatch(/\+1 more variant$/);
-  });
-});

@@ -1,17 +1,17 @@
 import { stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
+import { createStatementSessionExtractionReceipts } from "../../../garden/statement-session/statement-session-extraction-receipts.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, vi } from "vitest";
 
 import {
   FormationKind,
   GardenRole,
   GardenTaskKind,
-  GardenTier,
   MemoryDimension,
   MemoryGovernanceEventType,
   ProposalResolutionState,
@@ -24,7 +24,6 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
-  type GardenTaskDescriptor,
   type MemoryEntry,
   type SoulEmitCandidateSignalResponse,
   type SoulMemorySearchResponse,
@@ -49,6 +48,9 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { createAlayaMcpServer } from "../../../mcp/server/mcp-server.js";
+import { createDaemonHostSessionCapture, MCP_HOST_SESSION_ISSUER } from "../../../garden/host-session/host-session-capture.js";
+import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
+import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 
 import {
   createMcpMemoryToolHandler,
@@ -62,7 +64,7 @@ import {
 
 import { createTrustStateRecorder } from "../../../trust/state.js";
 
-const TRACE_SQL = `
+export const TRACE_SQL = `
 WITH delivered AS (
   SELECT rowid AS event_order, event_type, payload_json, json_extract(payload_json, '$.delivery_id') AS delivery
   FROM event_log
@@ -88,7 +90,7 @@ UNION ALL SELECT event_order, event_type, payload_json FROM anchored
 ORDER BY event_order
 `;
 
-const PROPOSAL_MEMBERSHIP_SQL = `
+export const PROPOSAL_MEMBERSHIP_SQL = `
 WITH target_delivery AS (
   SELECT ? AS delivery
 )
@@ -100,29 +102,31 @@ WHERE e.event_type IN ('soul.proposal.created', 'soul.proposal.resolved')
 ORDER BY e.rowid
 `;
 
-const harnesses = new Set<TrustworthyLoopHarness>();
+export const harnesses = new Set<TrustworthyLoopHarness>();
 
-const PRIMARY_MEMORY_ID = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
+export const PRIMARY_MEMORY_ID = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
 
-const TRACE_REVIEWER_IDENTITY = "user:trace-reviewer";
+export const TRACE_REVIEWER_IDENTITY = "user:trace-reviewer";
 
-const TRACE_REVIEWER_TOKEN = "trace-review-token";
+export const TRACE_REVIEWER_TOKEN = "trace-review-token";
 
-interface TraceRow {
+export interface TraceRow {
   readonly event_order: number;
   readonly event_type: string;
   readonly payload_json: string;
 }
 
-interface TrustworthyLoopHarness {
+export interface TrustworthyLoopHarness {
   readonly database: StorageDatabase;
   readonly eventLogRepo: SqliteEventLogRepo;
   callTool<TOutput = unknown>(toolName: string, args: Record<string, unknown>): Promise<TOutput>;
   useHumanReviewSurface(): void;
   close(): Promise<void>;
+  /** Captures one host message and closes its container's statement session; returns the session task id. */
+  captureClosedSession(): Promise<string>;
 }
 
-async function createTrustworthyLoopHarness(
+export async function createTrustworthyLoopHarness(
   options: { readonly warn?: (message: string, meta: Record<string, unknown>) => void } = {}
 ): Promise<TrustworthyLoopHarness> {
   const database = initDatabase({ filename: ":memory:" });
@@ -207,8 +211,8 @@ async function createTrustworthyLoopHarness(
     generateId: nextUuid,
     recallService: {
       recall: async () => ({
-        candidates: [createRecallCandidate()],
         index: stubRecallIndex([PRIMARY_MEMORY_ID]),
+        candidates: [createRecallCandidate()],
         active_constraints: [],
         active_constraints_count: 0,
         total_scanned: 1,
@@ -218,6 +222,13 @@ async function createTrustworthyLoopHarness(
     },
     memoryService,
     signalService,
+    postTurnSignalReceiver: {
+      receiveSignal: async (signal) => await signalService.receiveSignal(signal)
+    },
+    statementSessionCompletion: {
+      receipts: createStatementSessionExtractionReceipts(eventLogRepo, eventPublisher),
+      admitRelations: async () => undefined
+    },
     graphExploreService: { exploreOneHop: async () => [] },
     sessionOverrideService: { apply: async () => ({ runtime_id: "override-1" }) },
     trustStateRecorder,
@@ -259,6 +270,16 @@ async function createTrustworthyLoopHarness(
       await client.close();
       await server.close();
       database.close();
+    },
+    async captureClosedSession() {
+      const capture = createDaemonHostSessionCapture({ eventLogRepo, runtimeNotifier, gardenTaskRepo,
+        now: () => "2026-05-11T00:00:00.000Z", warn: () => undefined,
+        stores: createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) }) });
+      await capture.capture({ workspaceId: "workspace-1", runId: "run-1", issuer: MCP_HOST_SESSION_ISSUER,
+        request: { container: { scope: "trace-host", id: "conversation-1" }, closes_tail: true, messages: [{
+          message_id: "message-0", position: 0, role: "user", content: "Garden extracted an unanchored signal.",
+          completeness: "complete", fidelity: "original_bytes" }] } });
+      return gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 1, GardenTaskKind.SOURCE_STATEMENT_SESSION)[0]!.id;
     }
   };
 
@@ -266,22 +287,22 @@ async function createTrustworthyLoopHarness(
   return harness;
 }
 
-function assertTraceSqlUsesMembershipOnly(): void {
+export function assertTraceSqlUsesMembershipOnly(): void {
   expect(TRACE_SQL).toContain("json_each(e.payload_json, '$.source_delivery_ids')");
   expect(TRACE_SQL).not.toContain("entity_id");
   expect(TRACE_SQL).not.toContain("run_id");
   expect(TRACE_SQL).not.toContain("->> '$.source_delivery_ids'");
 }
 
-function queryRows(database: StorageDatabase, sql: string, deliveryId: string): readonly TraceRow[] {
+export function queryRows(database: StorageDatabase, sql: string, deliveryId: string): readonly TraceRow[] {
   return database.connection.prepare(sql).all(deliveryId) as TraceRow[];
 }
 
-function parsePayload(row: TraceRow): Record<string, unknown> {
+export function parsePayload(row: TraceRow): Record<string, unknown> {
   return JSON.parse(row.payload_json) as Record<string, unknown>;
 }
 
-async function seedWorkspaceRun(
+export async function seedWorkspaceRun(
   workspaceRepo: SqliteWorkspaceRepo,
   runRepo: SqliteRunRepo
 ): Promise<void> {
@@ -306,7 +327,7 @@ async function seedWorkspaceRun(
   });
 }
 
-function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+export function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     object_id: PRIMARY_MEMORY_ID,
     object_kind: "memory_entry",
@@ -341,7 +362,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   };
 }
 
-function createRecallCandidate() {
+export function createRecallCandidate() {
   return {
     object_id: PRIMARY_MEMORY_ID,
     object_kind: "memory_entry",
@@ -356,12 +377,12 @@ function createRecallCandidate() {
   } as const;
 }
 
-function createUuidGenerator(): () => string {
+export function createUuidGenerator(): () => string {
   let counter = 0;
   return () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`;
 }
 
-type _UsedTypes = Server;
+export type _UsedTypes = Server;
 
 afterEach(async () => {
   for (const harness of harnesses) {
@@ -370,59 +391,3 @@ afterEach(async () => {
   harnesses.clear();
 });
 
-describe("trustworthy-loop-trace", () => {
-
-  it("links multi-delivery proposal events by array membership through the public request path", async () => {
-    const harness = await createTrustworthyLoopHarness();
-    const first = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
-      protocol_version: 1,
-      supported_result_kinds: ["memory_entry", "source_evidence"],
-      supports_source_evidence: true,
-      supports_product_updates: true,
-      query: "first delivery",
-      scope_class: ScopeClass.PROJECT,
-      dimension: MemoryDimension.PREFERENCE,
-      domain_tags: null,
-      max_results: 3
-    });
-    const second = await harness.callTool<SoulMemorySearchResponse>("soul.recall", {
-      protocol_version: 1,
-      supported_result_kinds: ["memory_entry", "source_evidence"],
-      supports_source_evidence: true,
-      supports_product_updates: true,
-      query: "second delivery",
-      scope_class: ScopeClass.PROJECT,
-      dimension: MemoryDimension.PREFERENCE,
-      domain_tags: null,
-      max_results: 3
-    });
-    const sourceDeliveryIds = [first.delivery_id, second.delivery_id] as const;
-
-    const proposal = await harness.callTool<SoulProposeMemoryUpdateResponse>("soul.propose_memory_update", {
-      target_object_id: PRIMARY_MEMORY_ID,
-      proposed_changes: { content: "Use pnpm from either recalled delivery." },
-      reason: "Multi-delivery trace test.",
-      source_delivery_ids: sourceDeliveryIds
-    });
-    harness.useHumanReviewSurface();
-    await harness.callTool<SoulReviewMemoryProposalResponse>("soul.review_memory_proposal", {
-      proposal_id: proposal.proposal_id,
-      verdict: "reject",
-      reason: "Trace test rejects synthetic proposal.",
-      reviewer_identity: TRACE_REVIEWER_IDENTITY,
-      reviewer_token: TRACE_REVIEWER_TOKEN
-    });
-
-    for (const deliveryId of sourceDeliveryIds) {
-      const rows = queryRows(harness.database, PROPOSAL_MEMBERSHIP_SQL, deliveryId);
-      expect(rows.map((row) => row.event_type)).toEqual([
-        MemoryGovernanceEventType.SOUL_PROPOSAL_CREATED,
-        MemoryGovernanceEventType.SOUL_PROPOSAL_RESOLVED
-      ]);
-      expect(rows.map((row) => parsePayload(row).source_delivery_ids)).toEqual([
-        sourceDeliveryIds,
-        sourceDeliveryIds
-      ]);
-    }
-  });
-});

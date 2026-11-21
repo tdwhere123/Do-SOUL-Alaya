@@ -1,4 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createAttachClaudeCommandSpec } from "../../cli/attach/claude.js";
+import { createAttachCodexCommandSpec } from "../../cli/attach/codex.js";
+import { extractTomlBlock, removeTomlBlock } from "../../attach/profile-mutation/profile-mutation-text.js";
+import {
+  createProfileCommandContext,
+  MemoryProfileAuditWriter,
+  MemoryProfileFs as CommandMemoryProfileFs
+} from "./profile-command-fixtures.js";
 import {
   ALAYA_OPERATOR_INSTRUCTIONS,
   applyProfileMutationPlan,
@@ -504,5 +512,86 @@ operator_instructions = ${JSON.stringify(stale)}
     expect(report.status).toBe("drifted");
     expect(report.attached_preview?.length).toBe(120);
     expect(report.attached_preview?.endsWith("…")).toBe(true);
+  });
+});
+
+describe("attach claude", () => {
+  it("writes MCP profile records, audits, and records trust state", async () => {
+    const fs = new CommandMemoryProfileFs();
+    const auditWriter = new MemoryProfileAuditWriter();
+    const trustStateRecorder = {
+      recordInstalled: vi.fn(async () => {}),
+      recordConfigured: vi.fn(async () => {})
+    };
+    const command = createAttachClaudeCommandSpec({
+      fs,
+      auditWriter,
+      trustStateRecorder,
+      nowIso: () => "2026-04-30T00:00:00.000Z"
+    });
+
+    const result = await command.execute({
+      ...createProfileCommandContext(),
+      yes: true
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.files.get(claudeJsonPath())).toContain('"alaya"');
+    expect(auditWriter.rows).toHaveLength(1);
+    expect(trustStateRecorder.recordInstalled).toHaveBeenCalledWith("claude-code");
+    expect(trustStateRecorder.recordConfigured).toHaveBeenCalledWith("claude-code");
+  });
+});
+
+describe("attach codex", () => {
+  it("writes MCP profile records, audits, and records trust state", async () => {
+    const fs = new CommandMemoryProfileFs();
+    const auditWriter = new MemoryProfileAuditWriter();
+    const trustStateRecorder = {
+      recordInstalled: vi.fn(async () => {}),
+      recordConfigured: vi.fn(async () => {})
+    };
+    const command = createAttachCodexCommandSpec({
+      fs,
+      auditWriter,
+      trustStateRecorder,
+      nowIso: () => "2026-04-30T00:00:00.000Z"
+    });
+
+    const result = await command.execute({
+      ...createProfileCommandContext(),
+      yes: true
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.files.get(codexConfigPath())).toContain("[mcp_servers.alaya]");
+    expect(auditWriter.rows).toHaveLength(1);
+    expect(trustStateRecorder.recordInstalled).toHaveBeenCalledWith("codex");
+    expect(trustStateRecorder.recordConfigured).toHaveBeenCalledWith("codex");
+  });
+});
+
+describe("profile mutation text", () => {
+  it("extracts and removes the codex MCP server TOML block with Windows launcher paths", () => {
+    const windowsPath = String.raw`D:\repo\bin\alaya.mjs`;
+    const content = [
+      "[other]",
+      "enabled = true",
+      "",
+      "[mcp_servers.alaya]",
+      'command = "node"',
+      `args = ${JSON.stringify([windowsPath, "mcp", "stdio"])}`,
+      "",
+      "[after]",
+      "keep = 1"
+    ].join("\n");
+
+    const extracted = extractTomlBlock(content, "[mcp_servers.alaya]");
+    expect(extracted).toContain(`args = ${JSON.stringify([windowsPath, "mcp", "stdio"])}`);
+
+    const removed = removeTomlBlock(content, "[mcp_servers.alaya]");
+    expect(removed).not.toContain("[mcp_servers.alaya]");
+    expect(removed).toContain("[other]");
+    expect(removed).toContain("[after]");
   });
 });

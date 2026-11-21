@@ -1,8 +1,27 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { expect, it } from "vitest";
-import { replayRetainedAdmission } from "../../../../../../apps/bench-runner/src/runs/extraction/enrichment-acceptance/retained-admission-replay.js";
-import { resultCandidateIdentity } from "./source-discovery-public-consumption-evidence.js";
+import { replayRetainedAdmission } from "../../../runs/extraction/enrichment-acceptance/retained-admission-replay.js";
+
+function resultCandidateIdentity(): Readonly<{
+  readonly result_sha: string | "unavailable";
+  readonly result_tree: string | "unavailable";
+}> {
+  try {
+    const porcelain = execFileSync("git", ["status", "--porcelain"], {
+      cwd: process.cwd(), encoding: "utf8"
+    });
+    const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: process.cwd(), encoding: "utf8" }).trim();
+    const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: process.cwd(), encoding: "utf8" }).trim();
+    if (porcelain.trim() !== "" || !/^[a-f0-9]{40}$/u.test(sha) || !/^[a-f0-9]{40}$/u.test(tree)) {
+      return { result_sha: "unavailable", result_tree: "unavailable" };
+    }
+    return { result_sha: sha, result_tree: tree };
+  } catch {
+    return { result_sha: "unavailable", result_tree: "unavailable" };
+  }
+}
 
 const configuration = process.env.ALAYA_RETAINED_ADMISSION_CONFIG;
 
