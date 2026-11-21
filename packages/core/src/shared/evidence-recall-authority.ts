@@ -14,17 +14,6 @@ export interface EvidenceRecallAuthority {
   readonly sourceHash: string | null;
 }
 
-export function hasDirectEvidenceRecallAuthority(
-  evidence: Readonly<EvidenceRecallAuthority>,
-  workspaceId: string
-): boolean {
-  return hasEvidenceRecallEnvelope(evidence, workspaceId) &&
-    hasGardenSourceTurnFallbackAnyReceiptFormat({
-      artifact_ref: evidence.artifactRef,
-      source_hash: evidence.sourceHash
-    });
-}
-
 export function hasEvidenceDocumentEmbeddingAuthority(
   evidence: Readonly<EvidenceRecallAuthority> & { readonly documentIdentity: string },
   workspaceId: string,

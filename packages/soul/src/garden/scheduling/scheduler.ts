@@ -51,11 +51,9 @@ export type {
   GardenSchedulerConfig,
   GardenSchedulerEventLogPort,
   GardenTaskBacklogCount,
-  GardenTaskClaimResult,
   GardenTaskEventInput,
   GardenTaskRepoPort,
-  GardenTaskRow,
-  GardenTaskStatus
+  GardenTaskRow
 } from "./scheduler-types.js";
 
 export const MAX_PENDING_BACKLOG_WARNING_TRANSITIONS = 32;

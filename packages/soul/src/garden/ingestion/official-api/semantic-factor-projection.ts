@@ -13,7 +13,7 @@ type SemanticGraphCardinalitySubject =
   | "result_variables"
   | "variables";
 
-export type OfficialApiSemanticFactorGraphProjectionReason =
+type OfficialApiSemanticFactorGraphProjectionReason =
   | "semantic_factor_graph_missing"
   | `semantic_factor_graph_invalid_${SemanticGraphCardinalitySubject}_${"too_few" | "too_many"}`
   | "semantic_factor_graph_invalid_identity"

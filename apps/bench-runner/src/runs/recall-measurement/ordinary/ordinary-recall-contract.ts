@@ -10,7 +10,7 @@ export const ORDINARY_RECALL_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v
 export const ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v2";
 export const ORDINARY_RECALL_PUBLIC_SEMANTICS = "conditional-field-source-only-v1";
 /** Pinned offline admission: later package/result versions need their own compatibility review. */
-export const ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION = "44.1.1";
+export const ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION = "45.0.0";
 export const ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS = "ordinary-native-field.v16";
 /** Exact saved-capture bindings; remove historical pairs only with their archives.
  * Undefined means no native archive contract, never permission to execute an old ranking. */

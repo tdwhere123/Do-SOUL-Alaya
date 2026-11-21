@@ -64,7 +64,6 @@ import type {
 import { withRecallReadSnapshot } from "./recall-read-snapshot.js";
 import { assertRecallZeroLiveExtraction } from "./zero-live-extraction.js";
 import {
-  RELATION_ROUTING as RELATION_MILLIGRADES,
   emptyField,
   observeField
 } from "./conditional-field-observe.js";
@@ -82,7 +81,6 @@ export type {
   RecallExecutionContext,
   RecallExecutionParams
 } from "./recall-service-runner-types.js";
-export { RELATION_MILLIGRADES };
 
 const DEFAULT_WORK_UNITS = 10_000;
 const DEFAULT_MEMORY_BYTES = 1_000_000;

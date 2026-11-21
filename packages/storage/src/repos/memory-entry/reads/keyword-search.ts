@@ -256,7 +256,7 @@ export function tokenizeFtsQuery(queryText: string): readonly string[] {
   );
 }
 
-export function countQueryCodepoints(value: string): number {
+function countQueryCodepoints(value: string): number {
   return Array.from(value).length;
 }
 
@@ -269,7 +269,7 @@ export function countQueryCodepoints(value: string): number {
 const CJK_TOKEN_PATTERN =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 
-export function tokenBearsCjk(token: string): boolean {
+function tokenBearsCjk(token: string): boolean {
   return CJK_TOKEN_PATTERN.test(token);
 }
 

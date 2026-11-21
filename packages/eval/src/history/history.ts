@@ -36,7 +36,6 @@ import {
   reconcileHistoryPointers,
   writeHistoryEntry,
   type HistoryFileSidecar,
-  type HistorySidecar,
   type WriteEntryOptions
 } from "./history-entry-write.js";
 import { isHistoryEntrySlug } from "./history-slug.js";
@@ -45,7 +44,6 @@ export {
   HistoryEntryCommittedError,
   isHistoryEntryCommittedError,
   type HistoryFileSidecar,
-  type HistorySidecar,
   type WriteEntryOptions
 };
 
@@ -271,7 +269,7 @@ export interface HistoryEntryQuery {
 }
 
 /** Shared cohort predicate for history readers and offline report regeneration. */
-export function matchesHistoryQuery(entry: KpiPayload, query: HistoryEntryQuery): boolean {
+function matchesHistoryQuery(entry: KpiPayload, query: HistoryEntryQuery): boolean {
   return (
     (query.split === undefined || entry.split === query.split) &&
     (query.policyShape === undefined ||

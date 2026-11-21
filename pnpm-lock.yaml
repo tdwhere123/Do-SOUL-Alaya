@@ -306,6 +306,9 @@ importers:
 
   packages/eval:
     dependencies:
+      '@do-soul/alaya-core':
+        specifier: workspace:*
+        version: link:../core
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../protocol

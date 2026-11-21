@@ -410,7 +410,7 @@ function buildManifestationBudgetAuditEvent(
     entity_id: configKey,
     workspace_id: workspaceId,
     run_id: null,
-    caused_by: "inspector",
+    caused_by: "http-config",
     payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
       entry_id: auditEntryId,
       event_kind: HealthEventKind.RECALL_TUNING,

@@ -183,14 +183,3 @@ export function collectAdditionalEvents(
     }
   }
 }
-
-export function assertNoAdditionalEventInputs(
-  additionalEventInputs: readonly EventPublisherInput[]
-): void {
-  if (additionalEventInputs.length > 0) {
-    throw new CoreError(
-      "CONFLICT",
-      "Atomic claim transition with additional audit events is not available"
-    );
-  }
-}

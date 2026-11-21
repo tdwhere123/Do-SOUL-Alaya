@@ -59,7 +59,7 @@ export function readGardenVerifiedUserAssertionReceipt(
   return { assertion, sourceHash: sourceHash! };
 }
 
-export function resolveGardenRawPayloadGrounding(
+function resolveGardenRawPayloadGrounding(
   rawPayload: CandidateMemorySignal["raw_payload"]
 ): GardenSignalGrounding {
   const grounding = readRecord(rawPayload.source_grounding);

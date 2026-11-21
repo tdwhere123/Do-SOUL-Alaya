@@ -2,10 +2,10 @@ import { z } from "zod";
 import { NonEmptyStringSchema } from "../shared/schema-primitives.js";
 import type { EvidenceSearchProjection } from "./evidence-capsule.js";
 
-export const ASSOCIATIVE_FACT_FRAME_SCHEMA_VERSION = 1 as const;
+const ASSOCIATIVE_FACT_FRAME_SCHEMA_VERSION = 1 as const;
 export const ASSOCIATIVE_FACT_FRAME_SLOT_LIMIT = 6;
 
-export const AssociativeFactSlotRoleSchema = z.enum([
+const AssociativeFactSlotRoleSchema = z.enum([
   "subject",
   "relation",
   "value",
@@ -13,7 +13,7 @@ export const AssociativeFactSlotRoleSchema = z.enum([
   "time"
 ]);
 
-export const AssociativeFactSlotSchema = z.object({
+const AssociativeFactSlotSchema = z.object({
   role: AssociativeFactSlotRoleSchema,
   text: NonEmptyStringSchema.max(512)
 }).strict().readonly();
@@ -46,7 +46,7 @@ export interface AttributedAssociativeFactKeyProjection {
 
 export const EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID =
   "evidence_fact_frame_formation_v1" as const;
-export const EvidenceFactFrameFormationStatusSchema = z.enum([
+const EvidenceFactFrameFormationStatusSchema = z.enum([
   "formed",
   "ineligible",
   "unavailable",

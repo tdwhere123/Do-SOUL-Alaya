@@ -9,7 +9,6 @@ import {
 export type { EnvLookup };
 import { createWarnLogger } from "../../runtime/daemon/lifecycle/daemon-runtime-helpers.js";
 import { z } from "zod";
-import { isBuiltinConversationToolId, type BuiltinConversationToolId } from "../server/builtin-conversation-tool-specs.js";
 import type { DaemonMcpServerRuntimeConfig } from "./mcp-runtime-registry.js";
 
 const JsonObjectRecordSchema = z.record(z.string(), z.unknown());
@@ -37,12 +36,6 @@ const DaemonMcpStdioConfigInputSchema = z
   })
   .loose()
   .readonly();
-const DaemonMcpBindingBuiltinSchema = z
-  .object({
-    binding_kind: z.literal("builtin_tool"),
-    builtin_tool_id: NonEmptyStringSchema
-  })
-  .readonly();
 const DaemonMcpBindingMcpToolSchema = z
   .object({
     binding_kind: z.literal("mcp_tool"),
@@ -50,17 +43,9 @@ const DaemonMcpBindingMcpToolSchema = z
   })
   .readonly();
 
-export type DaemonMcpRuntimeBinding = Readonly<{
-  readonly bindingKind: "builtin_tool";
-  readonly builtinToolId: BuiltinConversationToolId;
-}> | Readonly<{
-  readonly bindingKind: "mcp_tool";
-  readonly toolName?: string;
-}>;
-
 export type DaemonMcpCatalogToolEntry = Readonly<{
   readonly spec: Readonly<ToolProviderToolSpec>;
-  readonly runtimeBinding: DaemonMcpRuntimeBinding | null;
+  readonly runtimeToolName: string | null;
 }>;
 
 export type WarnLogger = (message: string, meta: Record<string, unknown>) => void;
@@ -227,9 +212,15 @@ function parseMcpToolEntry(rawTool: unknown): DaemonMcpCatalogToolEntry | null {
     return null;
   }
 
+  const binding = candidate.data.daemon_binding;
+  if (binding === undefined) {
+    return Object.freeze({ spec, runtimeToolName: spec.name });
+  }
+  const mcpBinding = DaemonMcpBindingMcpToolSchema.safeParse(binding);
+  // Keep rejected overrides so live discovery cannot enroll the same tool on their behalf.
   return Object.freeze({
     spec,
-    runtimeBinding: parseDaemonMcpToolRuntimeBinding(candidate.data.daemon_binding)
+    runtimeToolName: mcpBinding.success ? mcpBinding.data.tool_name ?? spec.name : null
   });
 }
 
@@ -254,32 +245,6 @@ function parseMcpToolSpec(rawTool: Pick<z.infer<typeof McpToolEntryInputSchema>,
     });
     return null;
   }
-}
-
-function parseDaemonMcpToolRuntimeBinding(value: unknown): DaemonMcpRuntimeBinding | null {
-  const builtinBinding = DaemonMcpBindingBuiltinSchema.safeParse(value);
-  if (builtinBinding.success) {
-    if (!isBuiltinConversationToolId(builtinBinding.data.builtin_tool_id)) {
-      return null;
-    }
-
-    return Object.freeze({
-      bindingKind: "builtin_tool",
-      builtinToolId: builtinBinding.data.builtin_tool_id
-    });
-  }
-
-  const mcpToolBinding = DaemonMcpBindingMcpToolSchema.safeParse(value);
-  if (mcpToolBinding.success) {
-    return Object.freeze({
-      bindingKind: "mcp_tool",
-      ...(mcpToolBinding.data.tool_name === undefined
-        ? {}
-        : { toolName: mcpToolBinding.data.tool_name })
-    });
-  }
-
-  return null;
 }
 
 function readStringRecord(value: unknown): Readonly<Record<string, string>> {

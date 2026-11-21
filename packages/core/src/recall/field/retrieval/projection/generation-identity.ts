@@ -19,7 +19,7 @@ export type ProjectionGenerationDraft = Readonly<{
   readonly recorded_at: string;
 }>;
 
-export function projectionGenerationId(
+function projectionGenerationId(
   inputEventFrontier: string,
   governanceFrontier: string,
   sha256: FieldContractSha256

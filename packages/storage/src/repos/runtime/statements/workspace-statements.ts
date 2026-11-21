@@ -1,7 +1,7 @@
 import type BetterSqlite3 from "better-sqlite3";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 
-export type SqliteStatement = BetterSqlite3.Statement;
+type SqliteStatement = BetterSqlite3.Statement;
 
 export interface WorkspaceStatements {
   readonly createStatement: SqliteStatement;

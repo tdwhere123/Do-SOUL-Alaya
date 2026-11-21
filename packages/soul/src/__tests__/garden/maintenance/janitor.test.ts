@@ -173,7 +173,7 @@ describe("Janitor", () => {
     expect(tieringPort.demoteToCold).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-2"]);
     expect(result).toMatchObject({
       success: true,
-      outcome: "skipped",
+      outcome: "completed",
       objects_affected: ["memory-1", "memory-2"],
       audit_entries: [
         "[SKIPPED] retention_decay_scan: port not wired",

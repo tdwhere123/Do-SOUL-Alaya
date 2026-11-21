@@ -86,7 +86,7 @@ export function productComponentState(entry: IndexEntry): ProductComponentState 
   };
 }
 
-export function retractedComponentState(previous: ProductComponentState): ProductComponentState {
+function retractedComponentState(previous: ProductComponentState): ProductComponentState {
   return { ...previous, membership_present: false };
 }
 

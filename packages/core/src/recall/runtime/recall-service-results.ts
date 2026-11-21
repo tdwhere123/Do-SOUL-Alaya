@@ -1,7 +1,6 @@
 import type {
   AssociativeFactSlot,
   AssociativeFactKeyProjectionForm,
-  FtsLaneId,
   MemoryEntry,
   RecallCandidate,
   SoulActiveConstraint,
@@ -9,7 +8,7 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type { EvidenceDocumentMaxOperatorId } from "../../embedding-recall/constants.js";
 
-export type RecallSynthesisStatus =
+type RecallSynthesisStatus =
   | Readonly<{ readonly status: "absent" }>
   | Readonly<{ readonly status: "ok"; readonly text: string }>
   | Readonly<{
@@ -18,19 +17,7 @@ export type RecallSynthesisStatus =
     readonly text?: string;
   }>;
 
-export interface RecallEvidenceProjectionMatchReceipt {
-  readonly evidence_ref: string;
-  readonly projection_kind: "owner" | "assistant_observation" | "fact_key";
-  readonly projection_id: number | null;
-  readonly normalized_rank: number;
-  /** Absent only in legacy traces; live FTS producers bind their source lanes. */
-  readonly matched_fts_lanes?: readonly FtsLaneId[];
-  readonly fact_key_forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
-  /** Present only for source-grounded Fact-Key projections; absent in legacy traces. */
-  readonly fact_slots?: readonly Readonly<AssociativeFactSlot>[];
-}
-
-export interface RecallEvidenceSemanticProjectionReceipt {
+interface RecallEvidenceSemanticProjectionReceipt {
   readonly projection_id: number | null;
   readonly projection_kind: "owner" | "fact_key";
   readonly matched_fact_key_forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
@@ -38,14 +25,7 @@ export interface RecallEvidenceSemanticProjectionReceipt {
   readonly fact_slots?: readonly Readonly<AssociativeFactSlot>[];
 }
 
-export interface RecallEvidenceSemanticDocument {
-  readonly evidenceRef: string;
-  readonly documentIdentity: string;
-  readonly content: string;
-  readonly projection: Readonly<RecallEvidenceSemanticProjectionReceipt>;
-}
-
-export interface RecallEvidenceSemanticWinnerReceipt {
+interface RecallEvidenceSemanticWinnerReceipt {
   readonly score: number;
   readonly evidenceObjectId: string;
   readonly documentIdentity: string;

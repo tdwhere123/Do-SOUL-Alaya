@@ -3,7 +3,6 @@ import {
   buildGardenTurnEvidenceFallback,
   buildGardenTurnEvidenceArtifactRef,
   buildGardenTurnEvidenceSearchProjections,
-  classifyOpenSemanticFactorFormationEligibility,
   isGardenTurnEvidenceFallback
 } from "@do-soul/alaya-soul";
 import type {
@@ -16,16 +15,6 @@ import { buildEvidenceInput } from
 const CREATED_AT = "2026-07-21T12:00:00.000Z";
 
 describe("Garden turn evidence fallback", () => {
-  it("archives graphless fallback while semantic formation stays unavailable", () => {
-    const signal = buildFallback("User: ok thanks", "empty_extraction");
-    expect(signal).not.toBeNull();
-    expect(isGardenTurnEvidenceFallback(signal!)).toBe(true);
-    expect(classifyOpenSemanticFactorFormationEligibility(signal!.raw_payload)).toEqual({
-      kind: "unavailable",
-      reason: "source_assertion_absent"
-    });
-  });
-
   it("builds a strict evidence-only source-turn envelope", () => {
     const signal = buildFallback("  User: ok thanks  ", "empty_extraction");
 

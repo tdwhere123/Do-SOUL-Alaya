@@ -2,21 +2,16 @@ import BetterSqlite3 from "better-sqlite3";
 import { sqliteHostFilename } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
-import { SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository, StorageDatabase } from "@do-soul/alaya-storage";
-import type { SourceIndexRootQualification, SourceIndexSnapshotFact }
-  from "../../../../core-daemon/src/runtime/recall-read-worker/source-index-measurement.js";
+import {
+  SqliteFieldSourceRecordRepo,
+  StorageDatabase,
+  readSourceIndexRootQualification,
+  readSourceIndexSnapshotFact,
+  type SourceIndexRootQualification,
+  type SourceIndexSnapshotFact
+} from "@do-soul/alaya-storage";
 import type { BenchDaemonHandle } from "../../harness/daemon.js";
 import { readSemanticChainDaemonRestoration } from "./contract.js";
-type Constructor = typeof SqliteSourceIndexRepository;
-type Measurement = Constructor[Extract<keyof Constructor, symbol>];
-
-/** Resolve the single installed/source constructor authority, not a workspace-relative runtime import. */
-export function sourceIndexMeasurementCapability(): Measurement {
-  const measurement = Reflect.get(SqliteSourceIndexRepository,
-    Symbol.for("@do-soul/alaya-storage/private/source-index-measurement")) as Measurement | undefined;
-  if (measurement === undefined) throw new AlayaError("CONFLICT", "private source-index measurement capability unavailable");
-  return measurement;
-}
 
 export type FrozenSourceIndexQualificationPage = Readonly<{
   snapshot_identity: string; index_identity: string; qualification: Omit<SourceIndexRootQualification, "snapshot">;
@@ -46,9 +41,8 @@ export function captureFrozenSourceIndexQualifications(input: Readonly<{
 function captureQualificationRows(input: Readonly<{ database: StorageDatabase; workspaceId: string; snapshotIdentity: string;
   onPage: (page: FrozenSourceIndexQualificationPage) => void }>): FrozenSourceIndexQualifications {
   if (input.database.connection.inTransaction) throw new AlayaError("CONFLICT", "qualification capture owns its read transaction");
-  const measurement = sourceIndexMeasurementCapability();
   return input.database.connection.transaction(() => {
-    const index = measurement.readSnapshot(input.database, input.workspaceId), indexMaterial = canonicalJson(index);
+    const index = readSourceIndexSnapshotFact(input.database, input.workspaceId), indexMaterial = canonicalJson(index);
     const indexIdentity = `sha256:${fieldContractSha256(indexMaterial)}`;
     const records = new SqliteFieldSourceRecordRepo(input.database, fieldContractSha256);
     let after: string | null = null, roots = 0, pages = 0;
@@ -60,7 +54,7 @@ function captureQualificationRows(input: Readonly<{ database: StorageDatabase; w
       const sourceId = source.record.source_id;
       let ordinal = -1;
       while (true) {
-        const qualification = measurement.readRoot(input.database, fieldContractSha256, input.workspaceId, sourceId, ordinal);
+        const qualification = readSourceIndexRootQualification(input.database, fieldContractSha256, input.workspaceId, sourceId, ordinal);
         if (canonicalJson(qualification.snapshot) !== indexMaterial) throw new AlayaError("CONFLICT", "qualification snapshot binding changed");
         const { snapshot: _snapshot, ...root } = qualification;
         input.onPage({ snapshot_identity: input.snapshotIdentity, index_identity: indexIdentity, qualification: root }); pages++;

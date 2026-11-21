@@ -187,9 +187,7 @@ describe("MaterializationRouter routing and grounding", () => {
           artifact_ref: `alaya:garden-turn-evidence:${signal.signal_id}`
         })
       }),
-      [],
-      undefined,
-      undefined
+      []
     );
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.claimService.create).not.toHaveBeenCalled();
@@ -243,9 +241,7 @@ describe("MaterializationRouter routing and grounding", () => {
         projection_id: 1,
         projection_kind: "assistant_observation",
         content: assistantContent
-      }],
-      undefined,
-      undefined
+      }]
     );
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.claimService.create).not.toHaveBeenCalled();

@@ -1,7 +1,6 @@
 import type { QueryProgram } from "@do-soul/alaya-protocol";
 
 export const ACCEPTING_PROGRAM_STATE = "accepting";
-export const START_PROGRAM_STATE = "start";
 
 type QueryRelation = Extract<QueryProgram, { readonly kind: "relation" }>;
 
@@ -11,7 +10,7 @@ export type AutomatonAdvance = Readonly<{
   readonly to: readonly string[];
 }>;
 
-export type HyperedgeAdvance = Readonly<{
+type HyperedgeAdvance = Readonly<{
   readonly from: string;
   readonly hyperedge: Extract<QueryProgram, { readonly kind: "hyperedge" }>;
   readonly to: readonly string[];

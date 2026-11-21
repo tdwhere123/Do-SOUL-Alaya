@@ -19,16 +19,16 @@ import {
   type SourceAdmissionAuditHistory, type SourceAdmissionAuditOutcome
 } from "./source-admission-audit.js";
 
-export type SourceReplacementPredecessor = Pick<SourceRecordIdentity,
+type SourceReplacementPredecessor = Pick<SourceRecordIdentity,
   "workspace_id" | "source_id" | "identity" | "source_version" | "content_digest">;
 
-export type SourceReplacementRequest = Readonly<{
+type SourceReplacementRequest = Readonly<{
   expected_current: SourceReplacementPredecessor;
   replacement: SourceAdmissionRequest;
 }>;
 
 /** Historical transition observed by this writer, not durable correction lineage or content truth. */
-export type SourceReplacementTransition = Readonly<{
+type SourceReplacementTransition = Readonly<{
   predecessor: SourceRecordIdentity;
   replacement: SourceAdmissionResult;
 }>;

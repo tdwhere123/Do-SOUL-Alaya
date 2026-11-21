@@ -3,7 +3,7 @@ import { cachedReadStatement } from "../../sqlite/dynamic-prepared-statement-cac
 import { retainedSourceChunkDigest } from "../../sqlite/retained-source-chunk-digest.js";
 
 export const RETAINED_SOURCE_CHUNK_BYTES = 4096;
-export const RETAINED_SOURCE_METADATA_BYTES = 8192;
+const RETAINED_SOURCE_METADATA_BYTES = 8192;
 export const RETAINED_SOURCE_READ_RESERVATION = RETAINED_SOURCE_CHUNK_BYTES + RETAINED_SOURCE_METADATA_BYTES;
 
 type ChunkIdentity = Readonly<{

@@ -11,4 +11,3 @@ export {
   segmentCjkRun,
   warmCjkSegmentation
 } from "./cjk-segmentation.js";
-export type { CjkSegmentationStatus } from "./cjk-segmentation.js";

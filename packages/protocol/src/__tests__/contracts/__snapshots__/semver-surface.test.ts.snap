@@ -317,12 +317,7 @@ evt:memory-governance.ts#SoulSynthesisStatusChangedPayloadSchema(caused_by,evide
 evt:memory-governance.ts#TransitionCausedBySchema()#6170fe1|enum=auditor|bootstrap|deterministic_rule|review|system|user
 evt:memory-governance.ts#TransitionRecordSchema(caused_by,evidence_refs,from_state,occurred_at,reason_code,to_state)#a083ade
 evt:message-delta.ts#MessageCompletedEventSchema(content,finishReason,messageId,runId,timestamp,type)#3a0a193
-evt:message-delta.ts#MessageCreatedEventSchema(createdAt,messageId,role,runId)#fd30e7a
-evt:message-delta.ts#MessageDeltaEventSchema(delta,finishReason,index,messageId,runId,timestamp,type)#576b92b
-evt:message-delta.ts#RunErrorEventSchema(errorCode,errorMessage,runId)#d6cf869
-evt:message-delta.ts#RunStateChangedEventSchema(previousState,runId,state)#67beae5
 evt:message-delta.ts#StreamingEventTypeSchema()#75231ef|enum=message.completed|message.delta
-evt:message-delta.ts#StreamingStatusSchema()#ee911f3|enum=completed|error|idle|streaming
 evt:obligation-trust-narrative.ts#DirtyStatePanicEventSchema(payload,type)#f975d74
 evt:obligation-trust-narrative.ts#DirtyStatePanicPayloadSchema(affected_entity_count,dossier_id,panic_source,panic_summary,principal_run_id,trigger,worker_run_id)#6d3d988
 evt:obligation-trust-narrative.ts#NarrativeBudgetExceededEventSchema(payload,type)#fb29ee8

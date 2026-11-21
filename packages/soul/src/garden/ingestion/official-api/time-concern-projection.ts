@@ -3,7 +3,7 @@ import type { OfficialApiTemporalProjectionDraft } from
   "../../extraction/temporal/projection-draft.js";
 import { resolveSourceTemporalCandidates } from "../../extraction/temporal/source-time.js";
 
-export type OfficialApiTimeConcernProjectionAudit = Readonly<{
+type OfficialApiTimeConcernProjectionAudit = Readonly<{
   readonly status: "formed" | "unavailable";
   readonly reason:
     | "source_temporal_term_verified"

@@ -3,7 +3,7 @@ import { NonEmptyStringSchema } from "../shared/schema-primitives.js";
 
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
 
-export const ToolAffectedPathSchema = NonEmptyStringSchema.refine(
+const ToolAffectedPathSchema = NonEmptyStringSchema.refine(
   (value) => isWorkspaceRelativePosixPath(value),
   "Expected a workspace-relative POSIX path"
 );

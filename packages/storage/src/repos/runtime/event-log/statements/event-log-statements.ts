@@ -12,7 +12,6 @@ import {
   type EventLogWorkspaceQueryStatements
 } from "./event-log-statement-groups.js";
 
-export type { SqliteStatement } from "./event-log-statement-groups.js";
 
 export interface EventLogStatements
   extends EventLogMutationStatements,

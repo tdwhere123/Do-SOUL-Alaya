@@ -31,4 +31,3 @@ export function refineSourceSemanticProfiledLibraryDelivery(value: Readonly<{ ex
     ctx.addIssue({ code: "custom", message: "execution and retained access belong to different profiles" });
   }
 }
-export type SourceSemanticProfiledLibraryDelivery = z.infer<typeof SourceSemanticProfiledLibraryDeliverySchema>;

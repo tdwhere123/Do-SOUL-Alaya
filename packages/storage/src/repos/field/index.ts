@@ -16,7 +16,6 @@ export type {
   FieldSourceRecordPageOptions,
   FieldSourceRecordRepo,
   FieldSourceRecordRow,
-  FieldSourceEvidenceBindingRow,
   FieldSourceSpanRepo,
   FieldSourceSpanRow
 } from "./ports.js";
@@ -24,8 +23,6 @@ export { SqliteFieldDerivationJobRepo } from "./derivation-job-repo.js";
 export { SqliteFieldEraseBarrierRepo } from "./erase-repo.js";
 export { SqliteFieldProjectionGenerationRepo } from "./generation-repo.js";
 export {
-  encodeRecordCursor,
-  parseRecordCursor,
   SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo
 } from "./source-repo.js";

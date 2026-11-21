@@ -1,4 +1,4 @@
-export const NON_MEMORY_RECALL_PREVIEW_CHARS = 600;
+const NON_MEMORY_RECALL_PREVIEW_CHARS = 600;
 
 // Source indexes retain the full capsule body; only the pseudo-memory transport
 // is bounded so one non-memory object cannot consume the delivery packet.

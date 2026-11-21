@@ -172,7 +172,7 @@ export function encodeBindingContext(env: ReadonlyMap<string, string>, owner?: B
   return digest;
 }
 
-export function recoverBindingContext(context: string, owner?: BindingContextStore): string {
+function recoverBindingContext(context: string, owner?: BindingContextStore): string {
   if (!/^sha256:[a-f0-9]{64}$/u.test(context)) return context;
   const packed = owner?.get(context);
   if (packed === undefined) throw new BindingContextUnavailableError("binding context is unavailable in this execution");

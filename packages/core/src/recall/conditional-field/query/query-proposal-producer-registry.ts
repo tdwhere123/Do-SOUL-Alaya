@@ -14,7 +14,7 @@ import {
 export const QUERY_PROPOSAL_PRODUCER_REGISTRY_POLICY_VERSION = "1";
 export const QUERY_PROPOSAL_CORE_PRODUCER_ID = "alaya.query.proposal.core.v1";
 
-export const QUERY_PROPOSAL_PRODUCER_CAPABILITIES = [
+const QUERY_PROPOSAL_PRODUCER_CAPABILITIES = [
   "program",
   "conditions",
   "holes",

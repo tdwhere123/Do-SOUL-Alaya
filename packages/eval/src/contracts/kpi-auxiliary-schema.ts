@@ -1,19 +1,17 @@
 import { z } from "zod";
 import {
   RECALL_TOKEN_ECONOMY_SAMPLE_SCHEMA_VERSION,
-  RecallTokenEconomySampleSchema,
-  type RecallTokenEconomySample
+  RecallTokenEconomySampleSchema
 } from "@do-soul/alaya-protocol";
 
 export {
-  RecallTokenEconomySampleSchema,
-  type RecallTokenEconomySample
+  RecallTokenEconomySampleSchema
 };
 
 const RatioSchema = z.number().min(0).max(1);
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
-export const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
+const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
   z.object({ enabled: z.literal(false) }).strict(),
   z.object({
     enabled: z.literal(true),
@@ -31,9 +29,6 @@ export const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
     d2q_input: z.literal("raw_content")
   }).strict()
 ]);
-export type EmbeddingSupplementRuntimeProvenance = z.infer<
-  typeof EmbeddingSupplementRuntimeProvenanceSchema
->;
 
 const RecallEvalAnswerRerankSchema = z.discriminatedUnion("enabled", [
   z.object({ enabled: z.literal(false) }).strict(),
@@ -110,7 +105,6 @@ export const RecallEvalAttributionSchema = z.object({
     producer_schema_migration_version: z.number().int().nonnegative().optional()
   }).strict()
 }).strict();
-export type RecallEvalAttribution = z.infer<typeof RecallEvalAttributionSchema>;
 
 // @anchor token-economy: event-sourced token-economy figures, all
 // derived from the bench run's EventLog (SOUL_SIGNAL_EMITTED for the
@@ -346,4 +340,3 @@ export const QaMetricsSchema = z
         message: "invalid judge evidence must retain the attempted cohort and leave accuracy unavailable" });
     }
   });
-export type QaMetrics = z.infer<typeof QaMetricsSchema>;

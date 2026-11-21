@@ -258,7 +258,7 @@ function buildRuntimeEmbeddingConfigAuditEvent(
     entity_id: RUNTIME_EMBEDDING_ENTITY_ID,
     workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
     run_id: null,
-    caused_by: "inspector",
+    caused_by: "http-config",
     payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
       entry_id: audit.auditEntryId,
       event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
@@ -310,7 +310,7 @@ function buildRuntimeGardenComputeConfigAuditEvent(
     entity_id: RUNTIME_GARDEN_COMPUTE_ENTITY_ID,
     workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
     run_id: null,
-    caused_by: "inspector",
+    caused_by: "http-config",
     payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
       entry_id: audit.auditEntryId,
       event_kind: HealthEventKind.GARDEN_COMPUTE,

@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-export type LongMemEvalArtifactReadErrorCode =
+type LongMemEvalArtifactReadErrorCode =
   | "invalid_policy"
   | "role_not_allowed"
   | "unsafe_reference"
@@ -24,7 +24,7 @@ export type LongMemEvalArtifactReadErrorCode =
   | "invalid_json"
   | "close_failed";
 
-export class LongMemEvalArtifactReadError extends Error {
+class LongMemEvalArtifactReadError extends Error {
   readonly code: LongMemEvalArtifactReadErrorCode;
 
   constructor(code: LongMemEvalArtifactReadErrorCode) {

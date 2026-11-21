@@ -24,7 +24,7 @@ import { buildTypedObservation } from "./observation-admission.js";
 
 export const STORED_COSINE_PRODUCER_ID = "stored.cosine.pair.v1";
 export const COSINE_DOMAIN_ID = "cosine.unit.v1";
-export const COSINE_NORMALIZATION_ID = "l2.dot.v1";
+const COSINE_NORMALIZATION_ID = "l2.dot.v1";
 const STORED_PAIR_SLOT_BYTES = 2 * (16384 * 4 + 2048) + 2304;
 
 export const INAPPLICABLE_CAP: ProjectedCap = Object.freeze({ status: "inapplicable" });

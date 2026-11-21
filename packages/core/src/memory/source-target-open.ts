@@ -12,7 +12,7 @@ import {
 import { CoreError } from "../shared/errors.js";
 import { projectSourceDisclosure } from "../recall/runtime/source-disclosure.js";
 
-export type OpenSourceRootRow = Readonly<{
+type OpenSourceRootRow = Readonly<{
   readonly kind: "source_record" | "evidence_capsule";
   readonly workspace_id: string;
   readonly root_id: string;
@@ -31,7 +31,7 @@ export type OpenSourceRootRow = Readonly<{
   readonly valid_to?: string | null;
 }>;
 
-export type OpenCurrentSourceTargetResult =
+type OpenCurrentSourceTargetResult =
   | { readonly status: "ok"; readonly row: OpenSourceRootRow }
   | { readonly status: "not_found" }
   | { readonly status: "conflict"; readonly reason: string }

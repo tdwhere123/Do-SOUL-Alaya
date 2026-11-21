@@ -1,16 +1,16 @@
 import { stableStringify } from "../../shared/stable-stringify.js";
 import { digestRecallFieldIdentity, type RecallFieldDigest } from "./field-identity.js";
 
-export const RECALL_FINITE_FIELD_SEAL_OPERATOR_ID =
+const RECALL_FINITE_FIELD_SEAL_OPERATOR_ID =
   "recall_finite_field_seal_v1";
 
-export type RecallFiniteFieldChannelStatus =
+type RecallFiniteFieldChannelStatus =
   | "complete"
   | "truncated"
   | "unavailable"
   | "ineligible";
 
-export type RecallFiniteFieldObservation = Readonly<{
+type RecallFiniteFieldObservation = Readonly<{
   readonly observation_id: string;
   readonly candidate_key: string;
   readonly rank: number;
@@ -24,7 +24,7 @@ export type RecallFiniteFieldChannelInput = Readonly<{
   readonly unseen_upper_bound: number | null;
 }>;
 
-export type RecallFiniteFieldChannelReceipt = RecallFiniteFieldChannelInput & Readonly<{
+type RecallFiniteFieldChannelReceipt = RecallFiniteFieldChannelInput & Readonly<{
   readonly channel_digest: RecallFieldDigest;
 }>;
 

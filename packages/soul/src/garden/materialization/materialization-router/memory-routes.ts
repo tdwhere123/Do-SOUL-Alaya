@@ -27,7 +27,6 @@ import {
   readPartialFailureCreatedObjects
 } from "./materialization-results.js";
 import { MaterializationRouterPathSideEffects } from "./path-side-effects.js";
-import { createSignalEvidence } from "./evidence/create-signal-evidence.js";
 
 type MemoryEntryMaterialization = {
   readonly evidence: MaterializationCreatedObject;
@@ -166,11 +165,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
       fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
       context
     });
-    const evidence = await createSignalEvidence(
-      this.dependencies.evidenceService,
-      signal,
-      evidenceInput
-    );
+    const evidence = await this.dependencies.evidenceService.create(evidenceInput);
     createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
     let memory: MemoryMaterializationCreatedObject;
@@ -267,7 +262,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     port: ReconciliationPort,
     state: ReconciledMaterializationState,
     context: MaterializationContext
-  ) {
+  ): ReturnType<ReconciliationPort["runWithDecision"]> {
     const incomingContent = buildDistilledFact(signal);
     const incomingMemory = buildMemoryInput(signal, [], this.enrichmentIntent(signal));
     return await port.runWithDecision(
@@ -316,9 +311,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     if (state.evidenceId !== undefined) {
       return state.evidenceId;
     }
-    const evidence = await createSignalEvidence(
-      this.dependencies.evidenceService,
-      signal,
+    const evidence = await this.dependencies.evidenceService.create(
       buildEvidenceInput(signal, undefined, {
         fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
         context

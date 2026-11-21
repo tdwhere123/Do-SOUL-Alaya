@@ -33,38 +33,24 @@ import type {
 } from "./recall-service-port-types.js";
 
 export type {
-  KeywordLexicalLaneId,
-  KeywordLexicalMergeCapture,
   KeywordSearchBatchQuery,
-  KeywordSearchFieldRefinementLevel,
-  KeywordSearchFieldResult,
   KeywordSearchLaneId,
   KeywordSearchLaneObservation,
   KeywordSearchLaneReceipt,
   KeywordSearchLaneScope,
   KeywordSearchLaneStatus,
-  KeywordSearchResult,
-  MemoryKeywordFieldCapture,
-  MemoryKeywordFieldCaptureVariant,
-  RecallEvidenceSearchMatch,
-  RecallEvidenceSearchProjectionIdentity,
-  RecallQualifiedEvidence
+  KeywordSearchResult
 } from "./recall-search-port-types.js";
 export type {
-  RecallActivationTopKQuery,
-  RecallEventTimeWindowQuery,
   RecallMemoryListPageOptions,
   RecallTierWindowCursor,
   RecallTierWindowResult
 } from "./recall-memory-window-port.js";
 export type {
-  RecallEvidenceSourceAnchor,
-  RecallTemporalProjectionReadOptions,
   TokenEstimator
 } from "./recall-service-port-types.js";
 export {
-  makeTokenEstimator,
-  readWithTemporalProjection
+  makeTokenEstimator
 } from "./recall-service-port-helpers.js";
 
 export interface RecallServiceMemoryRepoPort {

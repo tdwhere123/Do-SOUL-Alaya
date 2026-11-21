@@ -131,7 +131,7 @@ export function admitProposedGuard(guard: ProposedGuard | Guard): Guard {
   };
 }
 
-export function admitProposedProgram(program: ProposedQueryProgram | QueryProgram): QueryProgram {
+function admitProposedProgram(program: ProposedQueryProgram | QueryProgram): QueryProgram {
   switch (program.kind) {
     case "epsilon":
     case "empty":
@@ -150,7 +150,7 @@ export function admitProposedProgram(program: ProposedQueryProgram | QueryProgra
   }
 }
 
-export function stripProposalVerdicts(
+function stripProposalVerdicts(
   proposal: QueryInterpretationProposal
 ): QueryInterpretationProposal {
   return {

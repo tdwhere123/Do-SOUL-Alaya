@@ -46,7 +46,7 @@ export interface HotDemotionCandidate {
   readonly activation_score: number;
 }
 
-export interface JanitorHotDemotionCriteria {
+interface JanitorHotDemotionCriteria {
   readonly maxLastHitAgeMs: number;
   readonly minActivationScore: number;
 }
@@ -67,7 +67,7 @@ interface JanitorSweepResult {
   readonly auditEntries: readonly string[];
 }
 
-export interface LowActivityMemoryRecord {
+interface LowActivityMemoryRecord {
   readonly memory_id: string;
 }
 
@@ -77,7 +77,7 @@ export interface LowActivityMemoryRecord {
 // guarded active->dormant transition that resolves "skipped" (no audit, no
 // throw) when the row is not active anymore. The sweep counts only "demoted"
 // rows and CONTINUES past a skip so one racy candidate cannot abort the batch.
-export type DormantDemotionOutcome = "demoted" | "skipped";
+type DormantDemotionOutcome = "demoted" | "skipped";
 
 export interface JanitorDormantDemotionPort {
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly LowActivityMemoryRecord[]>;
@@ -232,7 +232,7 @@ export class Janitor {
     task: GardenTaskDescriptor,
     completedAt: string
   ): Promise<GardenTaskResult> {
-    const retention = await runJanitorRetentionDecayScan(
+    const retentionAuditEntry = await runJanitorRetentionDecayScan(
       this.retentionDecayPort,
       task.workspace_id
     );
@@ -246,9 +246,9 @@ export class Janitor {
       selectedIds.length === 0 ? [] : await this.applyHotIndexDemotion(task, selectedIds);
 
     const result = this.createSuccessResult(task, completedAt, objectIds, [
-      retention.auditEntry,
+      retentionAuditEntry,
       `hot_index_demotion: demoted ${objectIds.length} entries to cold storage tier in ${task.workspace_id}`
-    ], retention.outcome);
+    ]);
     await this.scheduler.reportCompletion(result);
     return result;
   }
@@ -350,8 +350,7 @@ export class Janitor {
           : `[DEFERRED] tombstone_gc: ${this.tombstoneGcDeferredReason}`
       );
       const result = this.tombstoneGcDeferredReason !== undefined
-        ? this.createSuccessResult(task, completedAt, tombstonedNow, auditEntries,
-          tombstonedNow.length > 0 ? "completed" : "skipped")
+        ? this.createSuccessResult(task, completedAt, tombstonedNow, auditEntries, disposition.outcome)
         : { ...this.createFailureResult(task, completedAt, new AlayaError("UNAVAILABLE", "tombstone GC port is not configured")),
           objects_affected: [...tombstonedNow], audit_entries: auditEntries };
       await this.scheduler.reportCompletion(result);
@@ -363,8 +362,7 @@ export class Janitor {
       task,
       completedAt,
       [...tombstonedNow, ...gc.affectedIds],
-      [...auditEntries, ...gc.auditEntries],
-      disposition.outcome
+      [...auditEntries, ...gc.auditEntries]
     );
     await this.scheduler.reportCompletion(result);
     return result;

@@ -15,7 +15,7 @@ import type {
 
 type ExistsRow = { readonly found: number };
 
-export function normalizeEventLogText(value: string): string {
+function normalizeEventLogText(value: string): string {
   return value.trim().toLowerCase();
 }
 

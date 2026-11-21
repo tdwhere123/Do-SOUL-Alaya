@@ -33,7 +33,7 @@ export class SupportWorkMeter {
   }
 }
 
-export function compatiblePremises(
+function compatiblePremises(
   observations: readonly EvidenceObservation[],
   context: EvidenceIdentityContext
 ): boolean {
@@ -63,7 +63,7 @@ export function completeWitnessesFor(
   return retainCompleteAlternatives(witnesses);
 }
 
-export function retainCompleteAlternatives(
+function retainCompleteAlternatives(
   witnesses: readonly PolarizedWitness[]
 ): readonly PolarizedWitness[] {
   // Cost-then-id sort must not drop a cheaper complete alternative.

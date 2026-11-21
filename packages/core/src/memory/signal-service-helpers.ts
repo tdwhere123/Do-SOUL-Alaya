@@ -233,7 +233,7 @@ export function buildSignalWarningMeta(input: {
   };
 }
 
-export function hasInvalidSchemaGrounding(
+function hasInvalidSchemaGrounding(
   signal: CandidateMemorySignal
 ): boolean {
   return validateSchemaGroundingForSignal(signal).status !== "valid";

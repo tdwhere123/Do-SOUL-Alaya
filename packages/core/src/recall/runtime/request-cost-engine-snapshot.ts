@@ -80,7 +80,7 @@ export function snapshotRestoredEngineWork(
   };
 }
 
-export function snapshotObservedEngineWork(field: EngineCostField): EngineWorkMeters {
+function snapshotObservedEngineWork(field: EngineCostField): EngineWorkMeters {
   return {
     solver_completed_work: field.solver_completed_work ?? 0,
     charged_identities: field.seen_identities.length,

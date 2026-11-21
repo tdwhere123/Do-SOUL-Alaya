@@ -1,11 +1,7 @@
 import {
-  KIND_PROJECTION_DRAFT_PRODUCER_ID,
   KIND_PROJECTION_KIND_VALUE_LIMIT
 } from "@do-soul/alaya-protocol";
 import { z } from "zod";
-
-export const OFFICIAL_API_KIND_PROJECTION_PRODUCER =
-  KIND_PROJECTION_DRAFT_PRODUCER_ID;
 
 const KindProjectionDraftSchema = z.object({
   factor_id: z.string().trim().min(1).max(128),

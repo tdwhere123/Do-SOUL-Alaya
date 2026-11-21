@@ -1,20 +1,7 @@
 import type { SoulRecallTokenizerHint } from "@do-soul/alaya-protocol";
 import type {
-  RecallTemporalProjectionReadOptions,
   TokenEstimator
 } from "./recall-service-port-types.js";
-
-/**
- * Keeps the current-projection call shape compatible with legacy two-argument
- * readers while making an explicit historical projection opt-in.
- */
-export function readWithTemporalProjection<T>(
-  asOf: string | undefined,
-  readCurrent: () => Promise<T>,
-  readHistorical: (options: RecallTemporalProjectionReadOptions) => Promise<T>
-): Promise<T> {
-  return asOf === undefined ? readCurrent() : readHistorical({ asOf });
-}
 
 export function makeTokenEstimator(opts: {
   readonly hint?: SoulRecallTokenizerHint | null;

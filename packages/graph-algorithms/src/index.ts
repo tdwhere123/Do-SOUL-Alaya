@@ -12,35 +12,25 @@ export {
   extendMaxMinGraph,
   type MaxMinPreparedGraph,
   type MaxMinInput,
-  type MaxMinResult,
   type MaxMinTransition,
   type MaxMinWorkItem
 } from "./max-min-field.js";
 export {
   evaluateBooleanHypergraph,
   type BooleanHypergraphInput,
-  type BooleanHyperedge,
-  type UnaryBooleanEdge,
-  type AndBooleanHyperedge,
-  type OrBooleanHyperedge,
-  type IdentityBooleanEdge
+  type BooleanHyperedge
 } from "./boolean-hypergraph.js";
 export {
   solveBottleneckHypergraph,
   type BottleneckHyperedge,
   type BottleneckHypergraphInput,
-  type BottleneckWitness,
-  type BottleneckSolveResult
+  type BottleneckWitness
 } from "./bottleneck-hypergraph.js";
 export {
-  MonotonicHypergraphMaintainer,
-  type MonotonicMaintainerInput,
-  type MonotonicMaintainerStats
+  MonotonicHypergraphMaintainer
 } from "./bottleneck-hypergraph-maintainer.js";
 export {
-  repairBottleneckHypergraph,
-  type BottleneckRepairInput,
-  type BottleneckRepairResult
+  repairBottleneckHypergraph
 } from "./bottleneck-hypergraph-repair.js";
 export { MaxMinWorkQueue } from "./max-min-work-queue.js";
 export { PersistentStringMap } from "./persistent-string-map.js";
@@ -50,13 +40,11 @@ export {
 } from "./absolute-temporal-window.js";
 
 export { extractTemporalTerms } from "./temporal-terms.js";
-export { statementEventIntervals, type EventDayInterval } from "./statement-event-time.js";
+export { statementEventIntervals } from "./statement-event-time.js";
 
 export {
   parseRelativeTemporalTerm,
   resolveRelativeTemporalWindow,
-  type RelativeTemporalTerm,
-  type RelativeWeekday,
   type TemporalWindow
 } from "./temporal-window.js";
 

@@ -24,28 +24,17 @@ import type {
 } from "./types.js";
 
 export {
-  COMMON_CAUSE_PROPOSITION_KIND,
-  CONDITIONAL_FIELD_EVIDENCE_OPERATOR_ID
+  COMMON_CAUSE_PROPOSITION_KIND
 } from "./types.js";
 export type {
-  ClaimRead,
-  EvidenceAccess,
   EvidenceAssessment,
   EvidenceAssessmentInput,
-  EvidenceCorrelationRecord,
-  EvidenceCorrelationState,
   EvidenceObservation,
-  EvidencePolarity,
-  GovernanceOutcome,
-  GovernanceReason,
-  OwnerObservationInput,
   PropositionDemand,
   RelationAssertionRead,
-  SupportWorkStatus,
   WitnessTemplate
 } from "./types.js";
 export { evaluateGovernance, observationsFromOwners } from "./governance.js";
-export { compatiblePremises, retainCompleteAlternatives } from "./witnesses.js";
 
 export function assessEvidence(input: EvidenceAssessmentInput): EvidenceAssessment {
   const work = new SupportWorkMeter(input.work_limit);

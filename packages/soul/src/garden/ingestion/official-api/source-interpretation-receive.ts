@@ -15,8 +15,8 @@ import {
   indexOfficialApiSourceAssertions
 } from "../../triage/grounding/source-locator.js";
 
-export const OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION = 1 as const;
-export const OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER =
+const OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION = 1 as const;
+const OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER =
   "official-api-source-interpretation-receive-v1" as const;
 
 type OfficialApiInterpretationReceiveStatus = "complete" | "partial";

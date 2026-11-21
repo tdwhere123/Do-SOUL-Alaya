@@ -130,7 +130,7 @@ export function shouldRevokeGreenForEvidenceRewrite(
   return !previousEvidenceRefs.some((ref) => next.has(ref));
 }
 
-export function parseIsoDatetime(value: string): string {
+function parseIsoDatetime(value: string): string {
   try {
     return IsoDatetimeStringSchema.parse(value);
   } catch (error) {
@@ -138,7 +138,7 @@ export function parseIsoDatetime(value: string): string {
   }
 }
 
-export function assertStringArray(value: readonly string[], field: "domain_tags" | "evidence_refs"): void {
+function assertStringArray(value: readonly string[], field: "domain_tags" | "evidence_refs"): void {
   for (const item of value) {
     if (item.trim().length === 0) {
       throw new CoreError("VALIDATION", `${field} cannot contain empty items`);

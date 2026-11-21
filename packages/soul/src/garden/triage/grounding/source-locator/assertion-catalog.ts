@@ -23,7 +23,6 @@ import {
 export const OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION = VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION;
 export const SOURCE_ASSERTION_CATALOG_PRODUCER = "official-api-source-assertion-catalog-v4" as const;
 export const SOURCE_ASSERTION_CATALOG_PAGE_SIZE = 64;
-export const MAX_SOURCE_ASSERTIONS = SOURCE_ASSERTION_CATALOG_PAGE_SIZE;
 
 export interface OfficialApiSourceAssertion {
   readonly assertion_id: number;

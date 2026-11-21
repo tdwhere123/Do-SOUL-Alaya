@@ -21,7 +21,6 @@ import { collectSourceRoleMarkers } from
   "../../triage/grounding/source-role/marker.js";
 import { planTurnTransportPacks } from "./transport-pack.js";
 import {
-  ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID,
   bindAssertionSource,
   computeAssertionOccurrenceIdentity,
   computeAssertionSemanticKey,
@@ -58,7 +57,7 @@ const OfficialApiExtractionRequestSchema = z.object({
 
 export type OfficialApiExtractionRequest = z.infer<typeof OfficialApiExtractionRequestSchema>;
 
-export type { SourceAssertionCatalogCursor, SourceAssertionCatalogPage };
+export type { SourceAssertionCatalogCursor };
 
 export interface OfficialApiExtractionWindowPlan {
   readonly catalog: SourceAssertionCatalogPage;
@@ -194,7 +193,7 @@ export function mintOfficialApiAssertionWork(
   return mintOfficialApiAssertionWorkFromCorpus(sourceCorpus, messages.map((message) => message.message_id ?? null), datasetRevision);
 }
 
-export function mintOfficialApiAssertionWorkFromCorpus(
+function mintOfficialApiAssertionWorkFromCorpus(
   sourceCorpus: string,
   messageIds: readonly (string | null)[],
   datasetRevision?: string
@@ -269,7 +268,6 @@ export function mintOfficialApiAssertionBindings(
   ).map((item) => item.binding));
 }
 
-export { ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID };
 export type { AssertionSourceBinding };
 
 function buildRequest(

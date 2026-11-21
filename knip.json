@@ -82,6 +82,7 @@
       "entry": [
         "src/index.ts",
         "src/runtime/recall/recall-read-worker.ts",
+        "src/runtime/recall-read-worker/source-semantic-library-nominated-windows.ts",
         "src/__tests__/garden/support/embedding-kill-child.ts",
         "src/__tests__/runtime/field/projection-recovery-child.ts",
         "src/__tests__/**/*.test.ts"
@@ -93,6 +94,7 @@
       "entry": [
         "src/cli/index.ts",
         "src/runs/lifecycle/recall-eval/recall-eval-process/child.ts",
+        "src/runs/source-access-diagnostic/conditional-navigation-launch.ts",
         "src/runs/frozen-answer/launch.ts",
         "src/__tests__/**/*.test.ts",
         "bin/*.mjs",

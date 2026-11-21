@@ -16,7 +16,6 @@ import { STORED_RELATION_KIND } from "../query/ordinary-language.js";
 import { leafDerivation } from "./path-derivation.js";
 import {
   hyperedgeEffectSteps,
-  tryCompleteHyperedge,
   type HyperedgeCompletion,
   type HyperedgeEffect
 } from "./path-hyperedge.js";
@@ -52,8 +51,7 @@ import { composedFacetPathId, extendFacets, PathFacetLookup, type FacetIdentityI
 import { claimEvidenceDemandForState } from "../index/claim-obligation.js";
 import type { StateEndpointIndex } from "./state-endpoint-index.js";
 
-export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow, NamedKindOverlay };
-export { tryCompleteHyperedge };
+export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow };
 
 export type CompiledAdjacencyEffect = Readonly<{
   readonly observation_id: string;

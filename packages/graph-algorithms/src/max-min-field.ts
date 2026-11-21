@@ -33,7 +33,7 @@ export interface MaxMinPreparedGraph {
   readonly maxStrength: number;
 }
 
-export class MaxMinOutgoingEdges {
+class MaxMinOutgoingEdges {
   public constructor(public readonly length = 0, private readonly items = new PersistentStringMap<MaxMinTransition>()) {}
   public at(offset: number): MaxMinTransition | undefined { return this.items.get(String(offset)); }
   public append(edge: MaxMinTransition): MaxMinOutgoingEdges {

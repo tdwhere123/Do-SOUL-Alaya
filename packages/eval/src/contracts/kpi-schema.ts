@@ -7,7 +7,6 @@ import {
   validateLongMemEvalSelectionContract
 } from "./longmemeval-selection-contract.js";
 export {
-  BenchmarkMeasurementAttributionSchema,
   type BenchmarkMeasurementAttribution
 } from "./kpi-measurement-schema.js";
 export { RecallEvalAttributionSchema } from "./kpi-auxiliary-schema.js";
@@ -219,7 +218,6 @@ const SeedFuelInventorySchema = z
     support_bearing_candidates: z.number().int().nonnegative()
   })
   .strict();
-export type SeedFuelInventory = z.infer<typeof SeedFuelInventorySchema>;
 
 export const SeedExtractionPathSchema = z
   .object({
@@ -302,8 +300,6 @@ export type { QualityMetrics, MeasuredQualityMetrics } from "./kpi-quality-schem
 export type {
   EdgeProposalAutoAccept,
   EdgeProposalRate,
-  QaMetrics,
-  RecallEvalAttribution,
   RecallTokenEconomy,
   TokenEconomy
 } from "./kpi-auxiliary-schema.js";
@@ -377,7 +373,7 @@ const DiffVsPreviousSchema = z.object({
 });
 export type DiffVsPrevious = z.infer<typeof DiffVsPreviousSchema>;
 
-export const SeedPolicySchema = z
+const SeedPolicySchema = z
   .object({
     mode: z.string().min(1),
     label_independent: z.boolean(),
@@ -386,7 +382,6 @@ export const SeedPolicySchema = z
   })
   .strict()
   .readonly();
-export type SeedPolicy = z.infer<typeof SeedPolicySchema>;
 
 /**
  * @anchor harness_mode — bench data-ingestion path; an audit-distinguishable label.

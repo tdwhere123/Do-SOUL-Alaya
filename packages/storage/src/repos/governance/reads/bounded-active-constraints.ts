@@ -18,7 +18,7 @@ import {
   type MemoryEntryRow
 } from "../../memory-entry/mappers/row-mapper.js";
 
-export interface BoundedGovernancePathPage {
+interface BoundedGovernancePathPage {
   readonly rows: readonly Readonly<PathRelation>[];
   readonly rowsRead: number;
   readonly bytesRead: number;

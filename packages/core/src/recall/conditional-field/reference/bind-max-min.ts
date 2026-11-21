@@ -45,7 +45,7 @@ export type BindMaxMinSuccess = Readonly<{
   readonly cross_contract_conflicts?: Readonly<{ products: PersistentStringMap<boolean>; count: number }>;
 }>;
 
-export type BindMaxMinRejection = Readonly<{
+type BindMaxMinRejection = Readonly<{
   readonly kind: "resource_rejected";
   readonly completeness: CompletenessReport;
 }>;

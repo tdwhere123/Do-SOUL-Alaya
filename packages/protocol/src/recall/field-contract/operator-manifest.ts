@@ -1,13 +1,11 @@
 import { EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID } from "../../evidence/associative-fact-frame.js";
 import { OPEN_SEMANTIC_FACTOR_FORMATION_OPERATOR_ID } from "../../relations/open-semantic-factor-graph.js";
 import {
-  FIELD_CONTRACT_SCHEMA_VERSION,
   hashOperatorManifestDigest,
   type FieldContractSha256,
   type FieldOperatorVersionEntry
 } from "./canonical-identity.js";
 
-export { FIELD_CONTRACT_SCHEMA_VERSION };
 
 export const ATTRIBUTED_COVERAGE_ATOMS_OPERATOR_ID = "attributed_coverage_atoms_v1";
 export const SOURCE_SPAN_IDENTITY_OPERATOR_ID = "source_span_identity_v1";

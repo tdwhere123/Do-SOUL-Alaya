@@ -6,7 +6,6 @@ import {
 } from "@do-soul/alaya-protocol";
 
 export { validateSchemaGroundingForSignal } from "@do-soul/alaya-protocol";
-export type { SchemaGroundingValidationStatus, SchemaGroundingValidationResult } from "@do-soul/alaya-protocol";
 
 export interface SchemaGroundedRawPayloadInput {
   readonly rawPayload: Readonly<Record<string, unknown>>;

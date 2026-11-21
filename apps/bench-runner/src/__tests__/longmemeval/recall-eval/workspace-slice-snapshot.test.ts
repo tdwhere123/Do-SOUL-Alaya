@@ -29,7 +29,8 @@ import {
   MEMORY_A,
   TOKEN_A,
   WORKSPACE_A,
-  WORKSPACE_B
+  WORKSPACE_B,
+  writeRealMemoryOverlayBeside
 } from "./workspace-slice-fixture.js";
 
 const previousWriteQueue = process.env.ALAYA_SQLITE_WRITE_QUEUE;
@@ -316,6 +317,22 @@ describe("workspace slice snapshot identity", () => {
       workspaceId: WORKSPACE_A,
       dbPath: sliceA
     })).toBe(exploded.sliceSnapshotDigests[WORKSPACE_A]);
+  });
+
+  it("rejects an unclassified main table while preserving the live overlay", () => {
+    const dataDir = join(root, "unclassified-data");
+    installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
+    const filename = workingAlayaDbPath(dataDir);
+    writeRealMemoryOverlayBeside(filename, MEMORY_A, WORKSPACE_A);
+    const live = initDatabase({ filename });
+    try {
+      live.connection.exec("CREATE TABLE unclassified_main_probe (id TEXT PRIMARY KEY)");
+      expect(() => loadSliceIntoOpenDatabase(live, packedPath)).toThrow(/unhandled table unclassified_main_probe/u);
+      expect(live.connection.prepare("SELECT object_id FROM memory_embeddings").all()).toEqual([{ object_id: MEMORY_A }]);
+      expect(live.connection.prepare("SELECT object_id FROM main.memory_embeddings").all()).toEqual([]);
+    } finally {
+      live.close();
+    }
   });
 
   it("treats leftover SHM as outside the sealed main-file preimage", async () => {

@@ -7,7 +7,7 @@ import {
   type ReconciliationDeferral
 } from "@do-soul/alaya-protocol";
 
-export type { EventLogEntry, MemoryEntry };
+export type { MemoryEntry };
 
 import { KeyedMutex } from "@do-soul/alaya-protocol";
 import type { GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";

@@ -103,7 +103,7 @@ export function stageIndexField(index: InformationIndex, commit: () => void, sta
 export function preparedFieldRetentionBytes(index: InformationIndex): number { return PREPARED_BYTES.get(index) ?? 0; }
 export function preparedFieldDeadline(index: InformationIndex): number | undefined { return PREPARED_DEADLINE.get(index); }
 
-export function commitIndexField(index: InformationIndex): void {
+function commitIndexField(index: InformationIndex): void {
   PREPARED_FIELD.get(index)?.();
 }
 

@@ -1,9 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
-// Offline report adapter binds the formatter owner, not a new public eval export.
-import { renderProviderStateSummary } from
-  "../../../../../../packages/eval/dist/reports/report-absolute-kpis.js";
+import { renderProviderStateSummary } from "@do-soul/alaya-eval/internal";
 import type { LongMemEvalSnapshotManifest } from "../../snapshot/materialize.js";
 import type { RecallEvalResult } from "./recall-eval-contract.js";
 import type { LongMemEvalWorkerShardPlan } from "./recall-eval-shards-worker.js";

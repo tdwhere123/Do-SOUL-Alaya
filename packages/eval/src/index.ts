@@ -152,18 +152,6 @@ export {
 } from "./self/scenarios.js";
 
 export {
-  UtilizationBucketDeliverySchema,
-  UtilizationBucketReportSchema,
-  computeUtilizationBuckets,
-  rollUpUtilizationBucketsByCohort,
-  listSingleUsedAnchorDeliveries,
-  type UtilizationBucketDelivery,
-  type UtilizationBucketReport,
-  type UtilizationBucketCounts,
-  type UtilizationBucketCohortRow
-} from "./metrics/utilization-buckets.js";
-
-export {
   PlaneAttributionRowSchema,
   computePlaneAttribution,
   extractPlaneAttributionRows,

@@ -3,11 +3,9 @@ import {
   type ClaimForm,
   type EdgeProposalTriggerSourceValue,
   type EvidenceCapsule,
-  type EvidenceFactFrameFormationProposal,
   type EvidenceSearchProjection,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
-  type OpenSemanticFactorFormationAdmission,
   type PathGovernanceClass as PathGovernanceClassValue,
   type PathRelation,
   type QueryAvailability,
@@ -50,7 +48,7 @@ export interface MaterializationTarget {
 }
 
 /** Immutable admission envelope plus separately trusted source observation. */
-export interface MaterializationSourceEventAnchor {
+interface MaterializationSourceEventAnchor {
   readonly event_type: "soul.signal.emitted";
   readonly event_id: string;
   readonly occurred_at: string;
@@ -159,12 +157,10 @@ export type ClaimMaterializationInput = Omit<
   readonly governance_subject_qualifiers?: Record<string, string>;
 };
 
-export interface EvidenceMaterializationPort {
+interface EvidenceMaterializationPort {
   create(
     input: EvidenceMaterializationInput,
-    searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-    factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>,
-    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>
+    searchProjections?: readonly Readonly<EvidenceSearchProjection>[]
   ): Promise<MaterializationCreatedObject>;
 }
 
@@ -178,15 +174,15 @@ export type MemoryMaterializationCreatedObject = MaterializationCreatedObject & 
   readonly enrichmentEnqueued?: boolean;
 };
 
-export interface MemoryMaterializationPort {
+interface MemoryMaterializationPort {
   create(input: MemoryMaterializationInput): Promise<MemoryMaterializationCreatedObject>;
 }
 
-export interface SynthesisMaterializationPort {
+interface SynthesisMaterializationPort {
   create(input: SynthesisMaterializationInput): Promise<MaterializationCreatedObject>;
 }
 
-export interface ClaimMaterializationPort {
+interface ClaimMaterializationPort {
   create(input: ClaimMaterializationInput): Promise<MaterializationCreatedObject>;
 }
 
@@ -199,7 +195,7 @@ export interface PathRelationProposalPayload {
   readonly legitimacy: PathRelation["legitimacy"];
 }
 
-export interface PathRelationProposalPort {
+interface PathRelationProposalPort {
   assertPathRelationProposalAvailable?(input: {
     readonly workspaceId: string;
     readonly runId: string;
@@ -222,7 +218,7 @@ export interface SourceObservationPublicationPort {
   }): Promise<SourceObservationPublicationResult>;
 }
 
-export type SourceObservationPublicationResult = Readonly<{
+type SourceObservationPublicationResult = Readonly<{
   readonly bound: BoundSourceStatement;
   readonly evidence: MaterializationCreatedObject;
   readonly memory: MemoryMaterializationCreatedObject;
@@ -287,7 +283,7 @@ export interface GraphEdgeCreationPort {
 export type PathCandidateMintOutcome = "applied" | "already_present" | "rejected" | "failed";
 export type SignalRefTransientFailureMode = "durable_proposal" | "throw_for_retry";
 
-export interface PathCandidateSinkPort {
+interface PathCandidateSinkPort {
   submitCandidate(input: {
     readonly workspaceId: string;
     readonly sourceAnchor: { readonly kind: "object"; readonly object_id: string };
@@ -327,7 +323,7 @@ export interface SignalRefSeedSpec {
 // re-materialize of the same memory never duplicates enrichment.
 // see also: packages/storage/src/repos/garden/enrich-pending-repo.ts
 // see also: apps/core-daemon/src/garden-runtime.ts — BULK_ENRICH drain worker.
-export interface EnrichPendingPort {
+interface EnrichPendingPort {
   enqueue(params: {
     readonly workspaceId: string;
     readonly memoryId: string;
@@ -342,7 +338,7 @@ export interface EnrichPendingPort {
 // the potential_conflict signal_kind to evaluate; the established
 // memory_and_claim_draft path keeps using detectAndLinkConflicts as a
 // post-create scan.
-export interface ConflictDetectionPort {
+interface ConflictDetectionPort {
   detectAndLinkConflicts(params: {
     readonly newMemoryId: string;
     readonly newMemoryDimension: string;
@@ -392,7 +388,7 @@ export interface ConflictDetectionPort {
 // UPDATE / NOOP — the bench scoring sidecar remaps object_id -> answer
 // turn through it.
 // see also: packages/core/src/governance/reconciliation-service.ts
-export interface ReconciliationDecisionView {
+interface ReconciliationDecisionView {
   readonly kind: "add" | "update" | "noop" | "deferred";
   /** The row that ends up holding the fact for UPDATE / NOOP. */
   readonly survivingObjectId?: string;
@@ -419,7 +415,7 @@ export interface ReconciliationPort {
   ): Promise<ReconciliationDecisionView>;
 }
 
-export type ReconciliationProjectionFields = Pick<
+type ReconciliationProjectionFields = Pick<
   MemoryMaterializationInput,
   | "projection_schema_version"
   | "event_time_start"

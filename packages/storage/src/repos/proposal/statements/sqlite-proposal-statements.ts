@@ -16,7 +16,6 @@ import {
   type ProposalSynthesisApplyStatements
 } from "./proposal-statement-groups.js";
 
-export type { SqliteStatement } from "./proposal-statement-groups.js";
 
 export interface ProposalStatements
   extends ProposalCreateStatements,

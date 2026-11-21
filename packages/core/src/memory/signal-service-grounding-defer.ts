@@ -102,15 +102,6 @@ export async function reconcileStaleSourceGroundingClaim(input: {
   return committed.signal;
 }
 
-export function buildSourceGroundingDeferEvent(input: {
-  readonly signal: CandidateMemorySignal;
-  readonly materialization: SignalMaterializationResult;
-}): SourceGroundingDeferEventInput | null {
-  const meta = readSourceGroundingDeferMeta(input.materialization);
-  if (meta === null) return null;
-  return buildDeferredTriageEvent(input.signal, meta);
-}
-
 function buildDeferredTriageEvent(
   signal: CandidateMemorySignal,
   meta: ReturnType<typeof readSourceGroundingDeferMeta> | ReturnType<typeof readWritePathDeferMeta>
@@ -168,7 +159,7 @@ function readWritePathDeferMeta(materialization: {
   return { defer_class: SignalDeferClass.WRITE_PATH, deferral: parsed.data };
 }
 
-export function buildRedrivePatchAuditEvent(
+function buildRedrivePatchAuditEvent(
   signal: CandidateMemorySignal,
   rawPayload: CandidateMemorySignal["raw_payload"]
 ): SourceGroundingDeferEventInput {
@@ -204,7 +195,7 @@ function listChangedRawPayloadKeys(
     .sort();
 }
 
-export function buildStaleClaimReconciliationEvent(input: {
+function buildStaleClaimReconciliationEvent(input: {
   readonly signal: CandidateMemorySignal;
   readonly claimTokenFingerprint: string;
   readonly expectedClaimExpiresAt: string;

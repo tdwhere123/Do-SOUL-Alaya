@@ -208,7 +208,7 @@ export const PATH_MINT_SUPERSEDED_REVIEW_REASON =
 // operator verdict.
 export const PATH_MINT_SUPERSEDED_REVIEWER_IDENTITY = "system:edge_proposal_mint_reconcile";
 
-export interface AgentReportedConfidenceClampDiagnostic {
+interface AgentReportedConfidenceClampDiagnostic {
   readonly confidence: number;
   readonly requestedConfidence: number;
   readonly capApplied: boolean;
@@ -219,7 +219,7 @@ export function clampAgentReportedConfidence(confidence: number): number {
   return clampAgentReportedConfidenceWithDiagnostics(confidence).confidence;
 }
 
-export function clampAgentReportedConfidenceWithDiagnostics(
+function clampAgentReportedConfidenceWithDiagnostics(
   confidence: number
 ): AgentReportedConfidenceClampDiagnostic {
   const cap = 0.5;

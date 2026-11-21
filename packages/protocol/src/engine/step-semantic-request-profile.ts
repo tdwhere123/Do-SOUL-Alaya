@@ -1,6 +1,6 @@
 import { AlayaError } from "../shared/alaya-error.js";
 
-export const STEP_SEMANTIC_REQUEST_MODEL = "step-3.5-flash-2603" as const;
+const STEP_SEMANTIC_REQUEST_MODEL = "step-3.5-flash-2603" as const;
 export const STEP_SEMANTIC_REQUEST_PROFILE = "step-3.5-2603-low-json-schema-v1" as const;
 export const STEP_SEMANTIC_HIGH_REQUEST_PROFILE = "step-3.5-2603-high-json-schema-v1" as const;
 export const STEP_PREVIEW_REQUEST_PROFILE = "step-5-preview-low-json-schema-v1" as const;

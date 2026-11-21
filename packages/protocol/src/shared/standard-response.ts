@@ -27,7 +27,7 @@ export const ConfigPatchAckResponseSchema = z
   })
   .readonly();
 
-export function isStandardSuccessEnvelope(
+function isStandardSuccessEnvelope(
   value: unknown
 ): value is { readonly success: true; readonly data: unknown } {
   return (

@@ -1935,10 +1935,6 @@
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "packages/protocol/src/evidence/formation/evidence-osf-semantic-completeness.ts": {
-    "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "packages/protocol/src/evidence/formation/source-grammar/semantic-graph.ts": {
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"

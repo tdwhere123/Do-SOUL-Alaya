@@ -17,22 +17,10 @@ import {
 } from "./garden-librarian-data-ports.js";
 
 export type {
-  GardenAuditorBootstrappingPort,
-  GardenAuditorEvidenceCheckPort,
-  GardenAuditorGreenMaintenancePort,
-  GardenAuditorPointerHealthPort,
   GardenBackgroundDataPorts,
   GardenDataPortFactoryOptions,
-  GardenDormantDemotionOutcome,
-  GardenHotDemotionCandidate,
-  GardenJanitorDormantDemotionPort,
-  GardenJanitorHotDemotionCriteria,
-  GardenJanitorMemoryTieringPort,
   GardenLibrarianNeighborDetectionPort,
-  GardenLibrarianSynthesisThrottlePort,
-  GardenLowActivityMemoryRecord,
-  GardenNeighborGroup,
-  GardenSynthesisCandidateCluster
+  GardenLibrarianSynthesisThrottlePort
 } from "./garden-background-port-types.js";
 
 export function createGardenBackgroundDataPorts(

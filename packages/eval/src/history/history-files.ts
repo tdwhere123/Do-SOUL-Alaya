@@ -8,13 +8,13 @@ export const KPI_FILENAME = "kpi.json";
 export const REPORT_FILENAME = "report.md";
 export const FINDINGS_FILENAME = "findings.md";
 export const LATEST_BASELINE_FILENAME = "latest-baseline.json";
-export const LATEST_BASELINE_EMBEDDING_ON_FILENAME = "latest-baseline-embedding-on.json";
+const LATEST_BASELINE_EMBEDDING_ON_FILENAME = "latest-baseline-embedding-on.json";
 export const LATEST_RUN_FILENAME = "latest-run.json";
 export const LATEST_PASSING_FILENAME = "latest-passing.json";
-export const LATEST_RUN_EMBEDDING_OFF_FILENAME = "latest-run-embedding-off.json";
-export const LATEST_RUN_EMBEDDING_ON_FILENAME = "latest-run-embedding-on.json";
-export const LATEST_PASSING_EMBEDDING_OFF_FILENAME = "latest-passing-embedding-off.json";
-export const LATEST_PASSING_EMBEDDING_ON_FILENAME = "latest-passing-embedding-on.json";
+const LATEST_RUN_EMBEDDING_OFF_FILENAME = "latest-run-embedding-off.json";
+const LATEST_RUN_EMBEDDING_ON_FILENAME = "latest-run-embedding-on.json";
+const LATEST_PASSING_EMBEDDING_OFF_FILENAME = "latest-passing-embedding-off.json";
+const LATEST_PASSING_EMBEDDING_ON_FILENAME = "latest-passing-embedding-on.json";
 export const LIVE_GATES_FILENAME = "live-gates.json";
 
 export function latestPointerFilename(kind: HistoryPointerKind): string {

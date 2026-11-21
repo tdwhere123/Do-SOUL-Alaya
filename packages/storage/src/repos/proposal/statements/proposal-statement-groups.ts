@@ -42,7 +42,7 @@ export interface ProposalResolutionStatements {
   readonly updatePendingResolutionWithIdentityStatement: SqliteStatement;
 }
 
-export interface ProposalMemoryApplyCoreStatements {
+interface ProposalMemoryApplyCoreStatements {
   readonly findMemoryEntryByIdStatement: SqliteStatement;
   readonly updateMemoryEntryStatement: SqliteStatement;
   readonly findRevokableGreenStatusStatement: SqliteStatement;

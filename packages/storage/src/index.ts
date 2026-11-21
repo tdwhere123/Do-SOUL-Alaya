@@ -1,4 +1,10 @@
 export { SqliteSourceIndexRepository } from "./repos/source-index/source-index-repo.js";
+export {
+  readSourceIndexRootQualification,
+  readSourceIndexSnapshotFact,
+  type SourceIndexRootQualification,
+  type SourceIndexSnapshotFact
+} from "./repos/source-index/source-index-qualification.js";
 export { putSourceStatementArtifact } from "./repos/source-index/statement-artifact.js";
 export { putSourceStatementMemoryBinding } from "./repos/source-index/statement-dependencies.js";
 export { isLexicalDomainTable, isLexicalDomainTrigger, rebuildSourceIndexLexicalDomains } from "./repos/source-index/lexical-domain.js";

@@ -7,16 +7,16 @@ import type { WorkerRunLifecycleService } from "./worker-run-lifecycle-service.j
 
 export type SessionFinishedEvent = Extract<RuntimeEvent, { readonly type: "session_finished" }>;
 
-export interface RecoveryWorkerRunRepoPort {
+interface RecoveryWorkerRunRepoPort {
   getById(workerRunId: string): Promise<Readonly<DelegatedWorkerRun> | null>;
   deleteIfState(workerRunId: string, expectedState: DelegatedWorkerRun["state"]): Promise<void>;
 }
 
-export type RuntimeEventNormalizerPort = Pick<RuntimeEventNormalizer, "normalize" | "clearSessionState">;
+type RuntimeEventNormalizerPort = Pick<RuntimeEventNormalizer, "normalize" | "clearSessionState">;
 
-export type ConstraintProxyPort = Pick<ConstraintProxy, "assertNoViolation">;
+type ConstraintProxyPort = Pick<ConstraintProxy, "assertNoViolation">;
 
-export type StrongRefServicePort = Pick<StrongRefService, "releaseBySource">;
+type StrongRefServicePort = Pick<StrongRefService, "releaseBySource">;
 
 export interface RecoveryMetadata {
   readonly phase: "startup" | "event";

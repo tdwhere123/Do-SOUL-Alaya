@@ -98,7 +98,7 @@ export function observationIsGuaranteed(observation: TypedObservation): boolean 
   return observation.applicability.verdict === "true";
 }
 
-export function queryAdmitsGuaranteedSeed(interpretation: QueryInterpretation): boolean {
+function queryAdmitsGuaranteedSeed(interpretation: QueryInterpretation): boolean {
   return runtimeProgram(interpretation.program) !== "empty";
 }
 
@@ -115,18 +115,13 @@ export function seedFromObservation(
   };
 }
 
-export function timeStateFor(
+function timeStateFor(
   interpretation: QueryInterpretation,
   asOf: string
 ): string {
   if (interpretation.time_window !== undefined) return interpretation.time_window.end;
   if (interpretation.interpretation_clock !== undefined) return interpretation.interpretation_clock;
   return asOf.length > 0 ? asOf : DEFAULT_TIME_STATE;
-}
-
-export function hypothesisIdsFor(interpretation: QueryInterpretation): readonly string[] {
-  if (interpretation.hypotheses.length === 0) return [DEFAULT_HYPOTHESIS];
-  return interpretation.hypotheses.map((row) => row.hypothesis_id);
 }
 
 export function runtimeProgram(program: QueryProgram): QueryProgram | "empty" | "epsilon" {

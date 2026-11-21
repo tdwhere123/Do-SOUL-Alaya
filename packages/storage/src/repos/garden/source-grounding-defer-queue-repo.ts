@@ -13,11 +13,9 @@ import { parseRows } from "../shared/parse-row.js";
 
 export {
   SOURCE_GROUNDING_DEFER_QUEUE_CAP,
-  SOURCE_GROUNDING_DEFER_QUEUE_OVERFLOW_ALLOWANCE,
   type SourceGroundingDeferEnqueueInput,
   type SourceGroundingDeferEnqueueResult,
   type SourceGroundingDeferEntry,
-  type SourceGroundingDeferReason,
   type SourceGroundingDeferStats
 } from "@do-soul/alaya-protocol";
 

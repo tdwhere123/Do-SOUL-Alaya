@@ -120,14 +120,14 @@ export function assertAcceptedPathRelationGovernanceMatchesProposal(
   }
 }
 
-export function createAcceptedMemoryUpdateMismatch(proposalId: string): StorageError {
+function createAcceptedMemoryUpdateMismatch(proposalId: string): StorageError {
   return new StorageError(
     "CONFLICT",
     `Accepted memory update does not match proposal ${proposalId}.`
   );
 }
 
-export function createAcceptedPathRelationGovernanceMismatch(proposalId: string): StorageError {
+function createAcceptedPathRelationGovernanceMismatch(proposalId: string): StorageError {
   return new StorageError(
     "CONFLICT",
     `Accepted path relation governance update does not match proposal ${proposalId}.`
@@ -173,14 +173,14 @@ export function assertAcceptedSynthesisCreateMatchesProposal(
   }
 }
 
-export function createAcceptedSynthesisCreateMismatch(proposalId: string): StorageError {
+function createAcceptedSynthesisCreateMismatch(proposalId: string): StorageError {
   return new StorageError(
     "CONFLICT",
     `Accepted synthesis create does not match proposal ${proposalId}.`
   );
 }
 
-export function proposedChangesMatch(
+function proposedChangesMatch(
   stored: Readonly<MemoryEntryMutableFields>,
   supplied: Readonly<MemoryEntryMutableFields>
 ): boolean {

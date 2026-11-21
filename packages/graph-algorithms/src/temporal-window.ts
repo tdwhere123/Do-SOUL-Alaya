@@ -1,6 +1,6 @@
 type RelativeTemporalUnit = "day" | "week" | "month" | "year";
 type SeasonName = "spring" | "summer" | "autumn" | "fall" | "winter";
-export type RelativeWeekday =
+type RelativeWeekday =
   | "monday" | "tuesday" | "wednesday" | "thursday"
   | "friday" | "saturday" | "sunday";
 

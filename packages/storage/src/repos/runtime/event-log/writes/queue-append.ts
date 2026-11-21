@@ -10,13 +10,8 @@ import {
 import { parseEventLogEntry, parseEventLogEntryRow, type EventLogRow } from "../mappers/event-log-rows.js";
 import type { EventLogAppendInput } from "../../event-log-types.js";
 
-export {
-  EVENT_LOG_APPEND_WITH_REVISION_SQL,
-  EVENT_LOG_GET_BY_ID_SQL,
-  EVENT_LOG_SELECT_COLUMNS
-} from "../statements/append-sql.js";
 
-export function buildEventLogAppendPayloadStatement(
+function buildEventLogAppendPayloadStatement(
   event: EventLogAppendInput,
   identities: { readonly eventId: string; readonly createdAt: string }
 ): SqliteWriteStatement {

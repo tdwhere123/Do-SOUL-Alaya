@@ -20,7 +20,7 @@ import { SemanticChainConfigSchema, withSemanticChainDaemon, readSemanticChainDa
   from "../../../runs/recall-measurement/contract.js";
 import { captureFrozenSourceIndexQualifications, frozenIndexMetadataMatchesNativeBinding,
   type FrozenSourceIndexQualifications, type FrozenSourceIndexQualificationPage } from "../../../runs/recall-measurement/index-qualification.js";
-import { readSourceIndexRootQualification } from "../../../../../core-daemon/src/runtime/recall-read-worker/source-index-measurement.js";
+import { readSourceIndexRootQualification } from "@do-soul/alaya-storage";
 import { checkpointAndCopyBenchDb } from "../../../runs/snapshot/materialize.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { applyBaselineSql, currentSchemaVersion } from "../../../../../../packages/storage/src/__tests__/migrations/apply-baseline.js";

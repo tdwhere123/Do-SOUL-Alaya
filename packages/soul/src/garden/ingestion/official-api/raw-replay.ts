@@ -5,7 +5,7 @@ import {
 } from "../official-api-signal-parser.js";
 import { inspectRawOfficialApiSignalElements } from "./raw-signal-envelope.js";
 
-export const RAW_ARTIFACT_CONTRACT_VERSION = 1;
+const RAW_ARTIFACT_CONTRACT_VERSION = 1;
 
 export interface ImmutableRawInspection {
   readonly raw_json_sha256: string;

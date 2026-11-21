@@ -589,11 +589,14 @@ describe("workspace slice install and daemon reopen", () => {
     }
   });
 
-  it("rolls back an incomplete slice replacement and restores SQLite state", () => {
+  it.each([0, 1])("restores SQLite state after rollback with foreign_keys=%i", (foreignKeys) => {
     const dataDir = join(root, "fk-restore");
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
-    const live = initDatabase({ filename: join(dataDir, "alaya.db") });
+    const filename = workingAlayaDbPath(dataDir);
+    writeRealMemoryOverlayBeside(filename, MEMORY_A, WORKSPACE_A);
+    const live = initDatabase({ filename });
     try {
+      live.connection.pragma(foreignKeys === 1 ? "foreign_keys = ON" : "foreign_keys = OFF");
       const original = live.connection.prepare("SELECT workspace_id FROM workspaces ORDER BY workspace_id").all();
       expect(original.length).toBeGreaterThan(0);
       const triggerCountBefore = countTriggers(live);
@@ -602,9 +605,10 @@ describe("workspace slice install and daemon reopen", () => {
       expect(live.connection.inTransaction).toBe(false);
       expect(live.connection.prepare("SELECT workspace_id FROM workspaces ORDER BY workspace_id").all()).toEqual(original);
       expect(live.connection.pragma("database_list")).not.toContainEqual(expect.objectContaining({ name: "slice_src" }));
-      const fk = live.connection.pragma("foreign_keys") as ReadonlyArray<{ foreign_keys: number }>;
-      expect(fk[0]?.foreign_keys).toBe(1);
+      expect(live.connection.pragma("foreign_keys", { simple: true })).toBe(foreignKeys);
       expect(countTriggers(live)).toBe(triggerCountBefore);
+      expect(countTable(live, "memory_embeddings")).toBe(1);
+      expect(countTable(live, "main.memory_embeddings")).toBe(0);
     } finally {
       live.close();
     }

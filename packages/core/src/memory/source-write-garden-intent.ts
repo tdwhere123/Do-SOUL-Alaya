@@ -61,7 +61,7 @@ export function buildSourceEnrichmentTaskId(
   return `source_enrich_${digest}`;
 }
 
-export function buildSourceEnrichmentTaskPayload(input: SourceEnrichmentIntentInput & {
+function buildSourceEnrichmentTaskPayload(input: SourceEnrichmentIntentInput & {
   readonly taskId: string;
 }): Readonly<{
   readonly task_id: string;

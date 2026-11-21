@@ -94,7 +94,8 @@
       "root": "packages/eval",
       "package": "@do-soul/alaya-eval",
       "allowed_workspace_packages": [
-        "@do-soul/alaya-protocol"
+        "@do-soul/alaya-protocol",
+        "@do-soul/alaya-core"
       ]
     },
     {
@@ -1114,26 +1115,26 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 3244,
-      "expected_sha256": "8554ea54a7082aa4417c3ac630f3ca3a273d2b458571a69b44221146c46ecb91"
+      "expected_count": 3129,
+      "expected_sha256": "7136ff3dbe606ebcc8ba2bce7aa5e13cf51b880e875125204cefee365d915912"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
       "path": "packages/graph-algorithms/src/index.ts",
-      "expected_count": 37,
-      "expected_sha256": "d703eb62da5a17882380bcd203fbdeddaa986608e8e080f029468e3e571caf9d"
+      "expected_count": 24,
+      "expected_sha256": "f37d8d3c4b5f092db356640115eff9a5b3de921b35c6327fa43d02763d398679"
     },
     {
       "specifier": "@do-soul/alaya-cjk-segmentation",
       "path": "packages/cjk-segmentation/src/index.ts",
-      "expected_count": 12,
-      "expected_sha256": "0960acf1775c845ad3e6f5cd6914dcb30e1c3ab3bfa133684f241842b423f486"
+      "expected_count": 11,
+      "expected_sha256": "4248855c05ab6e8727899abf43f702ae7e009b87e8c6ad715931bc830a243be7"
     },
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 1039,
-      "expected_sha256": "49daf184ca658cc33a6883f8a14833445035eccffbbe364e9215f737928f7fe2"
+      "expected_count": 1011,
+      "expected_sha256": "3504d694bb51337ae117c851f917af0db96391ed6f8283a311f7508899a79064"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1144,8 +1145,8 @@
     {
       "specifier": "@do-soul/alaya-eval",
       "path": "packages/eval/src/index.ts",
-      "expected_count": 134,
-      "expected_sha256": "e107429b8716aa3cddddd391873cd16374b5e2ef15db339cc3fdac44c7d80eb0"
+      "expected_count": 125,
+      "expected_sha256": "a00dc9219eed28ba5b2771b26068d65033cf103473e7a480f0cd462631a419fd"
     },
     {
       "specifier": "@do-soul/alaya-eval/authority",
@@ -1156,20 +1157,20 @@
     {
       "specifier": "@do-soul/alaya-eval/internal",
       "path": "packages/eval/src/internal.ts",
-      "expected_count": 56,
-      "expected_sha256": "0dae7389226f271db4e45f4ac7016f3c8151d260df98ee831460845e21b16014"
+      "expected_count": 52,
+      "expected_sha256": "1b91f9257e1a5e528dcc4ce8d39e9bfa7fd8d725e6f01b09e3d0271dec237ad5"
     },
     {
       "specifier": "@do-soul/alaya-soul",
       "path": "packages/soul/src/index.ts",
-      "expected_count": 360,
-      "expected_sha256": "97207eccdffa7651e679052d3cd5e28cd593324a79abe8a48433c102038a2146"
+      "expected_count": 201,
+      "expected_sha256": "38fdd021d2c35673976276663fca893d8fa7bacbf2372cffead58c312bcecc97"
     },
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
-      "expected_count": 325,
-      "expected_sha256": "74e4e48ff9986be6d04de70f51d8454d8a6d2f2edc362d5e14d788fc0317c70f"
+      "expected_count": 329,
+      "expected_sha256": "49bc2be44d1368e8a8ad90b95bc494912efff8bea4e9f846ca0b862cb9819619"
     },
     {
       "specifier": "@do-soul/alaya",
@@ -1217,8 +1218,6 @@
     "packages/eval/src/index.ts -> packages/eval/src/cli/index.ts",
     "packages/protocol/src/index.ts -> packages/protocol/src/recall/conditional-field/index.ts",
     "packages/protocol/src/index.ts -> packages/protocol/src/recall/field-contract/index.ts",
-    "packages/soul/src/garden/index.ts -> packages/protocol/src/index.ts",
-    "packages/soul/src/index.ts -> packages/protocol/src/index.ts",
     "packages/soul/src/index.ts -> packages/soul/src/garden/index.ts",
     "packages/storage/src/index.ts -> packages/storage/src/repos/capsules/index.ts",
     "packages/storage/src/index.ts -> packages/storage/src/repos/control/index.ts",

@@ -85,21 +85,6 @@ export function selectSourceRecallPage(input: SourceRecallSelection, pairs: bool
   return selectionReasons(selected, supports, input);
 }
 
-/** The incumbent's occupied roots and positions survive optional same-root improvements. */
-export function improveSourceRecallPage(input: SourceRecallSelection, incumbentCount: number): void {
-  try {
-    input.meter.charge(input.count, input.count * 24, "reserved package improvement references");
-    const replacement = Array.from({ length: incumbentCount }, (_, i) => i);
-    const roots = new Set(replacement.map(input.root));
-    const candidates: number[] = [];
-    for (let member = incumbentCount; member < input.count; member++) if (roots.has(input.root(member))) candidates.push(member);
-    const supports = new Map<IndexEntry, SourceSemanticQuerySupport | undefined>();
-    for (const row of replacement) supports.set(input.entry(row), input.support(row));
-    for (const row of candidates) supports.set(input.entry(row), input.support(row));
-    improveCoverage(replacement, input, supports, pageScore(input, supports, undefined, undefined), input.root, undefined, false, candidates);
-  } catch (error) { if (!(error instanceof SourceSemanticResourceExhausted)) throw error; }
-}
-
 function improveWithPairAllowance(meter: SourceSemanticResourceLedger, incumbentWork: number, improve: () => void): void {
   const work = Math.min(200_000, incumbentWork, Math.floor(meter.work / 2));
   const bytes = Math.min(16_000_000, Math.floor(meter.bytes / 2));
@@ -131,11 +116,10 @@ function pageScore(input: SourceRecallSelection, supports: Supports,
 }
 
 function improveCoverage(selected: number[], input: SourceRecallSelection, supports: Supports, score: PageScore,
-  rootKey: (row: number) => string, proofsByRoot?: ReadonlyMap<string, readonly number[]>, vacantSlots = false,
-  membersToImprove?: readonly number[]): void {
+  rootKey: (row: number) => string, proofsByRoot?: ReadonlyMap<string, readonly number[]>, vacantSlots = false): void {
   let changed = true, searchSingles = !vacantSlots;
   if (vacantSlots) input.meter.charge(input.count * Math.max(1, Math.ceil(Math.log2(input.count))), input.count * 8, "pair exchange candidate order");
-  const candidates = (membersToImprove === undefined ? Array.from({ length: input.count }, (_, i) => i) : [...membersToImprove])
+  const candidates = Array.from({ length: input.count }, (_, i) => i)
     .sort((left, right) => compareCodeUnits(rootKey(left), rootKey(right)));
   while (changed) {
     changed = false;

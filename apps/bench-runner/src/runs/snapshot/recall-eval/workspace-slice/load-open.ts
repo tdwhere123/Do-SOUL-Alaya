@@ -25,28 +25,33 @@ export function loadSliceIntoOpenDatabase(
   if (live.connection.inTransaction) {
     throw new AlayaError("CONFLICT", "Workspace slice replacement requires a top-level SQLite transaction");
   }
-  const triggers = readTriggers(live);
-  // TEMP overlay views must not shadow main table DML during slice replace.
-  detachEmbeddingOverlay(live.connection);
   const catalog = classifyPackedTables(createSqliteCatalogReader(live.connection));
-  dropTriggers(live, triggers);
-  live.connection.pragma("foreign_keys = OFF");
-  let attached = false, replaced = false;
+  const triggers = readTriggers(live);
+  const foreignKeys = live.connection.pragma("foreign_keys", { simple: true });
+  let attached = false;
   try {
+    // TEMP overlay views must not shadow main table DML during slice replace.
+    detachEmbeddingOverlay(live.connection);
+    live.connection.pragma("foreign_keys = OFF");
     attachSlice(live, sliceDbPath);
     attached = true;
-    replaceAttachedTables(live, catalog);
-    replaced = true;
+    live.connection.transaction(() => {
+      dropTriggers(live, triggers);
+      replaceAttachedTables(live, catalog);
+      // The lexical rebuild installs its own domain triggers.
+      restoreTriggers(live, triggers.filter((trigger) => !isLexicalDomainTrigger(trigger.name)));
+    })();
     // Unqualified ANALYZE writes sqlite_stat on every attached schema, including the sealed slice.
     live.connection.exec("ANALYZE main");
   } finally {
     try {
       if (attached) detachSlice(live);
     } finally {
-      live.connection.pragma("foreign_keys = ON");
-      // Rebuild domain triggers from the replacement rows.
-      restoreTriggers(live, replaced ? triggers.filter(trigger => !isLexicalDomainTrigger(trigger.name)) : triggers);
-      bindEmbeddingOverlayIfPresent(live.connection, live.filename);
+      try {
+        live.connection.pragma(foreignKeys === 1 ? "foreign_keys = ON" : "foreign_keys = OFF");
+      } finally {
+        bindEmbeddingOverlayIfPresent(live.connection, live.filename);
+      }
     }
   }
 }
@@ -62,15 +67,13 @@ function detachSlice(live: StorageDatabase): void {
 }
 
 function replaceAttachedTables(live: StorageDatabase, catalog: ClassifiedCatalog): void {
-  live.connection.transaction(() => {
-    for (const table of catalog.workspace) {
-      replaceAttachedTable(live, table.name);
-    }
-    for (const table of catalog.global) {
-      applyAttachedGlobalTable(live, table.name, table.policy);
-    }
-    rebuildWorkspaceFts(live.connection, catalog.ftsVirtual);
-  })();
+  for (const table of catalog.workspace) {
+    replaceAttachedTable(live, table.name);
+  }
+  for (const table of catalog.global) {
+    applyAttachedGlobalTable(live, table.name, table.policy);
+  }
+  rebuildWorkspaceFts(live.connection, catalog.ftsVirtual);
 }
 
 function applyAttachedGlobalTable(

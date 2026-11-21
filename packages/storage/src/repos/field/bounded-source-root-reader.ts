@@ -583,7 +583,7 @@ export function encodeContentCursor(input: ContentCursor): string {
   return `o:${input.kind}\t${input.rootId}\t${input.offset}`;
 }
 
-export function parseContentCursor(cursor: string | null | undefined): ContentCursor | null {
+function parseContentCursor(cursor: string | null | undefined): ContentCursor | null {
   if (cursor == null || !cursor.startsWith("o:")) return null;
   if (cursor.startsWith("o:{")) {
     try {
@@ -652,4 +652,4 @@ function parseFamilyCursor(cursor: string | null | undefined): FamilyCursor | nu
   };
 }
 
-export { encodeRecordCursor, parseRecordCursor, encodeCapsuleCursor, parseCapsuleCursor };
+export { encodeRecordCursor, encodeCapsuleCursor };

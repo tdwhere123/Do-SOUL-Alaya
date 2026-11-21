@@ -27,18 +27,11 @@ import { readQuestionTimeDomain } from "./question-time-domain.js";
 import { readMemberListing, readStatementWitnesses, readTemplateStatements } from "./template-statements.js";
 import { readTaskObservation } from "./task-observation.js";
 import { readHostDependency } from "./host-dependency.js";
-import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
 import { nextStatementRelationOverlayTarget, readStatementRelationText, readStatementRelationVectors,
   writeStatementRelationVector } from "./statement-relation-vectors.js";
 
-// Private Node measurement friend. No package-root export, public operation or persisted state.
-// Both source and installed consumers discover this on the same existing package constructor.
-const SOURCE_INDEX_MEASUREMENT: unique symbol = Symbol.for("@do-soul/alaya-storage/private/source-index-measurement");
-
 /** Mechanical CAS/materialization for Core's SourceIndexLifecycle. No inference or truth promotion. */
 export class SqliteSourceIndexRepository implements SourceIndexRepository, SourceIndexQueryRepository {
-  static readonly [SOURCE_INDEX_MEASUREMENT] = Object.freeze({ statuses: SOURCE_INDEX_QUALIFICATION_STATUSES,
-    readSnapshot: readSourceIndexSnapshotFact, readRoot: readSourceIndexRootQualification });
   public readonly lexical: SqliteSourceIndexLexicalStore;
   private records: SqliteFieldSourceRecordRepo;
   private connectionVersion: number;

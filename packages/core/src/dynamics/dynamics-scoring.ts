@@ -1,6 +1,5 @@
 import {
   DYNAMICS_CONSTANTS,
-  type ManifestationState,
   type MemoryEntry,
   type RetentionState,
   type ScopeClass
@@ -96,4 +95,3 @@ export function computeActivationScore(memory: Readonly<MemoryEntry>, context: A
 }
 
 export { determineManifestation };
-export type { ManifestationState };

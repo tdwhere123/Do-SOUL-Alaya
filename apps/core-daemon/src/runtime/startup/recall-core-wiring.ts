@@ -11,7 +11,6 @@ import type { CreateRecallMaterializationWiringInput } from "../recall-materiali
 import { resolveRecallPathReadBind } from "../recall/recall-path-read-bind.js";
 import type { RecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
 import type { RelationProjectionAdmissionMode } from "../recall-materialization/relation-projection/mode.js";
-import type { QueryFactFrameOsfObligation } from "@do-soul/alaya-protocol";
 
 type Repositories = ReturnType<typeof createDaemonRepositories>;
 type Foundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
@@ -40,7 +39,7 @@ export async function createRecallAndCoreWiring(input: RecallCoreStartupInput) {
   const recallWiring = await createRecallMaterializationWiring({
     ...buildRecallRuntimeInput(input),
     ...buildRecallPersistenceInput(input),
-    ...buildRecallServiceInput(input, gardenComputeRuntime)
+    ...buildRecallServiceInput(input)
   });
   input.registerRecallReadWorker(recallWiring.recallReadWorkerClient);
   input.foundation.pathRelationProposalServiceRef.current =
@@ -97,10 +96,7 @@ function buildRecallPersistenceInput(input: RecallCoreStartupInput) {
   };
 }
 
-function buildRecallServiceInput(
-  input: RecallCoreStartupInput,
-  gardenComputeRuntime: Awaited<ReturnType<typeof createGardenComputeRuntime>>
-) {
+function buildRecallServiceInput(input: RecallCoreStartupInput) {
   const { foundation, repositories } = input;
   return {
     manifestationBudgetConfigProvider: foundation.manifestationBudgetConfigProvider,
@@ -119,24 +115,7 @@ function buildRecallServiceInput(
     enqueueEnrichPending: repositories.enqueueEnrichPending,
     pathFailureHealthInboxPort: foundation.pathFailureHealthInboxPort,
     evidenceService: foundation.evidenceService,
-    fieldComposition: repositories.fieldComposition,
-    openSemanticFactorExtractionPort: {
-      operator_id: gardenComputeRuntime.officialGardenProvider.operator_id,
-      extract: async (
-        sourceKind: "evidence" | "query",
-        sourceText: string
-      ) =>
-        await gardenComputeRuntime.officialGardenProvider.extractOpenSemanticFactors(
-          sourceKind,
-          sourceText
-        ),
-      extractCertifiedQuery: async (
-        sourceText: string,
-        obligation: Readonly<QueryFactFrameOsfObligation>
-      ) =>
-        await gardenComputeRuntime.officialGardenProvider
-          .extractCertifiedQueryOpenSemanticFactors(sourceText, obligation)
-    }
+    fieldComposition: repositories.fieldComposition
   };
 }
 

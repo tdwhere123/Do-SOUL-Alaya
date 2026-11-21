@@ -1,6 +1,6 @@
 export * from "./recall-service-ports.js";
 export * from "./recall-service-results.js";
-export type { SoulRecallHostContext, RecallCandidate } from "@do-soul/alaya-protocol";
+export type { RecallCandidate } from "@do-soul/alaya-protocol";
 
 export type RecallCandidateDropReason =
   | "ineligible"

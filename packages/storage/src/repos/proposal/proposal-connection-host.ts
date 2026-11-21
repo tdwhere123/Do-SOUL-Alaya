@@ -3,6 +3,7 @@ import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-h
 import { getEventLogWriter } from "../runtime/writes/event-log-writer.js";
 import { runSynchronousEventLogTransaction } from "../runtime/event-log/writes/synchronous-transaction.js";
 import { prepareProposalStatements, type ProposalStatements } from "./statements/sqlite-proposal-statements.js";
+import type { SqliteStatement } from "./statements/proposal-statement-groups.js";
 
 export class ProposalConnectionHost implements ProposalStatements {
   private readonly statementHolder: RefreshableStatementHolder<ProposalStatements>;
@@ -11,69 +12,69 @@ export class ProposalConnectionHost implements ProposalStatements {
     this.statementHolder = new RefreshableStatementHolder(db, prepareProposalStatements);
   }
 
-  public get createStatement() {
+  public get createStatement(): SqliteStatement {
     return this.activeStatements().createStatement;
   }
 
-  public get findPendingByDedupeKeyStatement() {
+  public get findPendingByDedupeKeyStatement(): SqliteStatement {
     return this.activeStatements().findPendingByDedupeKeyStatement;
   }
 
-  public get assignReviewerStatement() {
+  public get assignReviewerStatement(): SqliteStatement {
     return this.activeStatements().assignReviewerStatement;
   }
 
-  public get findByIdStatement() {
+  public get findByIdStatement(): SqliteStatement {
     return this.activeStatements().findByIdStatement;
   }
 
-  public get findByWorkspaceIdStatement() {
+  public get findByWorkspaceIdStatement(): SqliteStatement {
     return this.activeStatements().findByWorkspaceIdStatement;
   }
 
-  public get findByWorkspaceIdPagedStatement() {
+  public get findByWorkspaceIdPagedStatement(): SqliteStatement {
     return this.activeStatements().findByWorkspaceIdPagedStatement;
   }
 
-  public get countByWorkspaceIdStatement() {
+  public get countByWorkspaceIdStatement(): SqliteStatement {
     return this.activeStatements().countByWorkspaceIdStatement;
   }
 
-  public get findPendingStatement() {
+  public get findPendingStatement(): SqliteStatement {
     return this.activeStatements().findPendingStatement;
   }
 
-  public get findPendingPagedStatement() {
+  public get findPendingPagedStatement(): SqliteStatement {
     return this.activeStatements().findPendingPagedStatement;
   }
 
-  public get countPendingStatement() {
+  public get countPendingStatement(): SqliteStatement {
     return this.activeStatements().countPendingStatement;
   }
 
-  public get findPendingByRunIdStatement() {
+  public get findPendingByRunIdStatement(): SqliteStatement {
     return this.activeStatements().findPendingByRunIdStatement;
   }
 
-  public get findReviewerAssignmentStatement() {
+  public get findReviewerAssignmentStatement(): SqliteStatement {
     return this.activeStatements().findReviewerAssignmentStatement;
   }
 
 
 
-  public get updatePendingResolutionStatement() {
+  public get updatePendingResolutionStatement(): SqliteStatement {
     return this.activeStatements().updatePendingResolutionStatement;
   }
 
-  public get updatePendingResolutionWithIdentityStatement() {
+  public get updatePendingResolutionWithIdentityStatement(): SqliteStatement {
     return this.activeStatements().updatePendingResolutionWithIdentityStatement;
   }
 
-  public get findMemoryEntryByIdStatement() {
+  public get findMemoryEntryByIdStatement(): SqliteStatement {
     return this.activeStatements().findMemoryEntryByIdStatement;
   }
 
-  public get updateMemoryEntryStatement() {
+  public get updateMemoryEntryStatement(): SqliteStatement {
     return this.activeStatements().updateMemoryEntryStatement;
   }
 
@@ -85,27 +86,27 @@ export class ProposalConnectionHost implements ProposalStatements {
     return this.activeStatements().insertEvidenceRefStatement;
   }
 
-  public get findRevokableGreenStatusStatement() {
+  public get findRevokableGreenStatusStatement(): SqliteStatement {
     return this.activeStatements().findRevokableGreenStatusStatement;
   }
 
-  public get revokeGreenStatusStatement() {
+  public get revokeGreenStatusStatement(): SqliteStatement {
     return this.activeStatements().revokeGreenStatusStatement;
   }
 
-  public get findPathRelationByAnchorMemoryIdStatement() {
+  public get findPathRelationByAnchorMemoryIdStatement(): SqliteStatement {
     return this.activeStatements().findPathRelationByAnchorMemoryIdStatement;
   }
 
-  public get createPathRelationStatement() {
+  public get createPathRelationStatement(): SqliteStatement {
     return this.activeStatements().createPathRelationStatement;
   }
 
-  public get updatePathRelationLegitimacyStatement() {
+  public get updatePathRelationLegitimacyStatement(): SqliteStatement {
     return this.activeStatements().updatePathRelationLegitimacyStatement;
   }
 
-  public get createSynthesisCapsuleStatement() {
+  public get createSynthesisCapsuleStatement(): SqliteStatement {
     return this.activeStatements().createSynthesisCapsuleStatement;
   }
 

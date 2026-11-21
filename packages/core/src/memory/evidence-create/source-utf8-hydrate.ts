@@ -1,6 +1,6 @@
 import { assertSpanInContent, isUtf8Boundary, sliceUtf8Span } from "./source-span-views.js";
 
-export type Utf8HydrateChunk = Readonly<{
+type Utf8HydrateChunk = Readonly<{
   readonly status: "chunk";
   readonly text: string;
   readonly start_offset: number;
@@ -9,7 +9,7 @@ export type Utf8HydrateChunk = Readonly<{
   readonly next_offset: number | null;
 }>;
 
-export type Utf8HydrateUnavailable = Readonly<{
+type Utf8HydrateUnavailable = Readonly<{
   readonly status: "unavailable";
   readonly reason: "out_of_range" | "utf8_boundary";
 }>;
@@ -57,7 +57,7 @@ export function hydrateUtf8Chunk(
   };
 }
 
-export function normalizeSourceLiteralNfc(text: string): string {
+function normalizeSourceLiteralNfc(text: string): string {
   return text.normalize("NFC");
 }
 

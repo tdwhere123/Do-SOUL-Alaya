@@ -3,7 +3,6 @@ import {
   type OfficialApiSignalDraft,
   type OfficialApiSignalParseOptions
 } from "../official-api-signal-parser.js";
-import type { OfficialApiInterpretationEntryRejection } from "./source-interpretation-receive.js";
 import {
   computeOfficialApiSourceCorpusIdentity,
   officialApiExtractionRequestSourceBinding,
@@ -21,9 +20,6 @@ import {
 const OFFICIAL_API_REQUEST_RECEIVE_CONTRACT_VERSION = 1 as const;
 const OFFICIAL_API_REQUEST_RECEIVE_PRODUCER =
   "official-api-request-receive-v1" as const;
-export const OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION = 1 as const;
-export const OFFICIAL_API_GARDEN_COMPILE_PRODUCER =
-  "official-api-garden-compile-v1" as const;
 export const OFFICIAL_API_SEMANTIC_PRESERVATION_CLAIM =
   "not_claimed_by_request_completion" as const;
 
@@ -42,7 +38,7 @@ type OfficialApiRequestEntryRejectionReason =
   | "missing_response"
   | "transport_unknown";
 
-export interface OfficialApiRequestEntryRejection {
+interface OfficialApiRequestEntryRejection {
   readonly index: number;
   readonly reason: OfficialApiRequestEntryRejectionReason;
   readonly assertion_id?: number;
@@ -54,26 +50,6 @@ export interface OfficialApiRequestReceiveReceipt {
   readonly status: OfficialApiRequestReceiveStatus;
   readonly drafts: readonly OfficialApiSignalDraft[];
   readonly rejections: readonly OfficialApiRequestEntryRejection[];
-}
-
-export interface OfficialApiGardenCompilePendingBatch {
-  readonly source_corpus_identity: string;
-  readonly batch_index: number;
-  readonly batch_count: number;
-  readonly assertion_ids: readonly number[];
-}
-
-export interface OfficialApiGardenCompileReceipt {
-  readonly contract_version: typeof OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION;
-  readonly producer: typeof OFFICIAL_API_GARDEN_COMPILE_PRODUCER;
-  readonly status: "partial";
-  readonly drafts: readonly OfficialApiSignalDraft[];
-  readonly rejections: readonly (OfficialApiRequestEntryRejection | OfficialApiInterpretationEntryRejection)[];
-  readonly pending_batches: readonly OfficialApiGardenCompilePendingBatch[];
-  readonly catalog: Pick<
-    SourceAssertionCatalogPage,
-    "inventory_count" | "coverage" | "residual" | "next_cursor"
-  >;
 }
 
 const REQUIRE_GRAPH_FOR_MEMBERSHIP: Readonly<Record<SourceBoundF3Capability, boolean>> = {
@@ -167,36 +143,6 @@ export function parseOfficialApiRequestSignals(
     throw new Error("official API request receive is incomplete");
   }
   return received.drafts;
-}
-
-export function createOfficialApiGardenCompileReceipt(input: {
-  readonly drafts: readonly OfficialApiSignalDraft[];
-  readonly rejections: OfficialApiGardenCompileReceipt["rejections"];
-  readonly pending: readonly OfficialApiExtractionRequest[];
-  readonly catalog: Pick<
-    SourceAssertionCatalogPage,
-    "inventory_count" | "coverage" | "residual" | "next_cursor"
-  >;
-}): OfficialApiGardenCompileReceipt {
-  return Object.freeze({
-    contract_version: OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION,
-    producer: OFFICIAL_API_GARDEN_COMPILE_PRODUCER,
-    status: "partial" as const,
-    drafts: Object.freeze([...input.drafts]),
-    rejections: Object.freeze([...input.rejections]),
-    pending_batches: Object.freeze(input.pending.map((request) => Object.freeze({
-      source_corpus_identity: request.source_corpus_identity,
-      batch_index: request.batch_index,
-      batch_count: request.batch_count,
-      assertion_ids: Object.freeze(request.source_assertions.map((assertion) => assertion.assertion_id))
-    }))),
-    catalog: Object.freeze({
-      inventory_count: input.catalog.inventory_count,
-      coverage: input.catalog.coverage,
-      residual: input.catalog.residual,
-      next_cursor: input.catalog.next_cursor
-    })
-  });
 }
 
 export function receiveOfficialApiRequestSignals(

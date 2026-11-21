@@ -1,9 +1,9 @@
-export const ENGLISH_MONTHS = Object.freeze([
+const ENGLISH_MONTHS = Object.freeze([
   "january", "february", "march", "april", "may", "june",
   "july", "august", "september", "october", "november", "december"
 ] as const);
 
-export const ENGLISH_MONTH_ABBREV = Object.freeze([
+const ENGLISH_MONTH_ABBREV = Object.freeze([
   "jan", "feb", "mar", "apr", "may", "jun",
   "jul", "aug", "sep", "oct", "nov", "dec"
 ] as const);
@@ -17,12 +17,8 @@ export function monthIndexFromName(name: string): number | null {
   return short >= 0 ? short + 1 : null;
 }
 
-export function englishMonthName(month: number): string | null {
+function englishMonthName(month: number): string | null {
   return ENGLISH_MONTHS[month - 1] ?? null;
-}
-
-export function englishMonthAbbrev(month: number): string | null {
-  return ENGLISH_MONTH_ABBREV[month - 1] ?? null;
 }
 
 export function isValidMonthDay(month: number, day: number): boolean {

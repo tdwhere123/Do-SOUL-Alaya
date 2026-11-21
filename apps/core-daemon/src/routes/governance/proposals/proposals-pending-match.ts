@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PublicToolError } from "@do-soul/alaya-protocol";
+import type { PublicToolError, SoulListPendingProposalsResponse } from "@do-soul/alaya-protocol";
 import { HTTP_REVIEWER_AGENT_TARGET } from "../../../mcp-memory/proposal/reviewer-surfaces.js";
 import type { ProposalRouteServices } from "./proposals-types.js";
 
@@ -32,18 +32,7 @@ export async function findExistingPendingMatch(
   if (!result.ok) {
     return { ok: false, error: result.error };
   }
-  const output = result.output as
-    | {
-        readonly proposals?: ReadonlyArray<{
-          readonly proposal_id: string;
-          readonly target_object_id: string;
-          readonly proposed_changes: Record<string, unknown> | null;
-        }>;
-      }
-    | null
-    | undefined;
-  const proposals = output?.proposals ?? [];
-  if (proposals.length === 0) return { ok: true, proposalId: null };
+  const { proposals } = result.output as SoulListPendingProposalsResponse;
   const targetKey = canonicalizeChanges(input.proposed_changes);
   for (const proposal of proposals) {
     if (proposal.target_object_id !== input.memoryId) continue;

@@ -745,7 +745,7 @@ function sourceDomainCoverageOf(
   };
 }
 
-export function sourceDomainSettleCoverage(session: ObservationSession): SourceDomainCoverage {
+function sourceDomainSettleCoverage(session: ObservationSession): SourceDomainCoverage {
   const coverage = sourceDomainCoverageOf(session.interpretation, session.input);
   // Memory-seed exhaustion is not source-domain coverage.
   if (coverage.hasSourceReader !== true) return coverage;

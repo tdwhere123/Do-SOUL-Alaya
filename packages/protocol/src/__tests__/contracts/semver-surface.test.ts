@@ -179,7 +179,6 @@ describe("semver-surface", () => {
     expect(names).toEqual(expect.arrayContaining([
       "EventLogEntrySchema",
       "EventLogPayloadSchema",
-      "MessageDeltaEventSchema",
       "MessageCompletedEventSchema",
       "GovernanceResolutionPayloadSchema",
       "ContextDeliveryRecordSchema",

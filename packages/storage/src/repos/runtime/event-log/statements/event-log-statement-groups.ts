@@ -1,7 +1,7 @@
 import type { StorageDatabase } from "../../../../sqlite/db.js";
 import { EVENT_LOG_SELECT_COLUMNS } from "./append-sql.js";
 
-export interface SqliteStatement {
+interface SqliteStatement {
   run(...args: readonly unknown[]): { readonly changes: number };
   get(...args: readonly unknown[]): unknown;
   all(...args: readonly unknown[]): readonly unknown[];

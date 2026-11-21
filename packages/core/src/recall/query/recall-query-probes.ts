@@ -3,7 +3,7 @@ import { extractTemporalTerms } from "@do-soul/alaya-graph-algorithms";
 import { recallEnvRaw } from "../../runtime/config/recall-env-access.js";
 import { isCjkSegmentationCandidate, segmentCjkRun } from "@do-soul/alaya-cjk-segmentation";
 
-export type RecallQuerySubjectHint = "self_reference";
+type RecallQuerySubjectHint = "self_reference";
 
 export interface RecallQueryProbes {
   readonly normalized_query: string | null;
@@ -352,7 +352,7 @@ export function expandLexicalTerms(lexicalTerms: readonly string[]): readonly st
 }
 
 // Conservative noun-plural folding; verb stemming remains owned by the FTS tokenizer.
-export function foldLexicalMorphology(term: string): readonly string[] {
+function foldLexicalMorphology(term: string): readonly string[] {
   if (!/^[a-z][a-z'-]*$/u.test(term)) {
     return [];
   }

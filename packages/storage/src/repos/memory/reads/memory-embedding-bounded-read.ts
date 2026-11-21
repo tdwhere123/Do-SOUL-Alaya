@@ -63,7 +63,7 @@ export interface BoundedEmbeddingReadReceipt {
   readonly truncated: boolean;
 }
 
-export interface EmbeddingProfileIdentity {
+interface EmbeddingProfileIdentity {
   readonly providerKind: string;
   readonly modelId: string;
   readonly schemaVersion: number;

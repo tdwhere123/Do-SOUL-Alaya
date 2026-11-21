@@ -6,7 +6,7 @@ import { canonicalJson, sameSourceEvidenceRoot, sourceEvidenceRootTarget,
 import { sourceGoldRootIdentity } from "./source-semantic-library-recall.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { CoreError } from "../../shared/errors.js";
-import { selectSourceRecallPage, improveSourceRecallPage, type SourceRecallChoice,
+import { selectSourceRecallPage, type SourceRecallChoice,
   type SourceRecallSelection, type SourceRecallTupleIndex, type SourceRecallEvidenceSets } from "./source-recall-selection.js";
 
 /** A root's complete executed witness forests and necessary source bytes are indivisible. */
@@ -40,14 +40,13 @@ export function selectSourceSemanticLibraryPageWithEvidenceSetCoverage(input: Se
 }
 
 /** Ordinals borrow the canonical inventory for this synchronous policy call only. */
-function nativeSelection(input: SelectionInput, novelty: boolean, evidenceSets: boolean,
-  incumbent: readonly SourceSemanticLibraryPackage[] = []): SourceRecallSelection {
-  const rowAt = (member: number) => member < incumbent.length ? incumbent[member]! : input.candidates[member - incumbent.length]!;
+function nativeSelection(input: SelectionInput, novelty: boolean, evidenceSets: boolean): SourceRecallSelection {
+  const rowAt = (member: number) => input.candidates[member]!;
   const materialize = (choice: SourceRecallChoice): SourceSemanticLibraryPackage => ({
     ...rowAt(choice.member), selection_basis: choice.selection_basis
   });
   return {
-    count: incumbent.length + input.candidates.length, entry: i => rowAt(i).entry, root: i => root(rowAt(i)),
+    count: input.candidates.length, entry: i => rowAt(i).entry, root: i => root(rowAt(i)),
     accessPosition: i => rowAt(i).access_position, hasMandatorySupport: i => rowAt(i).proofs.length > 0,
     support: i => {
       const row = rowAt(i);
@@ -66,17 +65,6 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean, evidenceSets
   return selectSourceRecallPage(nativeSelection(input, novelty, evidenceSets), pairs && !novelty).map(choice => ({
     ...input.candidates[choice.member]!, selection_basis: choice.selection_basis
   }));
-}
-export function improveSourceSemanticLibraryPage(input: Pick<SelectionInput, "candidates" | "fits" | "meter"> & {
-  page: readonly SourceSemanticLibraryPackage[];
-}): readonly SourceSemanticLibraryPackage[] {
-  // Two borrowed inventory segments avoid another candidate copy or retained mapping table.
-  let selected = input.page;
-  const native = nativeSelection({ ...input, fits: page => {
-    const fits = input.fits(page); if (fits) selected = page; return fits;
-  } }, false, false, input.page);
-  improveSourceRecallPage(native, input.page.length);
-  return selected;
 }
 
 function root(row: SourceSemanticLibraryPackage): string {

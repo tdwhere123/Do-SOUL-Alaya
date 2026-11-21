@@ -237,7 +237,7 @@ describe("routes-config port batch", () => {
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
         event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
-        caused_by: "inspector",
+        caused_by: "http-config",
         payload_json: {
           entry_id: "audit-live",
           event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,

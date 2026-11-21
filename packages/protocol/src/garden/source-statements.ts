@@ -103,7 +103,7 @@ export function sourceStatementArtifact(bound: BoundSourceStatement, evidenceId:
     key_digest: hashContentDigest(key, sha256), key_text: key, bound: captured });
 }
 
-export function sourceStatementKey(statement: SourceStatement): string {
+function sourceStatementKey(statement: SourceStatement): string {
   const parsed = SourceStatementSchema.parse(statement);
   return `${parsed.text}\n${parsed.relation}`;
 }

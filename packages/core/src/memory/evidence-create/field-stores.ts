@@ -60,7 +60,7 @@ export type StoredSourceRecord = Readonly<{
   readonly content_bytes: string;
 }>;
 
-export type SourceRecordEvidenceBinding = Readonly<{
+type SourceRecordEvidenceBinding = Readonly<{
   readonly workspace_id: string;
   readonly record_id: string;
   readonly evidence_object_id: string;

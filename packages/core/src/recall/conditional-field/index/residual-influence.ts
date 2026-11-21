@@ -62,7 +62,7 @@ export function classifyResidualInfluence(
   return "irrelevant";
 }
 
-export function residualAffectsGrade(region: CoverageRegion): boolean {
+function residualAffectsGrade(region: CoverageRegion): boolean {
   const effects = semanticEffectsOf(region);
   return effects.includes("grade_bound") || effects.includes("membership");
 }

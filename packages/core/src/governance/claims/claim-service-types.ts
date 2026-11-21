@@ -3,9 +3,7 @@ import type {
   ClaimLifecycleState as ClaimLifecycleStateType,
   EnforcementLevel as EnforcementLevelType,
   EffectDecisionReceipt,
-  EventLogEntry,
-  PrecedenceBasis as PrecedenceBasisType,
-  TransitionCausedBy as TransitionCausedByType
+  EventLogEntry
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher, EventPublisherInput } from "../../runtime/event-publisher.js";
 import type { SlotElectionResult } from "../../surfaces/slot-service.js";
@@ -103,14 +101,3 @@ export interface ClaimServiceDependencies {
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
 }
-
-export type ClaimHelperInputs = {
-  readonly claim: Readonly<ClaimForm>;
-  readonly domain: string;
-  readonly qualifiers: Record<string, string>;
-  readonly reason: string;
-  readonly lifecycleState: ClaimLifecycleStateType;
-  readonly causedBy: TransitionCausedByType;
-  readonly precedence: PrecedenceBasisDecisionInput;
-  readonly precedenceResult?: PrecedenceBasisType;
-};

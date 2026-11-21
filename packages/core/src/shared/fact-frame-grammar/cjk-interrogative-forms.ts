@@ -12,11 +12,6 @@ export const CJK_LOCATION_RESULT_FORMS = cjkWhSurfaces(
 export const CJK_COPULAR_PREDICATE_FORMS = ["要", "是"] as const;
 export const CJK_LOCATIVE_LINKER_FORM = "在" as const;
 
-export const CJK_INTERROGATIVE_RESULT_FORMS = Object.freeze([
-  ...CJK_COPULAR_MEASURE_FORMS,
-  ...CJK_LOCATION_RESULT_FORMS
-]);
-
 function cjkWhSurfaces(surfaces: readonly string[]): readonly string[] {
   return Object.freeze(surfaces.filter((surface) => /\p{Script=Han}/u.test(surface)));
 }

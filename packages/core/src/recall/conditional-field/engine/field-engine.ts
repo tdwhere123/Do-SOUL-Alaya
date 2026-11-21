@@ -94,7 +94,7 @@ export type FieldObservationEffect = Readonly<{
   readonly discovery?: RoutingDiscovery;
 }>;
 
-export type ObserverWorkUnits = Readonly<{
+type ObserverWorkUnits = Readonly<{
   readonly work_units: number;
 }>;
 
