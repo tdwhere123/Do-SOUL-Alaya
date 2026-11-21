@@ -135,7 +135,7 @@ export interface MemoryEntryRepo {
     fields: MemoryEntryRepoUpdateFields,
     callbacks: {
       readonly beforeUpdate?: () => void;
-      readonly afterUpdate?: () => void;
+      readonly afterUpdate?: (updated: Readonly<MemoryEntry>) => void;
     },
     workspaceId?: string
   ): Readonly<MemoryEntry>;

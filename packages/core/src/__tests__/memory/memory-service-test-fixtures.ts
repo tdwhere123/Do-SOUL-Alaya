@@ -166,7 +166,7 @@ export function createDependencies(overrides: Partial<MemoryServiceDependencies>
       } else {
         void repoUpdateScopedSpy(objectId, workspaceId, fields);
       }
-      callbacks.afterUpdate?.();
+      callbacks.afterUpdate?.(updated);
       return updated;
     }
   );

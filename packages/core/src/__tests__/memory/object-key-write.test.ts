@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FormationKind,
+  GreenGovernanceEventType,
   MemoryDimension,
+  MemoryGovernanceEventType,
   ScopeClass,
   SourceKind,
   type EvidenceCapsule
@@ -13,7 +15,7 @@ import {
   readObjectKeyEvidenceSources,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { MemoryService } from "../../memory/memory-service.js";
+import { MemoryService, type MemoryServiceDependencies } from "../../memory/memory-service.js";
 import { createMemoryObjectKeyWriter } from "../../memory/object-keys/write-service.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import {
@@ -34,45 +36,64 @@ afterEach(() => {
 });
 
 describe("MemoryService object-key materialization", () => {
+  it("rolls back create and audit when SQLite cannot insert an object key", async () => {
+    const notifications: string[] = [];
+    const { database, eventLogRepo, memoryEntryRepo, service } = await setupKeyWrite({
+      runtimeNotifier: { notifyEntry: (event) => { notifications.push(event.event_type); } }
+    });
+    database.connection.exec(`CREATE TRIGGER reject_key_insert BEFORE INSERT ON memory_object_keys
+      BEGIN SELECT RAISE(ABORT, 'key insert failed'); END`);
+
+    await expect(service.create(keyedInput())).rejects.toThrow("key insert failed");
+
+    await expect(memoryEntryRepo.findById(MEMORY_ID)).resolves.toBeNull();
+    await expect(eventLogRepo.queryByEntity("memory_entry", MEMORY_ID)).resolves.toEqual([]);
+    expect(notifications).toEqual([]);
+  });
+
+  it("rolls back a failed key rewrite and notifies the committed retry before Green revocation", async () => {
+    const order: string[] = [];
+    const { database, eventLogRepo, keys, memoryEntryRepo, service } = await setupKeyWrite({
+      runtimeNotifier: { notifyEntry: (event) => { order.push(event.event_type); } },
+      greenService: {
+        reevaluate: async () => {},
+        pierce: async () => { order.push(GreenGovernanceEventType.SOUL_GREEN_PIERCED); }
+      }
+    });
+    await service.create(keyedInput());
+    const before = await memoryEntryRepo.findById(MEMORY_ID);
+    expect(before).not.toBeNull();
+    const originalKeys = keys.listByOwner(REAL_SQLITE_TEST_WORKSPACE_ID, MEMORY_ID);
+    expect(originalKeys.length).toBeGreaterThan(0);
+    order.length = 0;
+    database.connection.exec(`CREATE TRIGGER reject_key_delete BEFORE DELETE ON memory_object_keys
+      BEGIN SELECT RAISE(ABORT, 'key delete failed'); END`);
+    const update = () => service.update(MEMORY_ID, { evidence_refs: [] }, "manual_update");
+
+    await expect(update()).rejects.toThrow("key delete failed");
+    await expect(memoryEntryRepo.findById(MEMORY_ID)).resolves.toEqual(before);
+    expect(keys.listByOwner(REAL_SQLITE_TEST_WORKSPACE_ID, MEMORY_ID)).toEqual(originalKeys);
+    expect((await eventLogRepo.queryByEntity("memory_entry", MEMORY_ID)).map((event) => event.event_type))
+      .toEqual([MemoryGovernanceEventType.SOUL_MEMORY_CREATED]);
+    expect(order).toEqual([]);
+
+    database.connection.exec("DROP TRIGGER reject_key_delete");
+    await expect(update()).resolves.toMatchObject({ evidence_refs: [] });
+    expect(keys.listByOwner(REAL_SQLITE_TEST_WORKSPACE_ID, MEMORY_ID)).toEqual([]);
+    expect(order).toEqual([
+      MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
+      GreenGovernanceEventType.SOUL_GREEN_PIERCED
+    ]);
+  });
+
   it.each([false, true])("persists gist-remainder keys on create with notify failure=%s", async (notifyFails) => {
-    const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRecallRealStorage(
-      (db) => databases.add(db)
-    );
-    await evidenceCapsuleRepo.create(capsule());
-    const keys = new SqliteMemoryObjectKeyRepo(database);
-    const service = new MemoryService({
-      now: () => "2026-06-01T00:00:00.000Z",
-      generateObjectId: () => MEMORY_ID,
-      evidenceService: {
-        findById: (objectId) => evidenceCapsuleRepo.findById(objectId),
-        findByIds: (workspaceId, objectIds) => evidenceCapsuleRepo.findByIds(workspaceId, objectIds)
-      },
-      eventLogRepo: new SqliteEventLogRepo(database),
-      memoryEntryRepo,
+    const { keys, service } = await setupKeyWrite({
       runtimeNotifier: { notifyEntry: async () => {
         if (notifyFails) throw new Error("notification interrupted");
-      } },
-      objectKeyWriter: createMemoryObjectKeyWriter({
-        readEvidenceSources: (workspaceId, evidenceIds) =>
-          readObjectKeyEvidenceSources(database, workspaceId, evidenceIds),
-        replaceOwnerKeys: (workspaceId, ownerId, minted, expected) =>
-          keys.replaceOwnerKeys(workspaceId, ownerId, minted, expected)
-      })
+      } }
     });
 
-    const creation = service.create({
-      created_by: "user_action",
-      dimension: MemoryDimension.FACT,
-      source_kind: SourceKind.USER,
-      formation_kind: FormationKind.EXPLICIT,
-      scope_class: ScopeClass.PROJECT,
-      content: "I took my niece to the museum.",
-      domain_tags: ["smoke"],
-      evidence_refs: [EVIDENCE_ID],
-      workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
-      run_id: REAL_SQLITE_TEST_RUN_ID,
-      surface_id: null
-    });
+    const creation = service.create(keyedInput());
     if (notifyFails) await expect(creation).rejects.toThrow("notification interrupted");
     else await creation;
 
@@ -124,6 +145,45 @@ describe("MemoryService object-key materialization", () => {
     expect((await memoryEntryRepo.findById(MEMORY_ID))?.lifecycle_state).toBe("tombstone");
   });
 });
+
+async function setupKeyWrite(
+  effects: Pick<MemoryServiceDependencies, "runtimeNotifier" | "greenService">
+) {
+  const { database, memoryEntryRepo, evidenceCapsuleRepo } = await createRecallRealStorage(db => databases.add(db));
+  await evidenceCapsuleRepo.create(capsule());
+  const keys = new SqliteMemoryObjectKeyRepo(database);
+  const eventLogRepo = new SqliteEventLogRepo(database);
+  const service = new MemoryService({
+    ...effects, eventLogRepo, memoryEntryRepo,
+    now: () => "2026-06-01T00:00:00.000Z",
+    generateObjectId: () => MEMORY_ID,
+    evidenceService: {
+      findById: id => evidenceCapsuleRepo.findById(id),
+      findByIds: (workspaceId, ids) => evidenceCapsuleRepo.findByIds(workspaceId, ids)
+    },
+    objectKeyWriter: createMemoryObjectKeyWriter({
+      readEvidenceSources: (workspaceId, ids) => readObjectKeyEvidenceSources(database, workspaceId, ids),
+      replaceOwnerKeys: (workspaceId, owner, minted, expected) => keys.replaceOwnerKeys(workspaceId, owner, minted, expected)
+    })
+  });
+  return { database, eventLogRepo, keys, memoryEntryRepo, service };
+}
+
+function keyedInput() {
+  return {
+    created_by: "user_action",
+    dimension: MemoryDimension.FACT,
+    source_kind: SourceKind.USER,
+    formation_kind: FormationKind.EXPLICIT,
+    scope_class: ScopeClass.PROJECT,
+    content: "I took my niece to the museum.",
+    domain_tags: ["smoke"],
+    evidence_refs: [EVIDENCE_ID],
+    workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
+    run_id: REAL_SQLITE_TEST_RUN_ID,
+    surface_id: null
+  };
+}
 
 function capsule(): EvidenceCapsule {
   return {

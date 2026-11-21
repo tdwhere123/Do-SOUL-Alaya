@@ -40,14 +40,15 @@ it("writes soul.memory.updated before persistence and runtime notification with 
         updateWithinTransaction: vi.fn((_objectId, fields, callbacks) => {
           callbacks.beforeUpdate?.();
           order.push("repo_update");
-          callbacks.afterUpdate?.();
-          return Object.freeze({
+          const updated = Object.freeze({
             ...existing,
             content: fields.content ?? existing.content,
             evidence_refs: fields.evidence_refs ?? existing.evidence_refs,
             updated_at: fields.updated_at,
             storage_tier: fields.storage_tier ?? existing.storage_tier
           });
+          callbacks.afterUpdate?.(updated);
+          return updated;
         }),
         archive: vi.fn(async () => {
           throw new Error("not used");

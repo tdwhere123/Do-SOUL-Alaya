@@ -46,12 +46,20 @@ function parseRelationFromGistText(gist: string, sha256: FieldContractSha256) {
   return { relation, digest: hashContentDigest(relation, sha256) };
 }
 
-function relationFromGist(database: StorageDatabase, workspaceId: string, artifactId: string, sha256: FieldContractSha256) {
-  const raw = cachedReadStatement(database,
-    "SELECT gist FROM evidence_capsules WHERE workspace_id=? AND object_id=? AND lifecycle_state='active'")
-    .get(workspaceId, artifactId);
-  if (raw === undefined) return null;
-  return parseRelationFromGistText(readStringField(readRecord(raw, "statement relation gist"), "gist"), sha256);
+function readBoundedRelationGist(database: StorageDatabase, workspaceId: string, artifactId: string,
+  maxBytes: number, sha256: FieldContractSha256) {
+  const raw = cachedReadStatement(database, `SELECT octet_length(gist) AS gist_bytes,
+    CASE WHEN octet_length(gist) <= ? THEN gist ELSE NULL END AS gist
+    FROM evidence_capsules WHERE workspace_id=? AND object_id=? AND lifecycle_state='active'`)
+    .get(maxBytes, workspaceId, artifactId);
+  if (raw === undefined) return { status: "unavailable", gistBytes: 0 } as const;
+  const row = readRecord(raw, "statement relation gist");
+  const gistBytes = readIntegerField(row, "gist_bytes");
+  if (gistBytes > maxBytes) return { status: "read_budget", gistBytes: 0 } as const;
+  const gist = parseRelationFromGistText(readStringField(row, "gist"), sha256);
+  return gist === null
+    ? { status: "unavailable", gistBytes } as const
+    : { status: "ready", gistBytes, ...gist } as const;
 }
 
 export function readStatementRelationText(database: StorageDatabase, records: SqliteFieldSourceRecordRepo,
@@ -65,19 +73,11 @@ export function readStatementRelationText(database: StorageDatabase, records: Sq
     if (dequeue) dequeueStatementRelationPending(database, workspaceId, generationId, rootKey);
     return { status: "unavailable", reason, resources };
   };
-  const need = (work: number, bytes: number) => {
-    if (resources.work + work > budget.work || resources.native_bytes + bytes > budget.native_bytes) {
-      return unknown("statement_relation_text_read_budget");
-    }
-    return null;
-  };
-  const blocked = need(1, 0);
-  if (blocked !== null) return blocked;
+  if (budget.work < 1) return unknown("statement_relation_text_read_budget");
   const generation = readSourceIndexGeneration(database, workspaceId, generationId);
   resources.work++;
   if (generation === null) return unavailable("missing_generation");
-  const targetBudget = need(1, 0);
-  if (targetBudget !== null) return targetBudget;
+  if (resources.work >= budget.work) return unknown("statement_relation_text_read_budget");
   const source = statementTarget(database, workspaceId, generationId, rootKey);
   resources.work++;
   if (source === null || source.auxiliary === undefined) return unavailable("missing_target", true);
@@ -90,21 +90,13 @@ export function readStatementRelationText(database: StorageDatabase, records: Sq
       ? unknown(guard.reason === "read_budget" ? "statement_relation_text_read_budget" : guard.reason)
       : unavailable(guard.reason, true);
   }
-  const gistBudget = need(1, 0);
-  if (gistBudget !== null) return gistBudget;
-  const maxGistBytes = budget.native_bytes - resources.native_bytes;
-  const rawGist = cachedReadStatement(database, `SELECT octet_length(gist) AS gist_bytes,
-    CASE WHEN octet_length(gist) <= ? THEN gist ELSE NULL END AS gist
-    FROM evidence_capsules WHERE workspace_id=? AND object_id=? AND lifecycle_state='active'`)
-    .get(maxGistBytes, source.target.workspace_id, source.auxiliary.artifact_id);
+  if (resources.work >= budget.work) return unknown("statement_relation_text_read_budget");
+  const gist = readBoundedRelationGist(database, source.target.workspace_id, source.auxiliary.artifact_id,
+    budget.native_bytes - resources.native_bytes, sha256);
   resources.work++;
-  if (rawGist === undefined) return unavailable("statement_relation_unavailable", true);
-  const gistRow = readRecord(rawGist, "statement relation gist");
-  const gistBytes = readIntegerField(gistRow, "gist_bytes");
-  if (gistBytes > maxGistBytes) return unknown("statement_relation_text_read_budget");
-  resources.native_bytes += gistBytes;
-  const gist = parseRelationFromGistText(readStringField(gistRow, "gist"), sha256);
-  if (gist === null) return unavailable("statement_relation_unavailable", true);
+  resources.native_bytes += gist.gistBytes;
+  if (gist.status === "read_budget") return unknown("statement_relation_text_read_budget");
+  if (gist.status === "unavailable") return unavailable("statement_relation_unavailable", true);
   return { status: "ready", relation: gist.relation, resources };
 }
 
@@ -132,30 +124,44 @@ export function writeStatementRelationVector(database: StorageDatabase, records:
       || !Number.isSafeInteger(value.token_count) || value.token_count < 1 || value.token_count > profile.max_input_tokens) {
     throw new StorageError("VALIDATION_FAILED", "statement relation vector requires compatible complete statement input");
   }
-  const gist = relationFromGist(database, source.target.workspace_id, source.auxiliary.artifact_id, sha256);
-  if (gist === null || value.input_digest !== gist.digest) {
-    throw new StorageError("VALIDATION_FAILED", "statement relation vector requires the published relation digest");
+  if (resources.work >= input.budget.work) return rejected("read_budget", resources);
+  resources.work++;
+  try {
+    const gist = readBoundedRelationGist(database, source.target.workspace_id, source.auxiliary.artifact_id,
+      input.budget.native_bytes - resources.native_bytes, sha256);
+    resources.native_bytes += gist.gistBytes;
+    if (gist.status === "read_budget") return rejected("read_budget", resources);
+    if (gist.status === "unavailable" || value.input_digest !== gist.digest) {
+      throw new StorageError("VALIDATION_FAILED", "statement relation vector requires the published relation digest");
+    }
+    persistStatementRelationVector(database, input.workspaceId, input.generationId, value);
+    return { status: "accepted", resources };
+  } catch (error) {
+    throw new SourceIndexOperationError(error, resources);
   }
+}
+
+function persistStatementRelationVector(database: StorageDatabase, workspaceId: string, generationId: string,
+  value: SourceIndexStatementRelationVector): void {
+  const dimensions = value.embedding.length;
   const blob = encodeEmbeddingBlob(value.embedding);
   const previous = cachedReadStatement(database, `SELECT dimensions,embedding_blob,token_count,input_digest
     FROM ${RELATION_TABLE} WHERE workspace_id=? AND generation_id=? AND root_key=?`)
-    .get(input.workspaceId, input.generationId, value.root_key);
+    .get(workspaceId, generationId, value.root_key);
   if (previous !== undefined) {
     const persisted = readRecord(previous, "statement relation vector");
-    if (readIntegerField(persisted, "dimensions") !== profile.dimensions
+    if (readIntegerField(persisted, "dimensions") !== dimensions
         || readIntegerField(persisted, "token_count") !== value.token_count
         || readStringField(persisted, "input_digest") !== value.input_digest
         || !readBufferField(persisted, "embedding_blob").equals(blob)) {
       throw new StorageError("CONFLICT", "statement relation vector retry differs from its persisted result");
     }
-    dequeueStatementRelationPending(database, input.workspaceId, input.generationId, value.root_key);
-    return { status: "accepted", resources };
+  } else {
+    database.connection.prepare(`INSERT INTO ${RELATION_TABLE}
+      (workspace_id,generation_id,root_key,input_digest,dimensions,embedding_blob,token_count) VALUES(?,?,?,?,?,?,?)`)
+      .run(workspaceId, generationId, value.root_key, value.input_digest, dimensions, blob, value.token_count);
   }
-  database.connection.prepare(`INSERT INTO ${RELATION_TABLE}
-    (workspace_id,generation_id,root_key,input_digest,dimensions,embedding_blob,token_count) VALUES(?,?,?,?,?,?,?)`)
-    .run(input.workspaceId, input.generationId, source.root_key, value.input_digest, profile.dimensions, blob, value.token_count);
-  dequeueStatementRelationPending(database, input.workspaceId, input.generationId, source.root_key);
-  return { status: "accepted", resources };
+  dequeueStatementRelationPending(database, workspaceId, generationId, value.root_key);
 }
 
 function overlayTableMissing(error: unknown): boolean {

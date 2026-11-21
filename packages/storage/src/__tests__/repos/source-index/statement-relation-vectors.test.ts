@@ -10,10 +10,12 @@ afterEach(() => { for (const environment of opened.splice(0)) environment.databa
 const QUERY = { work_units: 100_000, memory_bytes: 10_000_000 };
 const VECTOR = new Float32Array([0.6, 0.8, 0]);
 
-function setupStatement() {
+function setupStatement(messageText = "I ordered a café cocktail.") {
   const environment = fixture(); opened.push(environment);
-  const published = publishMessages(environment, [{ role: "user", text: "I ordered a café cocktail." }]);
-  const statement = publishStatement(environment, published, "relation-overlay");
+  const published = publishMessages(environment, [{ role: "user", text: messageText }]);
+  const statement = publishStatement(environment, published, "relation-overlay", 0, {
+    statement: { text: "I ordered a café cocktail.", relation: "reported event" }
+  });
   const generation = environment.index.begin(environment.index.select(WORKSPACE, configuration()));
   environment.index.capturePage(WORKSPACE, generation.generation_id, 8, BUDGET);
   const targets = environment.index.listTargets(WORKSPACE, generation.generation_id, null, 8);
@@ -67,6 +69,34 @@ it("rejects a digest that is not the published relation and a retry that changes
   expect(() => environment.index.writeStatementRelationVector(WORKSPACE, generation.generation_id, {
     root_key: source.root_key, input_digest: digest, embedding: new Float32Array([0, 1, 0]), token_count: 2
   })).toThrow(/retry differs/u);
+});
+
+it("charges one gist lookup and only transfers the gist within the write budget", () => {
+  // A large gist leaves room for the native guard's fixed reservation even at its one-byte refusal boundary.
+  const { environment, generation, source, digest } = setupStatement(`I ordered a café cocktail. ${"é".repeat(12_000)}`);
+  const db = environment.database.connection;
+  const generationId = generation.generation_id;
+  const text = environment.index.readStatementRelationText(WORKSPACE, generationId, source.root_key, BUDGET);
+  expect(text.status).toBe("ready");
+  const { gist_bytes: gistBytes } = db.prepare("SELECT octet_length(gist) AS gist_bytes FROM evidence_capsules WHERE object_id = ?")
+    .get(source.auxiliary!.artifact_id) as { gist_bytes: number };
+  expect(gistBytes).toBeGreaterThan(0);
+  // Text reads also account for the generation and target lookups.
+  const full = { work: text.resources.work - 2, native_bytes: text.resources.native_bytes };
+  const guard = { work: full.work - 1, native_bytes: full.native_bytes - gistBytes };
+  const value = { root_key: source.root_key, input_digest: digest, embedding: VECTOR, token_count: 2 };
+  const write = (budget: typeof full) => environment.index.writeStatementRelationVector(WORKSPACE, generationId, value, budget);
+
+  expect(write({ ...full, work: guard.work })).toEqual({
+    status: "rejected", reason: "read_budget", resources: guard
+  });
+  expect(write({ ...full, native_bytes: full.native_bytes - 1 })).toEqual({
+    status: "rejected", reason: "read_budget", resources: { ...guard, work: full.work }
+  });
+  expect(db.prepare("SELECT count(*) FROM source_statement_relation_vectors").pluck().get()).toBe(0);
+  expect(db.prepare("SELECT count(*) FROM source_statement_relation_pending").pluck().get()).toBe(1);
+  expect(write(full)).toEqual({ status: "accepted", resources: full });
+  expect(write(full)).toEqual({ status: "accepted", resources: full });
 });
 
 it("returns nulls when the overlay was never written and unknown when the blob is corrupt", () => {

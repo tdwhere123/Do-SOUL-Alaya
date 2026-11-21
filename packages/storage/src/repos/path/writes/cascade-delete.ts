@@ -134,6 +134,9 @@ export function cascadeDeleteWorkspace(connection: SqliteConnection, workspaceId
         WHERE task_id IN (SELECT task_id FROM garden_embedding_backfill_runs WHERE workspace_id = ?)
       `).run(workspaceId);
       connection.prepare("DELETE FROM reconciliation_leases WHERE lease_key = ?").run(workspaceId);
+      // Claim election lease keys encode [workspaceId, targetObjectId] as JSON.
+      const claimLeasePrefix = `claim-election:[${JSON.stringify(workspaceId)},`;
+      connection.prepare("DELETE FROM claim_election_leases WHERE instr(lease_key, ?) = 1").run(claimLeasePrefix);
       for (const table of WORKSPACE_OWNED_ROWS) {
         connection.prepare(`DELETE FROM ${table} WHERE workspace_id = ?`).run(workspaceId);
       }

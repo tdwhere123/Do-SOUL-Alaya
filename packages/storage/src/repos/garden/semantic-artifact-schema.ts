@@ -16,14 +16,11 @@ const WORKSPACE_ARTIFACT_TABLES = {
 export function deleteGardenSemanticWorkspaceRows(
   db: SqliteConnection,
   phase: keyof typeof WORKSPACE_ARTIFACT_TABLES,
-  workspaceId?: string
+  workspaceId: string
 ): void {
   const installed = new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").pluck().all());
-  const args = workspaceId === undefined ? [] : [workspaceId];
-  const scope = workspaceId === undefined
-    ? "NOT IN (SELECT workspace_id FROM workspaces WHERE workspace_id IS NOT NULL)" : "= ?";
   for (const table of WORKSPACE_ARTIFACT_TABLES[phase]) {
-    if (installed.has(table)) db.prepare(`DELETE FROM ${table} WHERE workspace_id ${scope}`).run(...args);
+    if (installed.has(table)) db.prepare(`DELETE FROM ${table} WHERE workspace_id = ?`).run(workspaceId);
   }
 }
 

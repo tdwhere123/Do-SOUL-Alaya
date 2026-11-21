@@ -58,13 +58,6 @@ export function dropWorkspaceLexicalDomains(connection: SqliteConnection, worksp
   }
 }
 
-export function pruneOrphanedLexicalDomains(connection: SqliteConnection): void {
-  const retained = new Set(connection.prepare("SELECT generation_id FROM source_index_lexical_generations").pluck().all());
-  for (const generation of installedLexicalDomains(connection)) {
-    if (!retained.has(generation)) dropLexicalDomain(connection, generation);
-  }
-}
-
 function installedLexicalDomains(connection: Pick<SqliteConnection, "prepare">): ReadonlySet<string> {
   return new Set(connection.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
     .map(raw => readStringField(readRecord(raw, "lexical domain table"), "name"))

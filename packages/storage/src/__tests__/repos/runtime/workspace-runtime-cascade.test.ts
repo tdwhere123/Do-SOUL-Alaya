@@ -1,16 +1,12 @@
-import { readFileSync } from "node:fs";
-import BetterSqlite3 from "better-sqlite3";
 import { expect, it } from "vitest";
 import { WorkspaceRunEventType } from "@do-soul/alaya-protocol";
 import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { SqliteClaimElectionLeaseRepo } from "../../../repos/lease/reconciliation-lease-repo.js";
 import { initializeSemanticArtifactCandidateSchema } from "../../../repos/garden/semantic-artifact-schema.js";
 import { createLexicalDomain, lexicalDomainTables } from "../../../repos/source-index/lexical-domain.js";
 import { initDatabase, type SqliteConnection } from "../../../sqlite/db.js";
-import { registerRetainedSourceChunkDigest } from "../../../sqlite/retained-source-chunk-digest.js";
-import { applySchemaMigration } from "../../../sqlite/schema-migration.js";
-import { registerUtcInstantComparison } from "../../../sqlite/utc-instant-comparison.js";
-import { applyBaselineSql, seedWorkspaceRow } from "../../migrations/apply-baseline.js";
+import { seedWorkspaceRow } from "../../migrations/apply-baseline.js";
 
 const NOW = "2026-11-01T00:00:00.000Z";
 const TABLES = [
@@ -36,6 +32,12 @@ it("deletes the workspace runtime closure and retains its audit with foreign key
     seedWorkspaceRow(connection, "keep");
     seedRuntime(connection, "keep");
     seedRuntime(connection, "remove");
+    const leases = new SqliteClaimElectionLeaseRepo(database);
+    const keepKey = 'claim-election:["keep","claim"]';
+    const removeKey = 'claim-election:["remove","claim"]';
+    const expires = "2026-11-01T00:05:00.000Z";
+    expect(leases.tryAcquire(keepKey, "holder", NOW, expires)).not.toBeNull();
+    expect(leases.tryAcquire(removeKey, "holder", NOW, expires)).not.toBeNull();
     connection.prepare(`
       INSERT INTO source_records
         (workspace_id, record_id, source_id, source_version, content_digest, recorded_at, operator_id, source_body)
@@ -52,43 +54,14 @@ it("deletes the workspace runtime closure and retains its audit with foreign key
     new SqliteWorkspaceRepo(database).delete("remove");
 
     expectRuntimeRows(connection, ["keep"]);
+    expect(leases.findByKey(removeKey)).toBeNull();
+    expect(leases.findByKey(keepKey)).not.toBeNull();
     expect(connection.prepare("SELECT workspace_id FROM workspaces").pluck().all()).toEqual(["keep"]);
     expect(connection.prepare("SELECT workspace_id FROM source_records").all()).toEqual([]);
     await expect(events.queryByWorkspace("remove")).resolves.toEqual([audit]);
     expect(connection.pragma("foreign_key_check")).toEqual([]);
   } finally {
     database.close();
-  }
-});
-
-it("migration 050 purges pre-existing runtime orphans while retaining live workspace rows", () => {
-  const db = new BetterSqlite3(":memory:");
-  try {
-    registerRetainedSourceChunkDigest(db);
-    registerUtcInstantComparison(db);
-    db.pragma("foreign_keys = OFF");
-    applyBaselineSql(db, 49);
-    db.pragma("foreign_keys = ON");
-    initializeSemanticArtifactCandidateSchema(db);
-    seedWorkspaceRow(db, "keep");
-    seedRuntime(db, "keep");
-    seedRuntime(db, "remove");
-    expectRuntimeRows(db, ["keep", "remove"]);
-    db.prepare(`
-      INSERT INTO proof_effect_decisions VALUES
-        ('keep', 'receipt', 2, 'reviewer', 'prior-run', 'proposal', 'erase', 'source', 'keep', ?,
-         'allow', '[]', '[]', 'frontier', 'policy', '1', ?)
-    `).run(NOW, NOW);
-
-    const migration = readFileSync(new URL("../../../migrations/050-cascade-delete-orphan-cleanup.sql", import.meta.url), "utf8");
-    db.transaction(() => applySchemaMigration(db, 50, "runtime", migration)).immediate();
-
-    expectRuntimeRows(db, ["keep"]);
-    expect(db.prepare("SELECT run_id FROM proof_effect_decisions WHERE request_digest = 'receipt'").pluck().get())
-      .toBe("prior-run");
-    expect(db.pragma("foreign_key_check")).toEqual([]);
-  } finally {
-    db.close();
   }
 });
 

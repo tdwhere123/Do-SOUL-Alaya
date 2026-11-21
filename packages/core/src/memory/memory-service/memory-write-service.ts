@@ -11,6 +11,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { scheduleAuditedAsyncSideEffect } from "../../runtime/async-side-effect-auditor.js";
+import { bindEventPublisher, type EventPublisher } from "../../runtime/event-publisher.js";
 import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
 import { appendMemoryEventLogSynchronously } from "./memory-audit-append.js";
 import type {
@@ -61,13 +62,17 @@ export interface MemoryWriteServiceDependencies {
 // evidence refs before mutation.
 export class MemoryWriteService {
   private readonly dependencies: MemoryWriteServiceDependencies;
-  private readonly generateObjectId: () => string;
   private readonly now: () => string;
+  private readonly eventPublisher: EventPublisher;
 
   public constructor(dependencies: MemoryWriteServiceDependencies) {
     this.dependencies = dependencies;
-    this.generateObjectId = dependencies.generateObjectId;
     this.now = dependencies.now;
+    this.eventPublisher = bindEventPublisher({
+      eventLogRepo: dependencies.eventLogRepo,
+      runtimeNotifier: dependencies.runtimeNotifier,
+      purpose: "MemoryService"
+    });
   }
 
   public async create(input: MemoryEntryInput): Promise<Readonly<MemoryEntry>> {
@@ -75,6 +80,34 @@ export class MemoryWriteService {
       enqueueEnrichment: enrichmentIntent, object_id: reservedObjectId, assertSourceCurrent, persistSourceStatementDependency, ...memoryEntryInput
     } = input;
     const enqueueEnrichment = freezeEnrichmentIntent(enrichmentIntent);
+    const memoryEntry = this.buildMemoryEntry(memoryEntryInput, reservedObjectId);
+    await this.validateEvidenceRefs(memoryEntry.workspace_id, memoryEntry.evidence_refs);
+    const eventInput = {
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
+      entity_type: "memory_entry",
+      entity_id: memoryEntry.object_id,
+      workspace_id: memoryEntry.workspace_id,
+      run_id: memoryEntry.run_id,
+      caused_by: memoryEntry.created_by,
+      payload_json: SoulMemoryCreatedPayloadSchema.parse({
+        object_id: memoryEntry.object_id,
+        object_kind: memoryEntry.object_kind,
+        workspace_id: memoryEntry.workspace_id,
+        run_id: memoryEntry.run_id
+      })
+    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+    const { created, event } = this.createRowAtomically(
+      memoryEntry, enqueueEnrichment, eventInput, assertSourceCurrent, persistSourceStatementDependency
+    );
+    await this.dependencies.runtimeNotifier.notifyEntry(event);
+    this.scheduleGreenReevaluation(created, event);
+    return created;
+  }
+
+  private buildMemoryEntry(memoryEntryInput: Omit<MemoryEntryInput,
+    "enqueueEnrichment" | "object_id" | "assertSourceCurrent" | "persistSourceStatementDependency"
+  >, reservedObjectId: string | undefined): MemoryEntry {
     const timestamp = this.now();
     const dynamics =
       this.dependencies.dynamicsService?.assignInitialDynamics({
@@ -91,9 +124,9 @@ export class MemoryWriteService {
         reinforcement_count: null,
         contradiction_count: null
       };
-    const memoryEntry = parseMemoryEntry({
+    return parseMemoryEntry({
       ...memoryEntryInput,
-      object_id: reservedObjectId ?? this.generateObjectId(),
+      object_id: reservedObjectId ?? this.dependencies.generateObjectId(),
       object_kind: "memory_entry",
       schema_version: 1,
       lifecycle_state: "active",
@@ -112,32 +145,9 @@ export class MemoryWriteService {
       contradiction_count: dynamics.contradiction_count,
       superseded_by: null
     });
+  }
 
-    await this.validateEvidenceRefs(memoryEntry.workspace_id, memoryEntry.evidence_refs);
-    const eventInput = {
-      event_type: MemoryGovernanceEventType.SOUL_MEMORY_CREATED,
-      entity_type: "memory_entry",
-      entity_id: memoryEntry.object_id,
-      workspace_id: memoryEntry.workspace_id,
-      run_id: memoryEntry.run_id,
-      caused_by: memoryEntry.created_by,
-      payload_json: SoulMemoryCreatedPayloadSchema.parse({
-        object_id: memoryEntry.object_id,
-        object_kind: memoryEntry.object_kind,
-        workspace_id: memoryEntry.workspace_id,
-        run_id: memoryEntry.run_id
-      })
-    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
-
-    const { created, event } = await this.createRowMaybeAtomicallyEnqueued(
-      memoryEntry,
-      enqueueEnrichment,
-      eventInput,
-      assertSourceCurrent, persistSourceStatementDependency
-    );
-    this.persistObjectKeys(created);
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-
+  private scheduleGreenReevaluation(created: Readonly<MemoryEntry>, event: EventLogEntry): void {
     if (
       created.evidence_refs.length > 0 &&
       (created.dimension === MemoryDimension.PREFERENCE || created.dimension === MemoryDimension.EPISODE)
@@ -164,23 +174,21 @@ export class MemoryWriteService {
         }
       );
     }
-
-    return created;
   }
 
   // invariant: production create commits audit + memory row + optional
   // Garden intent (and enrich_pending marker when still wired) in one
   // transaction, EventLog-first. Acknowledgment is durable source, not enriched.
-  private async createRowMaybeAtomicallyEnqueued(
+  private createRowAtomically(
     memoryEntry: Readonly<MemoryEntry>,
     enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"],
     createdEventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
     assertSourceCurrent?: () => void,
     persistSourceStatementDependency?: () => void
-  ): Promise<{
+  ): {
     readonly created: Readonly<MemoryEntry>;
     readonly event: EventLogEntry;
-  }> {
+  } {
     const createWithinTransaction = this.dependencies.memoryEntryRepo.createWithinTransaction;
     if (createWithinTransaction === undefined) {
       throw new CoreError("CONFLICT", "Memory create transaction port is not available", {
@@ -194,7 +202,10 @@ export class MemoryWriteService {
     const created = createWithinTransaction.call(this.dependencies.memoryEntryRepo, memoryEntry, {
       beforeCreate: () => {
         assertSourceCurrent?.();
-        event = this.appendCreatedEventSynchronously(createdEventInput);
+        event = appendMemoryEventLogSynchronously(
+          this.dependencies.eventLogRepo, createdEventInput,
+          "Memory create transaction requires a synchronous EventLog append port."
+        );
       },
       afterCreate: () => {
         if (event === undefined) {
@@ -202,6 +213,7 @@ export class MemoryWriteService {
         }
         persistSourceStatementDependency?.();
         this.persistEnrichmentIntent(memoryEntry.workspace_id, memoryEntry.object_id, event.revision, enqueueEnrichment, memoryEntry.created_at);
+        this.dependencies.objectKeyWriter?.materializeForMemory(memoryEntry);
       }
     });
 
@@ -210,16 +222,6 @@ export class MemoryWriteService {
     }
 
     return { created, event };
-  }
-
-  private appendCreatedEventSynchronously(
-    eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
-  ): EventLogEntry {
-    return appendMemoryEventLogSynchronously(
-      this.dependencies.eventLogRepo,
-      eventInput,
-      "Memory create transaction requires a synchronous EventLog append port."
-    );
   }
 
   public async update(
@@ -241,22 +243,26 @@ export class MemoryWriteService {
   }
 
   public async validateUpdate(objectId: string, fields: MemoryEntryUpdateFields): Promise<void> {
-    const parsedObjectId = parseObjectId(objectId);
-    const parsedFields = parseUpdateFields(fields);
+    await this.loadMemoryForUpdate(parseObjectId(objectId), parseUpdateFields(fields));
+  }
 
-    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
-    if (existing === null) {
+  private async loadMemoryForUpdate(
+    objectId: string, fields: MemoryEntryUpdateFields, workspaceId?: string
+  ): Promise<Readonly<MemoryEntry>> {
+    const existing = await this.dependencies.memoryEntryRepo.findById(objectId);
+    if (existing === null || (workspaceId !== undefined && existing.workspace_id !== workspaceId)) {
       throw new CoreError("NOT_FOUND", "Memory entry not found");
     }
 
-    if (parsedFields.evidence_refs !== undefined) {
-      await this.validateEvidenceRefs(existing.workspace_id, parsedFields.evidence_refs);
+    if (fields.evidence_refs !== undefined) {
+      await this.validateEvidenceRefs(existing.workspace_id, fields.evidence_refs);
     }
 
     if (existing.lifecycle_state === "archived") {
       throw new CoreError("VALIDATION", "Memory entry is archived and cannot be updated");
     }
-    rejectFrozenObservationConfidence(existing, parsedFields);
+    rejectFrozenObservationConfidence(existing, fields);
+    return existing;
   }
 
   private async updateInternal(input: {
@@ -273,48 +279,15 @@ export class MemoryWriteService {
     const parsedFields = parseUpdateFields(input.fields);
     const enqueueEnrichment = freezeEnrichmentIntent(input.enqueueEnrichment);
 
-    const existing = await this.dependencies.memoryEntryRepo.findById(parsedObjectId);
-
-    if (existing === null || (parsedWorkspaceId !== undefined && existing.workspace_id !== parsedWorkspaceId)) {
-      throw new CoreError("NOT_FOUND", "Memory entry not found");
-    }
-
-    if (parsedFields.evidence_refs !== undefined) {
-      await this.validateEvidenceRefs(existing.workspace_id, parsedFields.evidence_refs);
-    }
-
-    if (existing.lifecycle_state === "archived") {
-      throw new CoreError("VALIDATION", "Memory entry is archived and cannot be updated");
-    }
-    rejectFrozenObservationConfidence(existing, parsedFields);
-
-    const updatedFields = toUpdatedFieldNames(parsedFields);
-    const occurredAt = this.now();
-    const eventInput = {
-      event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
-      entity_type: "memory_entry",
-      entity_id: existing.object_id,
-      workspace_id: existing.workspace_id,
-      run_id: existing.run_id,
-      caused_by: parsedReason,
-      payload_json: SoulMemoryUpdatedPayloadSchema.parse({
-        object_id: existing.object_id,
-        object_kind: existing.object_kind,
-        workspace_id: existing.workspace_id,
-        run_id: existing.run_id,
-        updated_fields: updatedFields
-      })
-    } satisfies Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
-
+    const existing = await this.loadMemoryForUpdate(parsedObjectId, parsedFields, parsedWorkspaceId);
     const { updated, event } = this.updateRowAtomically(
       parsedObjectId,
-      { ...parsedFields, updated_at: occurredAt },
-      eventInput,
+      { ...parsedFields, updated_at: this.now() },
+      memoryUpdatedEvent(existing, parsedFields, parsedReason),
       parsedWorkspaceId,
       enqueueEnrichment
     );
-
-    this.persistObjectKeys(updated);
+    await this.eventPublisher.propagateCommitted([event]);
     if (
       parsedFields.evidence_refs !== undefined &&
       shouldRevokeGreenForEvidenceRewrite(existing.evidence_refs, parsedFields.evidence_refs)
@@ -326,67 +299,45 @@ export class MemoryWriteService {
         runId: existing.run_id
       });
     }
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
     return updated;
   }
 
-  // invariant: production update commits audit + memory row in one transaction, EventLog-first.
   private updateRowAtomically(
     objectId: string,
     repoFields: MemoryEntryRepoUpdateFields,
     eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
     workspaceId: string | undefined,
     enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"]
-  ): {
-    readonly updated: Readonly<MemoryEntry>;
-    readonly event: EventLogEntry;
-  } {
-    const updateWithinTransaction = this.dependencies.memoryEntryRepo.updateWithinTransaction;
-    if (updateWithinTransaction === undefined) {
+  ): { readonly updated: Readonly<MemoryEntry>; readonly event: EventLogEntry } {
+    const update = this.dependencies.memoryEntryRepo.updateWithinTransaction;
+    if (update === undefined) {
       throw new CoreError("CONFLICT", "Memory update transaction port is not available", {
         subCode: "PORT_UNAVAILABLE"
       });
     }
-
     this.requireEnrichmentPorts(enqueueEnrichment);
     let event: EventLogEntry | undefined;
-    const updated = updateWithinTransaction.call(
-      this.dependencies.memoryEntryRepo,
-      objectId,
-      repoFields,
-      {
-        beforeUpdate: () => {
-          event = this.appendUpdatedEventSynchronously(eventInput);
-        },
-        afterUpdate: () => {
-          if (event === undefined) {
-            throw new CoreError("CONFLICT", "Memory update transaction did not append its audit event.");
-          }
-          this.persistEnrichmentIntent(
-            eventInput.workspace_id!,
-            objectId,
-            event.revision,
-            enqueueEnrichment,
-            repoFields.updated_at ?? event.created_at
-          );
-        }
+    const updated = update.call(this.dependencies.memoryEntryRepo, objectId, repoFields, {
+      beforeUpdate: () => {
+        event = appendMemoryEventLogSynchronously(
+          this.dependencies.eventLogRepo, eventInput,
+          "Memory update transaction requires a synchronous EventLog append port."
+        );
       },
-      workspaceId
-    );
+      afterUpdate: (row) => {
+        if (event === undefined) {
+          throw new CoreError("CONFLICT", "Memory update transaction did not append its audit event.");
+        }
+        this.persistEnrichmentIntent(
+          row.workspace_id, row.object_id, event.revision, enqueueEnrichment, repoFields.updated_at ?? event.created_at
+        );
+        this.dependencies.objectKeyWriter?.materializeForMemory(row);
+      }
+    }, workspaceId);
     if (event === undefined) {
       throw new CoreError("CONFLICT", "Memory update transaction did not append its audit event.");
     }
     return { updated, event };
-  }
-
-  private appendUpdatedEventSynchronously(
-    eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
-  ): EventLogEntry {
-    return appendMemoryEventLogSynchronously(
-      this.dependencies.eventLogRepo,
-      eventInput,
-      "Memory update transaction requires a synchronous EventLog append port."
-    );
   }
 
   private async validateEvidenceRefs(workspaceId: string, evidenceRefs: readonly string[]): Promise<void> {
@@ -421,12 +372,6 @@ export class MemoryWriteService {
     if (firstMissing !== undefined) {
       throw new CoreError("VALIDATION", `Evidence reference not found: ${firstMissing.evidenceRef}`);
     }
-  }
-
-  private persistObjectKeys(
-    memory: Pick<MemoryEntry, "object_id" | "workspace_id" | "content" | "evidence_refs">
-  ): void {
-    this.dependencies.objectKeyWriter?.materializeForMemory(memory);
   }
 
   private requireEnrichmentPorts(enqueueEnrichment: MemoryEntryInput["enqueueEnrichment"]): void {
@@ -479,6 +424,26 @@ export class MemoryWriteService {
       sourceSignalId: enqueueEnrichment.sourceSignalId
     });
   }
+}
+
+function memoryUpdatedEvent(
+  memory: Readonly<MemoryEntry>, fields: MemoryEntryUpdateFields, reason: string
+): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
+  return {
+    event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
+    entity_type: "memory_entry",
+    entity_id: memory.object_id,
+    workspace_id: memory.workspace_id,
+    run_id: memory.run_id,
+    caused_by: reason,
+    payload_json: SoulMemoryUpdatedPayloadSchema.parse({
+      object_id: memory.object_id,
+      object_kind: memory.object_kind,
+      workspace_id: memory.workspace_id,
+      run_id: memory.run_id,
+      updated_fields: toUpdatedFieldNames(fields)
+    })
+  };
 }
 
 function rejectFrozenObservationConfidence(
