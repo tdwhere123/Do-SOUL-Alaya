@@ -29,12 +29,12 @@ export function nativeRecallArchiveSemantics(version: string) {
   if (version === "39.0.0" || version === "39.1.0" || version === "39.2.0") return "ordinary-native-field.v13";
   if (version === "40.0.0") return "ordinary-native-field.v14";
   if (version === "41.0.0" || version === "41.1.0" || version === "41.2.0") return "ordinary-native-field.v15";
-  if (version === "42.0.0" || version === "43.0.0" || version === "44.0.0" || version === "44.1.0") return "ordinary-native-field.v16";
+  if (version === "42.0.0" || version === "43.0.0" || version === "44.0.0" || version === "44.1.0" || version === "44.1.1") return "ordinary-native-field.v16";
   if (version === ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION) return ORDINARY_RECALL_NATIVE_PUBLIC_SEMANTICS;
   return undefined;
 }
 export const RepresentationAwareRecallProtocolVersionSchema = z.enum([
-  "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0", "27.0.0", "28.0.0", "29.0.0", "30.0.0", "31.0.0", "32.0.0", "33.0.0", "34.0.0", "34.1.0", "35.0.0", "36.0.0", "37.0.0", "38.0.0", "39.0.0", "39.1.0", "39.2.0", "40.0.0", "41.0.0", "41.1.0", "41.2.0", "42.0.0", "43.0.0", "44.0.0", "44.1.0", ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION
+  "18.0.0", "18.1.0", "19.0.0", "19.1.0", "20.0.0", "27.0.0", "28.0.0", "29.0.0", "30.0.0", "31.0.0", "32.0.0", "33.0.0", "34.0.0", "34.1.0", "35.0.0", "36.0.0", "37.0.0", "38.0.0", "39.0.0", "39.1.0", "39.2.0", "40.0.0", "41.0.0", "41.1.0", "41.2.0", "42.0.0", "43.0.0", "44.0.0", "44.1.0", "44.1.1", ORDINARY_RECALL_NATIVE_PROTOCOL_VERSION
 ]);
 export const OrdinaryRecallProtocolVersionSchema = z.enum([
   "14.1.0", "15.0.0", "16.0.0", "17.0.0", ...RepresentationAwareRecallProtocolVersionSchema.options

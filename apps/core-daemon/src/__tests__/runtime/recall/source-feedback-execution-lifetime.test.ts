@@ -10,11 +10,6 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../../scripts/test-support/provider-free/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
-// Source-only adapter controls: do not require a newly emitted Core barrel or Worker artifact.
-vi.mock("@do-soul/alaya-core", async original => ({
-  ...await original<typeof import("@do-soul/alaya-core")>(),
-  ...await import("../../../../../../packages/core/src/recall/runtime/source-feedback-session.js")
-}));
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
 

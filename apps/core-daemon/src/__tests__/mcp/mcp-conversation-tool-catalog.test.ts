@@ -302,8 +302,7 @@ describe("daemon conversation tool catalog", () => {
       await expect(
         catalog.executeTool({
           toolId: "mcp__filesystem__read_file",
-          rawInput: { path: "README.md" },
-          writableRoots: ["/workspace/project"]
+          rawInput: { path: "README.md" }
         })
       ).resolves.toEqual({
         ok: false,
@@ -318,6 +317,56 @@ describe("daemon conversation tool catalog", () => {
       });
       expect(catalog.listAllowedServerNames()).toEqual(["github"]);
       expect(catalog.hasTool("mcp__filesystem__read_file")).toBe(false);
+    } finally {
+      restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
+      restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);
+    }
+  });
+
+  it("matches live-discovered unprefixed tool names against retired builtin overrides by derived tool_id", async () => {
+    const originalAllowedServers = process.env.ALAYA_ALLOWED_MCP_SERVERS;
+    const originalToolCatalog = process.env.ALAYA_MCP_TOOL_CATALOG_JSON;
+    process.env.ALAYA_ALLOWED_MCP_SERVERS = "filesystem";
+    process.env.ALAYA_MCP_TOOL_CATALOG_JSON = JSON.stringify({
+      filesystem: [
+        {
+          tool_id: "mcp__filesystem__read_file",
+          name: "filesystem.read_file",
+          description: "Retired builtin override.",
+          daemon_binding: {
+            binding_kind: "builtin_tool",
+            builtin_tool_id: "tools.read_file"
+          }
+        }
+      ]
+    });
+
+    try {
+      const server = {
+        server_name: "filesystem",
+        transport_type: "stdio" as const,
+        status: "active" as const,
+        registered_at: "2026-04-21T00:00:00.000Z"
+      };
+      const catalog = createDaemonMcpCatalogFromEnv({
+        now: () => server.registered_at,
+        runtimeRegistry: {
+          refresh: vi.fn(async () => undefined),
+          listServerInfos: () => [server],
+          getServerTools: () => [{ name: "read_file", description: "Read file" }],
+          listServerTools: vi.fn(async () => []),
+          callTool: vi.fn(async () => ({ content: [] })),
+          close: vi.fn(async () => undefined),
+          getHealth: () => ({ servers: [] })
+        },
+        warn: vi.fn()
+      });
+
+      expect(catalog.listEnrolledToolIds()).toEqual([]);
+      expect(catalog.hasTool("mcp__filesystem__read_file")).toBe(false);
+      await expect(catalog.listServerTools(server)).resolves.toEqual([]);
+      await expect(catalog.executeTool({ toolId: "mcp__filesystem__read_file", rawInput: {} }))
+        .resolves.toMatchObject({ ok: false, code: "MCP_EXTERNAL_UNBOUND" });
     } finally {
       restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
       restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);

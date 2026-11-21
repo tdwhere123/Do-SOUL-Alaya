@@ -114,6 +114,7 @@ type CreateCoreDaemonAppInput = Readonly<{
   synthesisService: RouteField<"syntheses", "synthesisService">;
   claimService: RouteField<"claims", "claimService">;
   proposalService: RouteField<"proposals", "proposalService">;
+  proposalRepo: RouteField<"proposals", "proposalRepo">;
   healthIssueGroupRepo: RouteField<"healthInbox", "healthIssueGroupRepo">;
   // Inspector loopback HTTP routes call the same MCP handler that
   // attached agents use.
@@ -303,6 +304,7 @@ function createGovernanceRouteServices(input: CreateCoreDaemonAppInput) {
       workspaceService: input.workspaceService,
       memoryService: input.memoryService,
       proposalService: input.proposalService,
+      proposalRepo: input.proposalRepo,
       mcpMemoryToolHandler: input.mcpMemoryToolHandler
     },
     healthInbox: {

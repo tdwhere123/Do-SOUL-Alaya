@@ -387,21 +387,34 @@ function selectEffectiveGardenSecretRef(
   });
 }
 
+function readEnvGardenProviderKind(
+  env: NodeJS.ProcessEnv,
+  configEnv: ReadonlyMap<string, string>
+) {
+  const declaredProviderKind = readNonEmptyEnv(
+    env[ALAYA_GARDEN_PROVIDER_KIND_ENV] ?? configEnv.get(ALAYA_GARDEN_PROVIDER_KIND_ENV)
+  );
+  const parsedProviderKind =
+    declaredProviderKind === null ? null : RuntimeGardenProviderKindSchema.safeParse(declaredProviderKind);
+  return {
+    declaredProviderKind,
+    providerKind: parsedProviderKind?.success ? parsedProviderKind.data : null
+  };
+}
+
 function readGardenComputeEnvOverrides(
   env: NodeJS.ProcessEnv,
   configEnv: ReadonlyMap<string, string>,
   persistedSecretRef?: string | null
 ) {
   const readEnv = (key: string) => env[key] ?? configEnv.get(key);
-  const declaredProviderKind = readNonEmptyEnv(readEnv(ALAYA_GARDEN_PROVIDER_KIND_ENV));
-  const parsedProviderKind =
-    declaredProviderKind === null ? null : RuntimeGardenProviderKindSchema.safeParse(declaredProviderKind);
+  const { declaredProviderKind, providerKind } = readEnvGardenProviderKind(env, configEnv);
   return {
     secretSelection: selectEffectiveGardenSecretRef(env, configEnv, persistedSecretRef),
     modelId: readNonEmptyEnv(readEnv(OFFICIAL_API_GARDEN_MODEL_ENV)),
     providerUrl: readNonEmptyEnv(readEnv(OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),
     declaredProviderKind,
-    providerKind: parsedProviderKind?.success ? parsedProviderKind.data : null
+    providerKind
   };
 }
 
@@ -417,6 +430,14 @@ function mergeGardenComputeRawWithEnv(
     return rawPersisted;
   }
   const persisted = rawPersisted as Record<string, unknown>;
+  const { providerKind: parsedEnvProviderKind } = readEnvGardenProviderKind(env, configEnv);
+  const effectiveProviderKind = parsedEnvProviderKind ?? persisted.provider_kind;
+  if (effectiveProviderKind === "host_worker" || effectiveProviderKind === "local_heuristics") {
+    return {
+      ...persisted,
+      ...(parsedEnvProviderKind !== null ? { provider_kind: parsedEnvProviderKind } : {})
+    };
+  }
   const persistedSecretRef = typeof persisted.secret_ref === "string" ? persisted.secret_ref : undefined;
   const overrides = readGardenComputeEnvOverrides(env, configEnv, persistedSecretRef);
   return {

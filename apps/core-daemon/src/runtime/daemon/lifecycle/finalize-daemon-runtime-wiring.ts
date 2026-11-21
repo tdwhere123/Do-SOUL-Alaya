@@ -228,6 +228,7 @@ function createDaemonAppServiceInput(input: FinalizeDaemonRuntimeWiringInput) {
     synthesisService: input.synthesisService,
     claimService: input.claimService,
     proposalService: input.proposalService,
+    proposalRepo: input.proposalRepo,
     healthIssueGroupRepo: input.healthIssueGroupRepo,
     fileRepo: input.fileRepo,
     runtimeNotifier: input.runtimeNotifier,

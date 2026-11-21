@@ -46,9 +46,7 @@ export interface DaemonMcpCatalog {
   executeTool(input: {
     readonly toolId: string;
     readonly rawInput: unknown;
-    readonly writableRoots: readonly string[];
-    readonly abortSignal?: AbortSignal;
-  }): Promise< unknown>;
+  }): Promise<unknown>;
 }
 
 export function createConversationToolCatalog(
@@ -239,13 +237,11 @@ export function createDaemonMcpCatalogFromEnv(input: {
     hasTool(toolId) {
       return state.toolAvailability.get(toolId)?.() ?? false;
     },
-    async executeTool({ toolId, rawInput, writableRoots, abortSignal }) {
+    async executeTool({ toolId, rawInput }) {
       return await executeExternalMcpTool({
         toolId,
         rawInput,
         toolAvailability: state.toolAvailability,
-        writableRoots,
-        abortSignal,
         toolExecutors: state.toolExecutors,
         readLastError: (id) => readCatalogToolLastError(input.runtimeRegistry, state.toolServerNames.get(id))
       });

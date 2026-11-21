@@ -25,21 +25,22 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       findByIdScoped: vi.fn(async () => ({ object_id: "mem-1", confidence: 0.6 }))
     };
     const mcpMemoryToolHandler = {
-      call: vi.fn(async (input?: { toolName?: string }) => ({
+      call: vi.fn(async () => ({
         ok: true,
-        output:
-          input?.toolName === "soul.list_pending_proposals"
-            ? { proposals: [] }
-            : { proposal_id: "proposal-1", status: "created" }
+        output: { proposal_id: "proposal-1", status: "created" }
       }))
+    };
+    const proposalRepo = {
+      findPendingSummaries: vi.fn(async () => [])
     };
     registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
+      proposalRepo,
       mcpMemoryToolHandler
     }));
-    return { app, workspaceService, proposalService, memoryService, mcpMemoryToolHandler };
+    return { app, workspaceService, proposalService, proposalRepo, memoryService, mcpMemoryToolHandler };
   }
 
   it("removes POST /proposals/:id/review (MR-B01: non-atomic + no workspace scoping)", async () => {
@@ -163,7 +164,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
   // not create duplicate pending proposals. The route should detect an
   // existing pending proposal whose target + proposed_changes match and
   // return its proposal_id with status=already_pending.
-  it("dedupes a repeated retire click against an existing pending tombstone proposal", async () => {
+  it("dedupes a repeated retire click against an existing pending tombstone proposal even past 100 pending rows", async () => {
     const app = new Hono();
     const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
     const memoryService = {
@@ -177,34 +178,43 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       ok: true as const,
       output: { proposal_id: "fresh-proposal", status: "created" }
     }));
-    const listPending = vi.fn(async () => ({
-      ok: true as const,
-      output: {
-        proposals: [
-          {
-            proposal_id: "existing-tombstone-proposal",
-            target_object_id: "mem-1",
-            target_object_kind: "memory_entry",
-            created_at: "2026-05-09T00:00:00.000Z",
-            proposed_change_summary: "retire mem-1",
-            proposed_changes: { retention_state: "tombstoned", storage_tier: "cold" },
-            assigned_reviewer_identity: null,
-            assigned_at: null,
-            deadline_at: null,
-            is_overdue: false
-          }
-        ]
-      }
+    const otherPending = Array.from({ length: 120 }, (_, idx) => ({
+      proposal_id: `other-proposal-${idx}`,
+      target_object_id: `other-mem-${idx}`,
+      target_object_kind: "memory_entry",
+      proposal_operation: "memory_update" as const,
+      created_at: "2026-05-09T00:00:00.000Z",
+      proposed_change_summary: `other ${idx}`,
+      proposed_changes: { confidence: 0.8 },
+      assigned_reviewer_identity: null,
+      assigned_at: null,
+      deadline_at: null,
+      is_overdue: false
     }));
+    const findPendingSummaries = vi.fn(async () => [
+      ...otherPending,
+      {
+        proposal_id: "existing-tombstone-proposal",
+        target_object_id: "mem-1",
+        target_object_kind: "memory_entry",
+        proposal_operation: "memory_update" as const,
+        created_at: "2026-05-09T00:00:00.000Z",
+        proposed_change_summary: "retire mem-1",
+        proposed_changes: { retention_state: "tombstoned", storage_tier: "cold" },
+        assigned_reviewer_identity: null,
+        assigned_at: null,
+        deadline_at: null,
+        is_overdue: false
+      }
+    ]);
     const mcpMemoryToolHandler = {
-      call: vi.fn(async (input: { toolName: string }) =>
-        input.toolName === "soul.list_pending_proposals" ? await listPending() : await propose()
-      )
+      call: vi.fn(async () => await propose())
     };
     registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
+      proposalRepo: { findPendingSummaries },
       mcpMemoryToolHandler
     }));
 
@@ -217,51 +227,101 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       success: true,
       data: { proposal_id: "existing-tombstone-proposal", status: "already_pending" }
     });
-    // The propose_memory_update path must NOT be invoked when a duplicate is detected.
+    expect(findPendingSummaries).toHaveBeenCalledWith("ws-1");
     expect(propose).not.toHaveBeenCalled();
   });
 
-  it("propagates list_pending_proposals failure as an explicit HTTP error instead of creating a duplicate proposal", async () => {
+  it("serializes concurrent identical retire requests so only one proposal is created", async () => {
     const app = new Hono();
     const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
     const memoryService = {
       findByIdScoped: vi.fn(async () => ({ object_id: "mem-1", confidence: 0.6 }))
     };
-    const proposalService = {
-      findByWorkspaceId: vi.fn(async () => []),
-      findPending: vi.fn(async () => [])
+    const pending: Array<{
+      readonly proposal_id: string;
+      readonly target_object_id: string;
+      readonly target_object_kind: string;
+      readonly proposal_operation: "memory_update";
+      readonly created_at: string;
+      readonly proposed_change_summary: string;
+      readonly proposed_changes: Record<string, unknown>;
+      readonly assigned_reviewer_identity: null;
+      readonly assigned_at: null;
+      readonly deadline_at: null;
+      readonly is_overdue: false;
+    }> = [];
+    let releaseFirstPropose!: () => void;
+    const firstProposeGate = new Promise<void>((resolve) => {
+      releaseFirstPropose = resolve;
+    });
+    const propose = vi.fn(async (input: { arguments: { proposed_changes: Record<string, unknown>; target_object_id: string } }) => {
+      await firstProposeGate;
+      const proposalId = "serialized-retire-proposal";
+      pending.push({
+        proposal_id: proposalId,
+        target_object_id: input.arguments.target_object_id,
+        target_object_kind: "memory_entry",
+        proposal_operation: "memory_update",
+        created_at: "2026-05-09T00:00:00.000Z",
+        proposed_change_summary: "retire mem-1",
+        proposed_changes: input.arguments.proposed_changes,
+        assigned_reviewer_identity: null,
+        assigned_at: null,
+        deadline_at: null,
+        is_overdue: false
+      });
+      return { ok: true as const, output: { proposal_id: proposalId, status: "created" } };
+    });
+    registerProposalRoutes(app, proposalRouteServices({
+      workspaceService,
+      memoryService,
+      proposalService: {},
+      proposalRepo: { findPendingSummaries: vi.fn(async () => [...pending]) },
+      mcpMemoryToolHandler: { call: propose as never }
+    }));
+
+    const req1 = app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/retire", { method: "POST" });
+    const req2 = app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/retire", { method: "POST" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseFirstPropose();
+    const [res1, res2] = await Promise.all([req1, req2]);
+
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+    expect(await res1.json()).toEqual({ success: true, data: { proposal_id: "serialized-retire-proposal", status: "created" } });
+    expect(await res2.json()).toEqual({ success: true, data: { proposal_id: "serialized-retire-proposal", status: "already_pending" } });
+    expect(propose).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates pending summary lookup failure as an explicit HTTP error instead of creating a duplicate proposal", async () => {
+    const app = new Hono();
+    registerErrorHandler(app, { error: vi.fn() });
+    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
+    const memoryService = {
+      findByIdScoped: vi.fn(async () => ({ object_id: "mem-1", confidence: 0.6 }))
     };
     const propose = vi.fn(async () => ({
       ok: true as const,
       output: { proposal_id: "fresh-proposal", status: "created" }
     }));
-    const mcpMemoryToolHandler = {
-      call: vi.fn(async (input: { toolName: string }) => {
-        if (input.toolName === "soul.list_pending_proposals") {
-          return {
-            ok: false as const,
-            error: { code: "NEEDS_CONTEXT" as const, message: "Additional context is required." }
-          };
-        }
-        return await propose();
-      })
-    };
     registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
-      proposalService,
-      mcpMemoryToolHandler
+      proposalService: {},
+      proposalRepo: {
+        findPendingSummaries: vi.fn(async () => {
+          throw new Error("pending summary lookup failed");
+        })
+      },
+      mcpMemoryToolHandler: { call: propose }
     }));
 
     const response = await app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/retire", {
       method: "POST"
     });
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      success: false,
-      error: { code: "NEEDS_CONTEXT", message: "Additional context is required." }
-    });
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({ success: false });
     expect(propose).not.toHaveBeenCalled();
   });
 

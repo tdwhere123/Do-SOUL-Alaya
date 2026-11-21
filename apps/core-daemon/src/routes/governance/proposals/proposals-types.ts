@@ -3,12 +3,14 @@ import type {
   ProposalService,
   WorkspaceService
 } from "@do-soul/alaya-core";
+import type { ProposalRepo } from "@do-soul/alaya-storage";
 import type { McpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 
 export interface ProposalRouteServices {
   readonly workspaceService: WorkspaceService;
   readonly memoryService: Pick<MemoryService, "findByIdScoped">;
   readonly proposalService: ProposalService;
+  readonly proposalRepo: Pick<ProposalRepo, "findPendingSummaries">;
   // invariant: the loopback HTTP surface uses these workspace-scoped HTTP
   // wrappers around the same MCP handler that attached agents call. The
   // wrappers exist on the daemon HTTP plane (not the agent control

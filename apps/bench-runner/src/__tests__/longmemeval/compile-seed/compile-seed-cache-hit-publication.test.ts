@@ -320,7 +320,7 @@ describe("whole-session cache fill and round-bound publication", () => {
         arguments: { operation: "privacy_erase", target_object_id: rootId, reason: "user_requested_deletion" } });
       expect(proposal, JSON.stringify(proposal)).toMatchObject({ ok: true });
       const proposalId = (proposal as { output: { proposal_id: string } }).output.proposal_id;
-      const review = await handler.call({ toolName: "soul.review_memory_proposal", context: { ...context, agentTarget: "inspector" },
+      const review = await handler.call({ toolName: "soul.review_memory_proposal", context: { ...context, runId: null, agentTarget: "cli" },
         arguments: { proposal_id: proposalId, verdict: "accept", reason: "authorized fixture erasure",
           reviewer_identity: "recorded-reviewer", reviewer_token: "fixture-review-token" } });
       expect(review, JSON.stringify(review)).toMatchObject({ ok: true, output: { resolution_state: "accepted" } });

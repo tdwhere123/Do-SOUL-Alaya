@@ -31,7 +31,6 @@ import { createGardenTaskCompletionHandler } from "./garden-task-completion.js";
 import type { PostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
 import { parseStatementSessionTaskPayload, StatementSessionSourceUnavailableError } from "../../garden/statement-session/statement-session-task.js";
 import type { StatementSessionExtractionReceipts } from "../../garden/statement-session/statement-session-extraction-receipts.js";
-import { requireStatementSessionCompletion } from "./statement-session-completion.js";
 import { gardenTaskSourceAvailable, quarantineUnavailableSourceTasks,
   type GardenTaskSourceGuardPort } from "../../garden/post-turn-extract/source-provenance.js";
 
@@ -213,9 +212,10 @@ function createClaimGardenTaskHandler(params: Readonly<{
 
 async function releaseExtractedStatementClaim(deps: GardenTaskHandlerDependencies,
   repo: NonNullable<GardenTaskHandlerDependencies["gardenTaskRepo"]>, row: GardenTaskRow, claimant: string): Promise<boolean> {
+  if (deps.statementSessionCompletion === undefined) return false;
   try {
     const payload = parseStatementSessionTaskPayload(row.payload);
-    if (requireStatementSessionCompletion(deps).receipts.read(row, payload.run_id) === null) return false;
+    if (deps.statementSessionCompletion.receipts.read(row, payload.run_id) === null) return false;
   } catch (error) {
     await repo.releaseClaim(row.id, claimant);
     throw error;

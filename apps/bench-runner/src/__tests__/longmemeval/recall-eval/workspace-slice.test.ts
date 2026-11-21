@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -609,6 +609,31 @@ describe("workspace slice install and daemon reopen", () => {
       expect(countTriggers(live)).toBe(triggerCountBefore);
       expect(countTable(live, "memory_embeddings")).toBe(1);
       expect(countTable(live, "main.memory_embeddings")).toBe(0);
+    } finally {
+      live.close();
+    }
+  });
+
+  it("preserves the primary slice load error when overlay rebinding also fails during cleanup", () => {
+    const dataDir = join(root, "primary-error-preserve");
+    installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
+    const filename = workingAlayaDbPath(dataDir);
+    const overlayPath = writeRealMemoryOverlayBeside(filename, MEMORY_A, WORKSPACE_A);
+    const live = initDatabase({ filename });
+    try {
+      live.connection.pragma("foreign_keys = ON");
+      unlinkSync(overlayPath);
+      let caught: unknown;
+      try {
+        loadSliceIntoOpenDatabase(live, join(dataDir, "missing-slice.db"));
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).toMatch(/no such table/u);
+      expect((caught as Error).cause).toMatchObject({ message: "embedding overlay file is missing" });
+      expect(live.connection.pragma("database_list")).not.toContainEqual(expect.objectContaining({ name: "slice_src" }));
+      expect(live.connection.pragma("foreign_keys", { simple: true })).toBe(1);
     } finally {
       live.close();
     }

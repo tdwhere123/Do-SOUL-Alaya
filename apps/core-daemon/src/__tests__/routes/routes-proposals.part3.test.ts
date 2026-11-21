@@ -104,18 +104,16 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       findByIdScoped: vi.fn(async () => ({ object_id: "mem-1", confidence: 0.6 }))
     };
     const mcpMemoryToolHandler = {
-      call: vi.fn(async (input?: { toolName?: string }) => ({
+      call: vi.fn(async () => ({
         ok: true,
-        output:
-          input?.toolName === "soul.list_pending_proposals"
-            ? { proposals: [] }
-            : { proposal_id: "proposal-1", status: "created" }
+        output: { proposal_id: "proposal-1", status: "created" }
       }))
     };
     registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
+      proposalRepo: { findPendingSummaries: vi.fn(async () => []) },
       mcpMemoryToolHandler
     }));
     return { app, workspaceService, proposalService, memoryService, mcpMemoryToolHandler };
@@ -327,35 +325,30 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       ok: true as const,
       output: { proposal_id: "new-rewrite-proposal", status: "created" }
     }));
-    const listPending = vi.fn(async () => ({
-      ok: true as const,
-      output: {
-        proposals: [
-          {
-            proposal_id: "existing-keep-proposal",
-            target_object_id: "mem-1",
-            target_object_kind: "memory_entry",
-            created_at: "2026-05-09T00:00:00.000Z",
-            proposed_change_summary: "keep mem-1",
-            // Different shape than retire — dedupe must NOT match.
-            proposed_changes: { confidence: 0.65 },
-            assigned_reviewer_identity: null,
-            assigned_at: null,
-            deadline_at: null,
-            is_overdue: false
-          }
-        ]
+    const findPendingSummaries = vi.fn(async () => [
+      {
+        proposal_id: "existing-keep-proposal",
+        target_object_id: "mem-1",
+        target_object_kind: "memory_entry",
+        proposal_operation: "memory_update" as const,
+        created_at: "2026-05-09T00:00:00.000Z",
+        proposed_change_summary: "keep mem-1",
+        // Different shape than retire — dedupe must NOT match.
+        proposed_changes: { confidence: 0.65 },
+        assigned_reviewer_identity: null,
+        assigned_at: null,
+        deadline_at: null,
+        is_overdue: false
       }
-    }));
+    ]);
     const mcpMemoryToolHandler = {
-      call: vi.fn(async (input: { toolName: string }) =>
-        input.toolName === "soul.list_pending_proposals" ? await listPending() : await propose()
-      )
+      call: vi.fn(async () => await propose())
     };
     registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
+      proposalRepo: { findPendingSummaries },
       mcpMemoryToolHandler
     }));
 

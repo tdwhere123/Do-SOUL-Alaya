@@ -60,7 +60,7 @@ describe("daemon MCP catalog listServerTools failures", () => {
     expect(catalog.listEnrolledToolIds()).toEqual([]);
     expect(catalog.hasTool(toolId)).toBe(false);
     await expect(catalog.listServerTools(server)).resolves.toEqual([]);
-    await expect(catalog.executeTool({ toolId, rawInput: {}, writableRoots: [] }))
+    await expect(catalog.executeTool({ toolId, rawInput: {} }))
       .resolves.toMatchObject({ ok: false, code: "MCP_EXTERNAL_UNBOUND" });
     expect(listServerTools).not.toHaveBeenCalled();
     expect(callTool).not.toHaveBeenCalled();
@@ -157,8 +157,7 @@ describe("daemon MCP catalog listServerTools failures", () => {
     await expect(
       catalog.executeTool({
         toolId: "mcp__filesystem__read_file",
-        rawInput: { path: "README.md" },
-        writableRoots: ["/workspace/project"]
+        rawInput: { path: "README.md" }
       })
     ).resolves.toEqual({
       ok: false,

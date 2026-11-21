@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { PublicToolError, SoulListPendingProposalsResponse } from "@do-soul/alaya-protocol";
 import { HTTP_REVIEWER_AGENT_TARGET } from "../../../mcp-memory/proposal/reviewer-surfaces.js";
 import type { ProposalRouteServices } from "./proposals-types.js";
 
@@ -12,10 +11,6 @@ export function createHttpReviewerToolContext(workspaceId: string) {
   };
 }
 
-export type PendingMatchResult =
-  | { readonly ok: true; readonly proposalId: string | null }
-  | { readonly ok: false; readonly error: PublicToolError };
-
 export async function findExistingPendingMatch(
   services: ProposalRouteServices,
   input: {
@@ -23,25 +18,19 @@ export async function findExistingPendingMatch(
     readonly memoryId: string;
     readonly proposed_changes: Record<string, unknown>;
   }
-): Promise<PendingMatchResult> {
-  const result = await services.mcpMemoryToolHandler.call({
-    toolName: "soul.list_pending_proposals",
-    arguments: { limit: 100 },
-    context: createHttpReviewerToolContext(input.workspaceId)
-  });
-  if (!result.ok) {
-    return { ok: false, error: result.error };
-  }
-  const { proposals } = result.output as SoulListPendingProposalsResponse;
+): Promise<string | null> {
+  // Query the repository directly without a 100-row cap so older pending proposals
+  // are still deduplicated.
+  const proposals = await services.proposalRepo.findPendingSummaries(input.workspaceId);
   const targetKey = canonicalizeChanges(input.proposed_changes);
   for (const proposal of proposals) {
     if (proposal.target_object_id !== input.memoryId) continue;
     if (proposal.proposed_changes === null) continue;
     if (canonicalizeChanges(proposal.proposed_changes) === targetKey) {
-      return { ok: true, proposalId: proposal.proposal_id };
+      return proposal.proposal_id;
     }
   }
-  return { ok: true, proposalId: null };
+  return null;
 }
 
 function canonicalizeChanges(value: Record<string, unknown>): string {

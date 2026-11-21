@@ -23,9 +23,10 @@ export type { ProposalRouteServices } from "./proposals-types.js";
 // removed: every endpoint here binds the workspace from the URL and
 // delegates downstream services to enforce that scope.
 export function registerProposalRoutes(app: Hono, services: ProposalRouteServices): void {
+  const memoryActionLocks = new Map<string, Promise<void>>();
   registerProposalListRoutes(app, services);
   registerProposalReviewRoutes(app, services);
-  registerMemoryActionProposalRoutes(app, services);
+  registerMemoryActionProposalRoutes(app, services, memoryActionLocks);
 }
 
 function registerProposalListRoutes(app: Hono, services: ProposalRouteServices): void {
@@ -79,18 +80,28 @@ function registerProposalReviewRoutes(app: Hono, services: ProposalRouteServices
   });
 }
 
-function registerMemoryActionProposalRoutes(app: Hono, services: ProposalRouteServices): void {
-  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/keep", boundedPathParams("wsId", "memoryId"), (context) => keepMemoryProposal(context, services));
-  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/rewrite", boundedPathParams("wsId", "memoryId"), (context) => rewriteMemoryProposal(context, services));
-  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/downgrade", boundedPathParams("wsId", "memoryId"), (context) => downgradeMemoryProposal(context, services));
+type MemoryActionLocks = Map<string, Promise<void>>;
 
-  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/retire", boundedPathParams("wsId", "memoryId"), (context) => retireMemoryProposal(context, services));
+function registerMemoryActionProposalRoutes(
+  app: Hono,
+  services: ProposalRouteServices,
+  memoryActionLocks: MemoryActionLocks
+): void {
+  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/keep", boundedPathParams("wsId", "memoryId"), (context) => keepMemoryProposal(context, services, memoryActionLocks));
+  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/rewrite", boundedPathParams("wsId", "memoryId"), (context) => rewriteMemoryProposal(context, services, memoryActionLocks));
+  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/downgrade", boundedPathParams("wsId", "memoryId"), (context) => downgradeMemoryProposal(context, services, memoryActionLocks));
+
+  app.post("/workspaces/:wsId/soul/memory/:memoryId/proposals/retire", boundedPathParams("wsId", "memoryId"), (context) => retireMemoryProposal(context, services, memoryActionLocks));
 }
 
-async function keepMemoryProposal(context: Context, services: ProposalRouteServices): Promise<Response> {
+async function keepMemoryProposal(
+  context: Context,
+  services: ProposalRouteServices,
+  memoryActionLocks: MemoryActionLocks
+): Promise<Response> {
   const prepared = await prepareExistingMemoryAction(context, services, { rejectBody: true });
   if (prepared instanceof Response) return prepared;
-  return await createMemoryActionProposal(context, services, {
+  return await createMemoryActionProposal(context, services, memoryActionLocks, {
     workspaceId: prepared.workspaceId,
     memoryId: prepared.memoryId,
     proposed_changes: { confidence: clamp01((prepared.memory.confidence ?? 0.5) + 0.05) },
@@ -98,14 +109,18 @@ async function keepMemoryProposal(context: Context, services: ProposalRouteServi
   });
 }
 
-async function rewriteMemoryProposal(context: Context, services: ProposalRouteServices): Promise<Response> {
+async function rewriteMemoryProposal(
+  context: Context,
+  services: ProposalRouteServices,
+  memoryActionLocks: MemoryActionLocks
+): Promise<Response> {
   const prepared = await prepareExistingMemoryAction(context, services, { rejectBody: false });
   if (prepared instanceof Response) return prepared;
   const body = await readJsonObject(context);
   if (body === null) return jsonError(context, 400, "invalid JSON body");
   const newContent = typeof body.new_content === "string" ? body.new_content.trim() : "";
   if (newContent.length === 0) return jsonError(context, 400, "new_content is required");
-  return await createMemoryActionProposal(context, services, {
+  return await createMemoryActionProposal(context, services, memoryActionLocks, {
     workspaceId: prepared.workspaceId,
     memoryId: prepared.memoryId,
     proposed_changes: { content: newContent },
@@ -113,10 +128,14 @@ async function rewriteMemoryProposal(context: Context, services: ProposalRouteSe
   });
 }
 
-async function downgradeMemoryProposal(context: Context, services: ProposalRouteServices): Promise<Response> {
+async function downgradeMemoryProposal(
+  context: Context,
+  services: ProposalRouteServices,
+  memoryActionLocks: MemoryActionLocks
+): Promise<Response> {
   const prepared = await prepareExistingMemoryAction(context, services, { rejectBody: true });
   if (prepared instanceof Response) return prepared;
-  return await createMemoryActionProposal(context, services, {
+  return await createMemoryActionProposal(context, services, memoryActionLocks, {
     workspaceId: prepared.workspaceId,
     memoryId: prepared.memoryId,
     proposed_changes: { confidence: clamp01((prepared.memory.confidence ?? 0.5) - 0.2) },
@@ -124,10 +143,14 @@ async function downgradeMemoryProposal(context: Context, services: ProposalRoute
   });
 }
 
-async function retireMemoryProposal(context: Context, services: ProposalRouteServices): Promise<Response> {
+async function retireMemoryProposal(
+  context: Context,
+  services: ProposalRouteServices,
+  memoryActionLocks: MemoryActionLocks
+): Promise<Response> {
   const prepared = await prepareExistingMemoryAction(context, services, { rejectBody: true });
   if (prepared instanceof Response) return prepared;
-  return await createMemoryActionProposal(context, services, {
+  return await createMemoryActionProposal(context, services, memoryActionLocks, {
     workspaceId: prepared.workspaceId,
     memoryId: prepared.memoryId,
     proposed_changes: { retention_state: "tombstoned", storage_tier: "cold" },
@@ -186,6 +209,7 @@ function buildReviewProposalArgs(proposalId: string, body: Record<string, unknow
 async function createMemoryActionProposal(
   context: Context,
   services: ProposalRouteServices,
+  memoryActionLocks: MemoryActionLocks,
   input: {
     readonly workspaceId: string;
     readonly memoryId: string;
@@ -193,16 +217,51 @@ async function createMemoryActionProposal(
     readonly reason: string;
   }
 ): Promise<Response> {
-  const existing = await findExistingPendingMatch(services, {
-    workspaceId: input.workspaceId,
-    memoryId: input.memoryId,
-    proposed_changes: input.proposed_changes
+  return await withMemoryActionLock(
+    memoryActionLocks,
+    input.workspaceId,
+    input.memoryId,
+    async () => {
+      const existingProposalId = await findExistingPendingMatch(services, {
+        workspaceId: input.workspaceId,
+        memoryId: input.memoryId,
+        proposed_changes: input.proposed_changes
+      });
+      if (existingProposalId !== null) {
+        return alreadyPendingProposal(context, existingProposalId);
+      }
+      const result = await callMemoryUpdateProposalTool(services, input);
+      if (!result.ok) {
+        return jsonError(context, mcpToolErrorStatus(result.error.code), result.error);
+      }
+      return context.json({ success: true, data: result.output }, 200);
+    }
+  );
+}
+
+async function withMemoryActionLock<T>(
+  locks: MemoryActionLocks,
+  workspaceId: string,
+  memoryId: string,
+  action: () => Promise<T>
+): Promise<T> {
+  const key = `${workspaceId}\0${memoryId}`;
+  const previous = locks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  if (!existing.ok) return jsonError(context, mcpToolErrorStatus(existing.error.code), existing.error);
-  if (existing.proposalId !== null) return alreadyPendingProposal(context, existing.proposalId);
-  const result = await callMemoryUpdateProposalTool(services, input);
-  if (!result.ok) return jsonError(context, mcpToolErrorStatus(result.error.code), result.error);
-  return context.json({ success: true, data: result.output }, 200);
+  const chained = previous.then(() => current);
+  locks.set(key, chained);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (locks.get(key) === chained) {
+      locks.delete(key);
+    }
+  }
 }
 
 function alreadyPendingProposal(context: Context, proposalId: string): Response {

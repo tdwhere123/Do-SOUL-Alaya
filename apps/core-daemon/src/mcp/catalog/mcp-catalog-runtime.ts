@@ -16,9 +16,7 @@ import type {
 } from "./mcp-catalog-parsing.js";
 type DaemonMcpToolRuntimeExecutor = (input: {
   readonly rawInput: unknown;
-  readonly writableRoots: readonly string[];
-  readonly abortSignal?: AbortSignal;
-}) => Promise< unknown>;
+}) => Promise<unknown>;
 
 export function buildDaemonMcpCatalogState(input: {
   readonly isServerAllowed: (serverName: string) => boolean;
@@ -114,9 +112,14 @@ function resolveDaemonMcpCatalogEntries(input: {
   const rawToolByName = new Map(
     rawTools.map((tool) => [tool.spec.name, tool] as const)
   );
+  const rawToolByToolId = new Map(
+    rawTools.map((tool) => [tool.spec.tool_id, tool] as const)
+  );
   return Object.freeze(
     liveTools.map((tool) => {
-      const override = rawToolByName.get(tool.name);
+      const override =
+        rawToolByName.get(tool.name) ??
+        rawToolByToolId.get(deriveDaemonMcpToolId(input.serverName, tool.name));
       if (override !== undefined) {
         return override;
       }
@@ -154,14 +157,12 @@ export async function executeExternalMcpTool(input: {
   readonly toolId: string;
   readonly rawInput: unknown;
   readonly toolAvailability: ReadonlyMap<string, () => boolean>;
-  readonly writableRoots: readonly string[];
-  readonly abortSignal?: AbortSignal;
   readonly toolExecutors: ReadonlyMap<string, DaemonMcpToolRuntimeExecutor>;
   readonly readLastError?: (toolId: string) => Readonly<{
     readonly code: DaemonMcpListFailureCode;
     readonly message: string;
   }> | null;
-}): Promise< unknown> {
+}): Promise<unknown> {
   const availabilityCheck = input.toolAvailability.get(input.toolId);
   const runtimeExecutor = input.toolExecutors.get(input.toolId);
   if (availabilityCheck?.() !== true || runtimeExecutor === undefined) {
@@ -181,9 +182,7 @@ export async function executeExternalMcpTool(input: {
   }
 
   return await runtimeExecutor({
-    rawInput: input.rawInput,
-    writableRoots: input.writableRoots,
-    abortSignal: input.abortSignal
+    rawInput: input.rawInput
   });
 }
 

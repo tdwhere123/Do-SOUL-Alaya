@@ -28,6 +28,8 @@ export function loadSliceIntoOpenDatabase(
   const catalog = classifyPackedTables(createSqliteCatalogReader(live.connection));
   const triggers = readTriggers(live);
   const foreignKeys = live.connection.pragma("foreign_keys", { simple: true });
+  let primaryError: unknown = null;
+  let hasPrimaryError = false;
   let attached = false;
   try {
     // TEMP overlay views must not shadow main table DML during slice replace.
@@ -43,16 +45,43 @@ export function loadSliceIntoOpenDatabase(
     })();
     // Unqualified ANALYZE writes sqlite_stat on every attached schema, including the sealed slice.
     live.connection.exec("ANALYZE main");
+  } catch (error) {
+    primaryError = error;
+    hasPrimaryError = true;
+    throw error;
   } finally {
+    cleanupSliceLoad(live, attached, foreignKeys, hasPrimaryError, primaryError);
+  }
+}
+
+function cleanupSliceLoad(
+  live: StorageDatabase,
+  attached: boolean,
+  foreignKeys: unknown,
+  hasPrimaryError: boolean,
+  primaryError: unknown
+): void {
+  const cleanupErrors: unknown[] = [];
+  const runCleanup = (step: () => void) => {
     try {
-      if (attached) detachSlice(live);
-    } finally {
-      try {
-        live.connection.pragma(foreignKeys === 1 ? "foreign_keys = ON" : "foreign_keys = OFF");
-      } finally {
-        bindEmbeddingOverlayIfPresent(live.connection, live.filename);
-      }
+      step();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
     }
+  };
+  if (attached) runCleanup(() => detachSlice(live));
+  runCleanup(() => live.connection.pragma(foreignKeys === 1 ? "foreign_keys = ON" : "foreign_keys = OFF"));
+  runCleanup(() => bindEmbeddingOverlayIfPresent(live.connection, live.filename));
+  if (cleanupErrors.length === 0) return;
+  const cleanupSummary =
+    cleanupErrors.length === 1
+      ? cleanupErrors[0]
+      : new AggregateError(cleanupErrors, "Workspace slice cleanup failed");
+  if (!hasPrimaryError) {
+    throw cleanupSummary;
+  }
+  if (primaryError instanceof Error && Object.isExtensible(primaryError) && primaryError.cause === undefined) {
+    primaryError.cause = cleanupSummary;
   }
 }
 

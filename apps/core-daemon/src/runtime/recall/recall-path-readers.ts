@@ -278,7 +278,7 @@ function buildRecallPathReadPorts(input: Readonly<{
   readonly findActiveByWorkspace: FindActiveByWorkspace;
   readonly ensureTemporalProjection: RecallTemporalProjectionEnsurer;
 }>): RecallPathReadPorts {
-  return Object.freeze({
+  return {
     pathExpansionPort: Object.freeze({
       findByAnchors: input.findByAnchors,
       findByTimeConcernWindowDigests: input.findByTimeConcernWindowDigests
@@ -298,7 +298,7 @@ function buildRecallPathReadPorts(input: Readonly<{
     }),
     findActiveByWorkspace: input.findActiveByWorkspace,
     ensureTemporalProjection: input.ensureTemporalProjection
-  });
+  };
 }
 
 export function createPreparedTemporalRecallPathReadPorts(
