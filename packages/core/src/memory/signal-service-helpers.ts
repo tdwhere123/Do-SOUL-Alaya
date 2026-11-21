@@ -128,7 +128,8 @@ export function buildSignalEmittedEventInput(
  */
 export function resolveSignalMaterializationContext(
   signal: CandidateMemorySignal,
-  event: EventLogEntry
+  event: EventLogEntry,
+  emittedRawPayloadSummary = buildEventLogRawPayloadSummary(signal.raw_payload)
 ): SignalMaterializationContext | null {
   const expected = buildSignalEmittedEventInput(signal);
   if (
@@ -144,7 +145,9 @@ export function resolveSignalMaterializationContext(
 
   try {
     const actualPayload = SoulSignalEmittedPayloadSchema.parse(event.payload_json);
-    if (stableStringify(actualPayload) !== stableStringify(expected.payload_json)) {
+    if (stableStringify(actualPayload) !== stableStringify({
+      ...expected.payload_json, raw_payload: emittedRawPayloadSummary
+    })) {
       return null;
     }
   } catch {
@@ -162,6 +165,11 @@ export function resolveSignalMaterializationContext(
       occurred_at: sourceObservation.observed_at
     }
   };
+}
+
+export function readSignalRawPayloadDigest(summary: Readonly<Record<string, unknown>>): string | null {
+  const digest = summary[RAW_PAYLOAD_SHA256_KEY];
+  return typeof digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(digest) ? digest : null;
 }
 
 export function resolveSignalMaterializationDisposition(

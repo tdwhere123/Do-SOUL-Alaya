@@ -101,6 +101,7 @@ export interface SourceGroundingDeferTransitionPort {
     readonly recover_unqueued?: true;
     readonly workspace_id: string;
     readonly signal_id: string;
+    readonly expected_raw_payload?: CandidateMemorySignal["raw_payload"];
     readonly raw_payload?: CandidateMemorySignal["raw_payload"];
     readonly audit_event?: SourceGroundingDeferEventInput;
     readonly claim_token: string;

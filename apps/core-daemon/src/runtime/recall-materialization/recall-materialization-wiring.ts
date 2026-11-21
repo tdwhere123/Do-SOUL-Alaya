@@ -51,7 +51,11 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
     pathReadBind: input.pathReadBind
   });
   const bindTemporalPathReads = pathReadBind === "temporal";
-  const directPathReadPorts = createDirectRecallPathReadPorts(input, bindTemporalPathReads);
+  const relationAssertionService = new RelationAssertionService({
+    repo: input.relationAssertionRepo, eventPublisher: input.eventPublisher, eventHistory: input.eventLogRepo
+  });
+  const ensureTemporalProjection = createRecallTemporalProjectionEnsurer(relationAssertionService);
+  const directPathReadPorts = createDirectRecallPathReadPorts(input, bindTemporalPathReads, ensureTemporalProjection);
   const allowDirectSqliteRecallReads = input.database.filename === ":memory:";
   // Bound lazily because the existing read-client construction precedes the shared embedding runtime.
   // This callback observes the selected Source configuration; it never selects a window/backfill policy.
@@ -99,7 +103,8 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
     );
     const materializationRuntime = await createRecallMaterializationRuntime(
       input,
-      recallReadRuntime
+      recallReadRuntime,
+      relationAssertionService
     );
     await recallReadWorkerReady;
 
@@ -108,7 +113,8 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
       recallReadRuntime,
       materializationRuntime,
       recallReadWorkerClient,
-      sourceIndexProducer
+      sourceIndexProducer,
+      ensureTemporalProjection
     );
   } catch (error) {
     try { await sharedEmbeddingRuntime?.closeProvider(); }
@@ -197,9 +203,10 @@ function createRecallReadRuntime(
 
 async function createRecallMaterializationRuntime(
   input: CreateRecallMaterializationWiringInput,
-  recallReadRuntime: ReturnType<typeof createRecallReadRuntime>
+  recallReadRuntime: ReturnType<typeof createRecallReadRuntime>,
+  relationAssertionService: RelationAssertionService
 ) {
-  const pathRelationRuntime = createPathRelationRuntime(input);
+  const pathRelationRuntime = createPathRelationRuntime(input, relationAssertionService);
   const edgeRuntime = await createEdgeAndReconciliationRuntime({
     ...input,
     relationAssertionService: pathRelationRuntime.relationAssertionService
@@ -260,7 +267,8 @@ function buildRecallMaterializationWiringResult(
   recallReadRuntime: ReturnType<typeof createRecallReadRuntime>,
   materializationRuntime: Awaited<ReturnType<typeof createRecallMaterializationRuntime>>,
   recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>,
-  sourceIndexProducer: ReturnType<typeof createSourceIndexProducer>
+  sourceIndexProducer: ReturnType<typeof createSourceIndexProducer>,
+  ensureTemporalProjection: ReturnType<typeof createRecallTemporalProjectionEnsurer>
 ) {
   return {
     globalMemoryService: globalMemoryRuntime.globalMemoryService,
@@ -286,6 +294,7 @@ function buildRecallMaterializationWiringResult(
     reconciliationBasisStatus: materializationRuntime.edgeRuntime.reconciliationBasisStatus,
     pathRelationProposalService: materializationRuntime.pathRelationRuntime.pathRelationProposalService,
     relationAssertionService: materializationRuntime.pathRelationRuntime.relationAssertionService,
+    ensureTemporalProjection,
     relationAssertionAdmissionPort:
       materializationRuntime.pathRelationRuntime.relationAssertionAdmissionPort,
     relationProjectionCheckpoint:
@@ -333,14 +342,10 @@ function createEmbeddingRuntimeWithWarmupObserver(input: CreateRecallMaterializa
 
 function createDirectRecallPathReadPorts(
   input: CreateRecallMaterializationWiringInput,
-  bindTemporalPathReads: boolean
+  bindTemporalPathReads: boolean,
+  ensureTemporalProjection: ReturnType<typeof createRecallTemporalProjectionEnsurer>
 ) {
   if (!bindTemporalPathReads) throw new Error("recall path reads require temporal projection");
-  const relationAssertionService = new RelationAssertionService({
-    repo: input.relationAssertionRepo,
-    eventPublisher: input.eventPublisher,
-    eventHistory: input.eventLogRepo
-  });
   const temporalReader = new SqliteTemporalPathProjectionReader(input.relationAssertionRepo);
   return createRecallPathReadPorts({
     temporalProjectionSelected: true,
@@ -349,7 +354,7 @@ function createDirectRecallPathReadPorts(
       usageRepo: new SqliteFieldCausalUsageRepo(input.database, fieldContractSha256)
     }),
     softAssociationPathReader: input.softAssociationPathRepo,
-    ensureTemporalProjection: createRecallTemporalProjectionEnsurer(relationAssertionService)
+    ensureTemporalProjection
   });
 }
 

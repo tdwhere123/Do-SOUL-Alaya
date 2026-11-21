@@ -160,6 +160,14 @@ export function readActiveProjectionGeneration(
   }
 }
 
+export function readReadableProjectionHistoryDigest(db: StorageDatabase): string | null {
+  const row = db.connection.prepare(`
+    SELECT history_digest FROM temporal_schema_state
+    WHERE state_id = 1 AND status = 'ready' AND projection_refresh_required = 0
+  `).get() as Readonly<{ history_digest: string | null }> | undefined;
+  return row?.history_digest ?? null;
+}
+
 export async function findActiveProjectionByWorkspace(
   db: StorageDatabase,
   workspaceId: string

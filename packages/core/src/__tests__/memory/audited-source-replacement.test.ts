@@ -25,7 +25,10 @@ function fixture() {
     entries.push(entry);
     return entry;
   } };
-  const input = { stores, eventLogRepo, sha256: fieldContractSha256, runtimeNotifier: { notifyEntry: vi.fn() } };
+  const input = { stores, eventLogRepo, sha256: fieldContractSha256, runtimeNotifier: { notifyEntry: vi.fn() },
+    auditHistory: { ...eventLogRepo, transactional: <T>(work: () => T) => work(),
+      queryByEntityInCurrentTransaction: (type: string, id: string) =>
+        entries.filter(entry => entry.entity_type === type && entry.entity_id === id) } };
   return { stores, entries, input, admission: createAuditedSourceAdmission(input), writer: createAuditedSourceReplacement(input) };
 }
 

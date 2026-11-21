@@ -1,9 +1,9 @@
 import { type MemoryEntry, type TransitionCausedBy } from "@do-soul/alaya-protocol";
 import {
+  CoreError,
   createGardenProposalWriter,
   type AnswersWithEdgeProducerService,
   GardenBacklogTelemetryService,
-  RelationAssertionService,
   rebuildCountersFromEventLog,
   scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
@@ -38,7 +38,6 @@ import type { DaemonStartupStepRecord } from "../daemon/lifecycle/daemon-runtime
 import type { createRecallMaterializationWiring } from "../recall-materialization/recall-materialization-wiring.js";
 import type { AlayaRuntimeNotifier } from "../daemon/support/runtime-notifier.js";
 import { createAnswersWithBackfillPort } from "./answers-with-backfill.js";
-import { createRecallTemporalProjectionEnsurer } from "../recall/recall-path-readers.js";
 
 type DaemonRepositories = ReturnType<typeof createDaemonRepositories>;
 type DaemonServiceFoundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
@@ -92,6 +91,8 @@ type GardenRuntimeWiringInput = Readonly<{
   Pick<
     RecallMaterializationWiring,
     | "embeddingBackfillHandler"
+    | "relationAssertionService"
+    | "ensureTemporalProjection"
     | "signalService"
     | "materializationRouter"
     | "edgeAutoProducerService"
@@ -195,11 +196,7 @@ function createGardenSchedulerRuntime(
   forgetTombstoneAuthority: ReturnType<typeof createForgetTombstoneAuthority>,
   answersWithCrystallizer: AnswersWithEdgeProducerService | undefined
 ) {
-  const relationAssertionService = new RelationAssertionService({
-    repo: input.relationAssertionRepo,
-    eventPublisher: input.eventPublisher,
-    eventHistory: input.eventLogRepo
-  });
+  const { relationAssertionService } = input;
   return createGardenRuntime({
     databaseConnection: input.database.connection,
     backlogThresholds: input.gardenBacklogThresholds,
@@ -225,13 +222,20 @@ function createGardenSchedulerRuntime(
       eventLogRepo: input.eventLogRepo, runtimeNotifier: input.runtimeNotifier, gardenTaskRepo,
       relationAssertionService, now: () => new Date().toISOString(), warn: input.warnLogger.warn }),
     onStatementSessionSettled: async (evt) => {
-      await materializeWorkspaceSessionStructuralRelations({
+      const result = await materializeWorkspaceSessionStructuralRelations({
         database: input.database,
         assertionService: relationAssertionService,
         workspaceId: evt.workspaceId,
         runId: evt.runId,
         warn: input.warnLogger.warn
       });
+      if (result.assertionsFailed > 0) {
+        throw new CoreError("CONFLICT", "Statement-session structural relation admission was incomplete.");
+      }
+      if (!result.projectionRefreshed && result.assertionsAlreadyPresent > 0 &&
+          relationAssertionService.readActiveProjectionGeneration() === null) {
+        await input.ensureTemporalProjection();
+      }
     },
     strongRefService: input.strongRefService,
     workspaceRepo: input.workspaceRepo,
@@ -245,9 +249,7 @@ function createGardenSchedulerRuntime(
 }
 
 function createTemporalMaintenancePathReader(input: GardenRuntimeWiringInput) {
-  const service = new RelationAssertionService({ repo: input.relationAssertionRepo,
-    eventPublisher: input.eventPublisher, eventHistory: input.eventLogRepo });
-  const ensure = createRecallTemporalProjectionEnsurer(service);
+  const ensure = input.ensureTemporalProjection;
   const reader = new SqliteTemporalPathProjectionReader(input.relationAssertionRepo);
   return {
     findByAnchors: async (workspaceId: string, anchors: Parameters<SqliteTemporalPathProjectionReader["findByAnchors"]>[1]) => {

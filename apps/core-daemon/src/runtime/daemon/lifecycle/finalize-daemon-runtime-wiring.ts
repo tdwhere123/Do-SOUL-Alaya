@@ -280,6 +280,7 @@ function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput,
       sha256: fieldContractSha256,
       stores: input.fieldComposition.stores,
       eventLogRepo: input.eventLogRepo,
+      auditHistory: input.eventLogRepo,
       runtimeNotifier: input.runtimeNotifier
     }),
     environmentStatusService: input.environmentStatusService,

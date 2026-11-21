@@ -14,7 +14,10 @@ import {
 } from "./audited-source-admission.js";
 import { runFieldAtomicWithOutcome } from "./field-stores.js";
 import { createSourceAdmissionPort } from "./source-admission.js";
-import { appendSourceRecordAdmittedWithOutcome } from "./source-admission-audit.js";
+import {
+  appendSourceRecordAdmittedWithOutcome, recoverSourceRecordAdmissionAudit,
+  type SourceAdmissionAuditHistory, type SourceAdmissionAuditOutcome
+} from "./source-admission-audit.js";
 
 export type SourceReplacementPredecessor = Pick<SourceRecordIdentity,
   "workspace_id" | "source_id" | "identity" | "source_version" | "content_digest">;
@@ -44,10 +47,18 @@ export type SourceReplacementOutcome =
 export type AuditedSourceReplacement = Readonly<{
   replaceCurrent(request: SourceReplacementRequest,
     context: SourceAdmissionContext): Promise<SourceReplacementOutcome>;
+  /** Reconcile a committed source receipt, including one superseded since the original commit. */
+  recoverAdmission(recordId: string, context: SourceAdmissionContext): Promise<SourceReplacementAdmissionRecovery>;
 }>;
 
+type SourceReplacementAdmissionRecovery =
+  | Readonly<{ status: "not_committed" | "unknown" | "projection_unready"; cause: unknown }>
+  | Readonly<{ status: "projection_settled"; projection: "ready" | "deferred"; audit: SourceAdmissionAuditOutcome }>;
+
 /** Trusted Node capability for core-daemon. Possession is authority; not an agent write surface. */
-export function createAuditedSourceReplacement(input: AuditedSourceWriterInput): AuditedSourceReplacement {
+export function createAuditedSourceReplacement(
+  input: AuditedSourceWriterInput & { readonly auditHistory: SourceAdmissionAuditHistory }
+): AuditedSourceReplacement {
   const admission = createSourceAdmissionPort(input);
   return {
     async replaceCurrent(request, context) {
@@ -94,6 +105,23 @@ export function createAuditedSourceReplacement(input: AuditedSourceWriterInput):
       // notification without overriding the configured checkpoint owner.
       return { status: outcome.projection === "deferred" ? "committed_projection_deferred" : "ready",
         transition, audit_entry: audit.entry };
+    },
+    async recoverAdmission(recordId, context) {
+      const { workspaceId } = context;
+      const readRetainedRecord = () => {
+        const stored = input.stores.getStoredRecord(workspaceId, recordId);
+        if (stored === null) throw new CoreError("NOT_FOUND", "Source admission receipt is unavailable.");
+        return stored.record;
+      };
+      // The source receipt and pending projection request survived the original
+      // commit. Recovery drains the request without rerunning the replacement CAS.
+      const outcome = runFieldAtomicWithOutcome(input.stores, readRetainedRecord);
+      if (outcome.status !== "committed") return outcome;
+      if (outcome.projection === "unready") return { status: "projection_unready", cause: outcome.cause };
+      const audit = await recoverSourceRecordAdmissionAudit(
+        input.auditHistory, readRetainedRecord, input.runtimeNotifier
+      );
+      return { status: "projection_settled", projection: outcome.projection, audit };
     }
   };
 }

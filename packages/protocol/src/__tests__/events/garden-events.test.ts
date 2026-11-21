@@ -284,6 +284,7 @@ describe("garden events", () => {
       GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT,
       GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP,
       GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
+      GardenEventType.SOUL_GARDEN_STATEMENT_SESSION_EXTRACTED,
       GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
       GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED,
       GardenEventType.SOUL_GARDEN_TASK_EXPIRED,

@@ -7,6 +7,41 @@ afterEach(() => { vi.restoreAllMocks(); expect(isolation.violations).toEqual([])
 afterAll(() => isolation.restore());
 import { candidate, cli, connect, fixture } from "./recovery-test-fixture.js";
 
+it("redrives successive audited payload patches across SQLite reopen and leaves invalid chains unclaimed", async () => {
+  const h = await fixture();
+  try {
+    await h.owner.service.receiveSignal(candidate("patched"));
+    await expect(h.owner.service.redriveSourceGroundingDefer("workspace-1", "patched", {
+      raw_payload: { observation: "First correction." }
+    })).resolves.toMatchObject({ signal: { signal_state: "deferred" }, materialization: { target_kind: "deferred" } });
+    await h.reopen();
+    const { service, database, queue, materialize, events } = h.owner;
+    await expect(service.redriveSourceGroundingDefer("workspace-1", "patched", {
+      raw_payload: { observation: "Second correction." }
+    })).resolves.toMatchObject({ signal: { signal_state: "deferred" }, materialization: { target_kind: "deferred" } });
+
+    const [latestPatch] = await events.queryByEntityTypeBefore(
+      "candidate_memory_signal", "patched", "soul.signal.normalized", null, 1);
+    expect(latestPatch?.caused_by).toBe("operator_redrive");
+    const update = database.connection.prepare("UPDATE event_log SET payload_json = ? WHERE event_id = ?");
+    update.run(JSON.stringify({ ...latestPatch!.payload_json,
+      normalized_fields: { source_grounding_redrive_patch: { previous_raw_payload_sha256: "broken" } }
+    }), latestPatch!.event_id);
+    await expect(service.redriveSourceGroundingDefer("workspace-1", "patched"))
+      .resolves.toMatchObject({ signal: { signal_state: "deferred" }, materialization: null });
+    expect(queue.get("workspace-1", "patched")?.claim_token_fingerprint).toBeNull();
+    expect(materialize).toHaveBeenCalledOnce();
+
+    update.run(JSON.stringify(latestPatch!.payload_json), latestPatch!.event_id);
+    h.owner.outcome("materialized");
+    await expect(service.redriveSourceGroundingDefer("workspace-1", "patched"))
+      .resolves.toMatchObject({ signal: { signal_state: "materialized", raw_payload: { observation: "Second correction." } } });
+    expect(queue.get("workspace-1", "patched")).toBeNull();
+  } finally {
+    await h.close();
+  }
+});
+
 it("discovers an evicted proven deferral after reopen and explicitly recovers through CLI while preserving the FIFO cap and active owner", async () => {
   const h = await fixture();
   try {

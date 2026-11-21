@@ -112,10 +112,12 @@ export async function createStatementSessionEnvironment() {
         return { rawJson: JSON.stringify({ messages: request.messages.map(message => ({
           message_id: message.message_id, statements: respond(message.text) })) }) };
       } } }),
-    processSession: (provider: OfficialApiGardenProvider, config: RuntimeGardenComputeConfig = OFFICIAL_CONFIG) =>
-      createStatementSessionTaskProcessor({ now, gardenTaskRepo, eventPublisher, signalReceiver, hostSessionCapture,
+    processSession: (provider: OfficialApiGardenProvider, config: RuntimeGardenComputeConfig = OFFICIAL_CONFIG,
+      onStatementSessionSettled?: Parameters<typeof createStatementSessionTaskProcessor>[0]["onStatementSessionSettled"]) =>
+      createStatementSessionTaskProcessor({ now, gardenTaskRepo, eventLogRepo, eventPublisher, signalReceiver, hostSessionCapture,
         configService: { getRuntimeGardenComputeConfig: async () => config },
-        officialApiGardenProvider: provider, warn })(),
+        officialApiGardenProvider: provider,
+        ...(onStatementSessionSettled === undefined ? {} : { onStatementSessionSettled }) })(),
     sessionTasks: () => database.connection.prepare(`SELECT id, status, payload_json, last_error_text FROM garden_tasks
       WHERE kind = 'source_statement_session' ORDER BY json_extract(payload_json, '$.chunk_index')`)
       .all() as { id: string; status: string; payload_json: string; last_error_text: string | null }[],

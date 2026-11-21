@@ -4,7 +4,15 @@ import {
   type EventLogEntry,
   type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
-import { bindEventPublisher, EventPublisherPropagationError, type EventPublisherInput } from "../../runtime/event-publisher.js";
+import { appendEventLogSynchronously, bindEventPublisher, EventPublisherPropagationError, type EventPublisherInput } from "../../runtime/event-publisher.js";
+import { CoreError } from "../../shared/errors.js";
+import { stableStringify } from "../../shared/stable-stringify.js";
+
+export type SourceAdmissionAuditHistory = Readonly<{
+  append(event: EventPublisherInput): EventLogEntry | Promise<EventLogEntry>;
+  transactional<T>(work: () => T): T;
+  queryByEntityInCurrentTransaction(entityType: string, entityId: string): readonly EventLogEntry[];
+}>;
 
 export type SourceAdmissionAuditOutcome =
   | Readonly<{ status: "ready"; entry: Readonly<EventLogEntry> }>
@@ -50,6 +58,38 @@ export async function appendSourceRecordAdmittedWithOutcome(
     // A failed append may already have persisted its row. Never infer absence.
     return { status: "audit_incomplete", audit: attempted ? "unknown" : "not_appended", cause };
   }
+}
+
+export async function recoverSourceRecordAdmissionAudit(
+  history: SourceAdmissionAuditHistory,
+  readRetainedRecord: () => SourceRecordIdentity,
+  runtimeNotifier: Parameters<typeof appendSourceRecordAdmitted>[2]
+): Promise<SourceAdmissionAuditOutcome> {
+  let audit: { entry: EventLogEntry; appended: boolean };
+  try {
+    audit = history.transactional(() => {
+      const expected = sourceRecordAdmittedEvent(readRetainedRecord());
+      const entries = history.queryByEntityInCurrentTransaction(expected.entity_type, expected.entity_id)
+        .filter(entry => entry.event_type === expected.event_type && entry.workspace_id === expected.workspace_id);
+      if (entries.some(entry => stableStringify(entry.payload_json) !== stableStringify(expected.payload_json))) {
+        throw new CoreError("CONFLICT", "Retained source admission audit differs from its receipt.");
+      }
+      const existing = entries[0];
+      return existing === undefined
+        ? { entry: appendEventLogSynchronously(history, expected), appended: true }
+        : { entry: existing, appended: false };
+    });
+  } catch (cause) {
+    return { status: "audit_incomplete", audit: "unknown", cause };
+  }
+  if (audit.appended) {
+    try {
+      await runtimeNotifier.notifyEntry(audit.entry);
+    } catch (cause) {
+      return { status: "notification_failed", entry: audit.entry, cause };
+    }
+  }
+  return { status: "ready", entry: audit.entry };
 }
 
 function sourceRecordAdmittedEvent(record: SourceRecordIdentity): EventPublisherInput {

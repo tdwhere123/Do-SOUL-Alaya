@@ -34,10 +34,12 @@ export interface RelationAssertionAtomicRepoPort {
     readonly identityKey: string;
   }): Readonly<RelationAssertion>;
   markProjectionRefreshRequiredInCurrentTransaction(): void;
+  hasErasedFormationSourceInCurrentTransaction(assertion: Readonly<RelationAssertion>): boolean;
   assertFormationInputsInCurrentTransaction(input: {
     readonly workspaceId: string;
     readonly evidenceReceipts: readonly RelationAssertionEvidenceReceipt[];
     readonly formationReceipt: RelationFormationReceipt;
+    readonly allowErasedSourceReceipts?: boolean;
   }): void;
   getCurrentResolutionInCurrentTransaction(
     assertionId: string

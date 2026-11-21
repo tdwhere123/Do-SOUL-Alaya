@@ -25,8 +25,8 @@ export interface TemporalProjectionReadOptions {
 }
 
 type TemporalProjectionRepo = Pick<RelationAssertionRepo,
-  "findActiveProjectionByWorkspace" | "findProjectionByWorkspaceAtAsOf">
-  & Partial<Pick<RelationAssertionRepo, "readActiveProjectionGenerationInCurrentTransaction">>;
+  "findActiveProjectionByWorkspace" | "findProjectionByWorkspaceAtAsOf" |
+  "readActiveProjectionGenerationInCurrentTransaction" | "readReadableProjectionHistoryDigest">;
 
 /**
  * Read-only adapter for temporal PathRelation projections. It deliberately
@@ -83,6 +83,7 @@ export class SqliteTemporalPathProjectionReader {
     asOf: string | undefined
   ): Promise<readonly Readonly<PathRelation>[]> {
     const cacheKey = this.projectionCacheKey(workspaceId, asOf);
+    if (cacheKey === null) return await this.loadProjection(workspaceId, asOf);
     const cached = this.parsedProjections.get(cacheKey);
     if (cached !== undefined) return cached;
     const pending = this.loadProjection(workspaceId, asOf).then(
@@ -96,14 +97,11 @@ export class SqliteTemporalPathProjectionReader {
     return pending;
   }
 
-  private projectionCacheKey(workspaceId: string, asOf: string | undefined): string {
-    const generation = asOf === undefined ? this.activeGenerationOrEmpty() : "";
-    return `${workspaceId}\0${asOf ?? ""}\0${generation}`;
-  }
-
-  private activeGenerationOrEmpty(): string {
-    // A rebuilt active generation is invisible unless the repo exposes the generation id.
-    return this.relationAssertions.readActiveProjectionGenerationInCurrentTransaction?.() ?? "";
+  private projectionCacheKey(workspaceId: string, asOf: string | undefined): string | null {
+    const version = asOf === undefined
+      ? this.relationAssertions.readActiveProjectionGenerationInCurrentTransaction()
+      : this.relationAssertions.readReadableProjectionHistoryDigest();
+    return version === null ? null : `${workspaceId}\0${asOf ?? ""}\0${version}`;
   }
 
   private async loadProjection(

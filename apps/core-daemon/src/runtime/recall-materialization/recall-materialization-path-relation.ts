@@ -60,7 +60,13 @@ type PathRelationRuntimeInput = Pick<
   | "warn"
 >;
 
-export function createPathRelationRuntime(input: PathRelationRuntimeInput): Readonly<{
+export function createPathRelationRuntime(input: PathRelationRuntimeInput,
+  relationAssertionService = new RelationAssertionService({
+    repo: input.relationAssertionRepo,
+    eventPublisher: input.eventPublisher,
+    eventHistory: input.eventLogRepo
+  })
+): Readonly<{
   readonly pathRelationProposalService: PathRelationProposalService;
   readonly relationAssertionService: RelationAssertionService;
   readonly relationAssertionAdmissionPort: RelationAssertionAdmissionPort;
@@ -70,11 +76,6 @@ export function createPathRelationRuntime(input: PathRelationRuntimeInput): Read
   readonly pathRelationEvictionTimer: NodeJS.Timeout;
 }> {
   const runtimeConfig = readPathRelationRuntimeConfig();
-  const relationAssertionService = new RelationAssertionService({
-    repo: input.relationAssertionRepo,
-    eventPublisher: input.eventPublisher,
-    eventHistory: input.eventLogRepo
-  });
   const pathRelationProposalService = createPathRelationProposalService(input, runtimeConfig);
   const pathRelationEvictionTimer = createPathRelationEvictionTimer(
     input,

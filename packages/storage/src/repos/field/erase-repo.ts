@@ -29,6 +29,7 @@ import type {
 import { scrubDerivedPrivacyClosure } from "./writes/erase/derived-closure.js";
 import type { EraseAuditRedactor } from "./writes/erase/governance-closure.js";
 import { repairSourceClosureBatch } from "./writes/erase/repair-progress.js";
+import { discoverEraseGenerationSubjects, invalidateErasedProjections } from "./writes/erase/projection-invalidation.js";
 
 type EraseSubject = Readonly<{
   subject_kind: ProjectionEraseSubjectKind;
@@ -86,7 +87,9 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
       this.insertDescendantBarriers(stored, closure.subjects);
       this.scrubEvidence(stored, closure.evidenceIds, closure.subjects);
       this.scrubSubjects(stored, closure.subjects);
-      this.invalidateGenerations(stored.workspace_id, closure.subjects);
+      const generationIds = closure.subjects.filter(subject => subject.subject_kind === "generation")
+        .map(subject => subject.subject_id);
+      invalidateErasedProjections(this.database, stored, generationIds);
       return stored;
     }, "erase barrier");
   }
@@ -149,7 +152,7 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
     return {
       subjects: row.subject_kind === "generation" || !includeCurrentGenerations
         ? subjects
-        : [...subjects, ...this.discoverGenerations(row.workspace_id)],
+        : [...subjects, ...discoverEraseGenerationSubjects(this.database, row.workspace_id)],
       evidenceIds: row.subject_kind === "source_record"
         ? [...new Set(subjects.filter(subject => subject.subject_kind === "source_record")
           .flatMap(subject => this.discoverEvidenceIds(row.workspace_id, subject.subject_id)))].sort()
@@ -214,15 +217,6 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
       return payload.success && payload.data.workspace_id === workspaceId && payload.data.evidence_object_id === row.entity_id
         ? [row.entity_id] : [];
     });
-  }
-
-  private discoverGenerations(workspaceId: string): readonly EraseSubject[] {
-    return parseRows(this.database.connection.prepare(`
-      SELECT 'generation' AS subject_kind, generation_id AS subject_id
-      FROM projection_generations
-      WHERE workspace_id = ?
-      ORDER BY generation_id
-    `).all(workspaceId), eraseSubjectParser, "erase generation descendant");
   }
 
   private insertDescendantBarriers(
@@ -324,32 +318,6 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
         connection.prepare("DELETE FROM source_host_inventories WHERE workspace_id = ? AND record_id = ?")
           .run(root.workspace_id, subject.subject_id);
       }
-    }
-  }
-
-  private invalidateGenerations(workspaceId: string, subjects: readonly EraseSubject[]): void {
-    const connection = this.database.connection;
-    const deletePointer = connection.prepare(`
-      DELETE FROM projection_generation_pointer
-      WHERE workspace_id = ? AND active_generation_id = ?
-    `);
-    const retire = connection.prepare(`
-      UPDATE projection_generations SET status = 'retired'
-      WHERE workspace_id = ? AND generation_id = ? AND status = 'active'
-    `);
-    const deletePins = connection.prepare(
-      "DELETE FROM projection_pins WHERE workspace_id = ? AND generation_id = ?"
-    );
-    const deleteArtifacts = connection.prepare(`
-      DELETE FROM projection_generation_artifacts
-      WHERE workspace_id = ? AND generation_id = ?
-    `);
-    for (const subject of subjects) {
-      if (subject.subject_kind !== "generation") continue;
-      deletePointer.run(workspaceId, subject.subject_id);
-      retire.run(workspaceId, subject.subject_id);
-      deletePins.run(workspaceId, subject.subject_id);
-      deleteArtifacts.run(workspaceId, subject.subject_id);
     }
   }
 }

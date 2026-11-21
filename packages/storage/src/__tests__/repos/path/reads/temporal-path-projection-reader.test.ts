@@ -57,6 +57,8 @@ describe("temporal path projection reader as-of lookup", () => {
       }
     } as PathRelation;
     const reader = new SqliteTemporalPathProjectionReader({
+      readActiveProjectionGenerationInCurrentTransaction: () => "active",
+      readReadableProjectionHistoryDigest: () => "history",
       findActiveProjectionByWorkspace: async () => [path],
       findProjectionByWorkspaceAtAsOf: async () => [path]
     });
@@ -173,6 +175,8 @@ function countingProjectionRepo(
   let activeCalls = 0;
   let asOfCalls = 0;
   return {
+    readActiveProjectionGenerationInCurrentTransaction: () => "active",
+    readReadableProjectionHistoryDigest: () => "history",
     get activeCalls() {
       return activeCalls;
     },

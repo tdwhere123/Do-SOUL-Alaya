@@ -263,6 +263,8 @@ async function buildGardenWiring(
     proposalRepo: repositories.proposalRepo,
     pathPlasticityWatermarkRepo: repositories.pathPlasticityWatermarkRepo,
     embeddingBackfillHandler: runtimeWiring.recallWiring.embeddingBackfillHandler,
+    relationAssertionService: runtimeWiring.recallWiring.relationAssertionService,
+    ensureTemporalProjection: runtimeWiring.recallWiring.ensureTemporalProjection,
     answersWithCrystallizer: createAnswersWithCrystallizer({
       database: bootstrap.database,
       relationAssertionAdmissionPort: runtimeWiring.recallWiring.relationAssertionAdmissionPort,

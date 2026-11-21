@@ -47,7 +47,8 @@ const nextRequest = (overrides: Partial<SourceAdmissionRequest> = {}) => sourceR
 function bind(database: StorageDatabase, mode: FieldProjectionAdmissionMode) {
   const eventLogRepo = new SqliteEventLogRepo(database);
   const field = createDaemonFieldComposition({ database, eventLogRepo, fieldProjectionAdmissionMode: mode });
-  const input = { stores: field.stores, eventLogRepo, sha256: fieldContractSha256, runtimeNotifier: { notifyEntry: vi.fn() } };
+  const input = { stores: field.stores, eventLogRepo, auditHistory: eventLogRepo, sha256: fieldContractSha256,
+    runtimeNotifier: { notifyEntry: vi.fn() } };
   return { database, eventLogRepo, field, input,
     admission: createAuditedSourceAdmission(input), writer: createAuditedSourceReplacement(input) };
 }
@@ -199,6 +200,17 @@ describe("file-backed source replacement transaction and effects", () => {
     expect(append).not.toHaveBeenCalled();
     expect(notifyEntry).not.toHaveBeenCalled();
     expect(drainPending).toHaveBeenCalledOnce();
+
+    const recordId = result.transition.replacement.record.identity;
+    await expect(writer.recoverAdmission(recordId, context)).resolves.toMatchObject({ status: "projection_unready" });
+    const recovered = await f.peer.writer.recoverAdmission(recordId, context);
+    expect(recovered).toMatchObject({ status: "projection_settled", projection: "ready",
+      audit: { status: "ready", entry: { entity_id: recordId } } });
+    expect(f.database.connection.prepare("SELECT workspace_id FROM field_projection_rebuild_requests").all()).toEqual([]);
+    expect(f.field.fieldRepos.generations.readActive(WORKSPACE)).not.toEqual(active);
+    await expect(f.writer.recoverAdmission(recordId, context)).resolves.toEqual(recovered);
+    expect(await f.eventLogRepo.queryByEntity("source_record", recordId)).toHaveLength(1);
+    expectHistory(f.database, first.record, "2");
   });
 
   it.each([

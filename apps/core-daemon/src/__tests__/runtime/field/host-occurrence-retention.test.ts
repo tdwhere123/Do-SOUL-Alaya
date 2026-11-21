@@ -32,7 +32,8 @@ function open(filename: string) {
   const database = initDatabase({ filename }); databases.push(database);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const field = createDaemonFieldComposition({ database, eventLogRepo, fieldProjectionAdmissionMode: "explicit_checkpoint" });
-  const input = { stores: field.stores, sha256: fieldContractSha256, eventLogRepo, runtimeNotifier: { notifyEntry: () => undefined } };
+  const input = { stores: field.stores, sha256: fieldContractSha256, eventLogRepo,
+    auditHistory: eventLogRepo, runtimeNotifier: { notifyEntry: () => undefined } };
   return { database, field, input, admission: createAuditedSourceAdmission(input) };
 }
 function fixture() {

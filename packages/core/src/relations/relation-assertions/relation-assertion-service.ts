@@ -1,8 +1,4 @@
 import {
-  RelationAssertionAdmissionSchema,
-  RelationAssertionAdmittedPayloadSchema,
-  RelationAssertionResolvedPayloadSchema,
-  RuntimeGovernanceEventType,
   compareUtcInstants,
   type RelationAssertion,
   type RelationAssertionResolution
@@ -10,6 +6,7 @@ import {
 import { stableStringify } from "../../shared/stable-stringify.js";
 import { CoreError } from "../../shared/errors.js";
 import type { EventPublisherDecision } from "../../runtime/event-publisher.js";
+import { sortEvidenceReceipts, verifyAdmissionEvent, verifyResolutionEvent } from "./relation-assertion-event-history.js";
 import { buildRelationProjection } from "./relation-projection-builder.js";
 import {
   createAdmissionEventInput,
@@ -28,7 +25,6 @@ import type {
   RelationAssertionAdmissionRequest,
   RelationAssertionAdmissionResult,
   RelationAssertionDeferredAdmissionResult,
-  RelationAssertionEventEntry,
   RelationAssertionProjectionResult,
   RelationAssertionReplayResult,
   RelationAssertionResolutionRequest,
@@ -243,6 +239,9 @@ export class RelationAssertionService {
     if (assertion.workspace_id !== request.workspaceId) {
       throw new Error(`Relation assertion ${request.assertionId} belongs to another workspace.`);
     }
+    if (this.dependencies.repo.hasErasedFormationSourceInCurrentTransaction(assertion)) {
+      throw new CoreError("CONFLICT", "Relation assertion has an erased formation source.");
+    }
     return assertion;
   }
 
@@ -271,10 +270,14 @@ export class RelationAssertionService {
     asOf: string,
     activate: boolean
   ): EventPublisherDecision<RelationAssertionReplayResult> {
-    const projection = this.buildProjectionInCurrentTransaction(asOf, activate);
+    const current = !activate && this.readActiveProjectionGeneration() === null
+      ? this.buildProjectionInCurrentTransaction(this.now(), true)
+      : undefined;
+    const projection = this.buildProjectionInCurrentTransaction(asOf, activate, current?.generation.historyDigest);
     return {
       eventInputs: [],
       apply: () => {
+        if (current !== undefined) this.activateProjection(current);
         const projectionGeneration = this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
           projection.generation,
           { activate }
@@ -289,31 +292,35 @@ export class RelationAssertionService {
   }
 
   private assertFormationInputs(
-    assertion: Pick<RelationAssertion, "workspace_id" | "evidence_receipts" | "formation_receipt">
+    assertion: Pick<RelationAssertion, "workspace_id" | "evidence_receipts" | "formation_receipt">,
+    allowErasedSourceReceipts = false
   ): void {
     this.dependencies.repo.assertFormationInputsInCurrentTransaction({
       workspaceId: assertion.workspace_id,
       evidenceReceipts: assertion.evidence_receipts,
-      formationReceipt: assertion.formation_receipt
+      formationReceipt: assertion.formation_receipt,
+      allowErasedSourceReceipts
     });
   }
 
   private buildProjectionInCurrentTransaction(
     asOf: string,
-    activate: boolean
+    activate: boolean,
+    currentHistoryDigest = this.dependencies.repo.readCurrentHistoryDigestInCurrentTransaction?.() ?? null
   ): RelationAssertionProjectionResult {
-    const assertions = this.dependencies.repo.listAssertionsInCurrentTransaction();
-    const resolutions = this.dependencies.repo.listResolutionHistoryInCurrentTransaction();
+    const assertions = this.dependencies.repo.listAssertionsInCurrentTransaction().filter(
+      assertion => !this.dependencies.repo.hasErasedFormationSourceInCurrentTransaction(assertion)
+    );
+    const assertionIds = new Set(assertions.map(assertion => assertion.assertion_id));
+    const resolutions = this.dependencies.repo.listResolutionHistoryInCurrentTransaction().filter(
+      resolution => assertionIds.has(resolution.assertion_id)
+    );
     return buildRelationProjection(
       assertions,
       resolutions,
       asOf,
       this.permittedTimelessPolicyIds,
-      {
-        activate,
-        currentHistoryDigest:
-          this.dependencies.repo.readCurrentHistoryDigestInCurrentTransaction?.() ?? null
-      }
+      { activate, currentHistoryDigest }
     );
   }
 
@@ -322,12 +329,12 @@ export class RelationAssertionService {
     resolutions: readonly Readonly<RelationAssertionResolution>[]
   ): void {
     for (const assertion of assertions) {
-      this.assertFormationInputs(assertion);
       const events = this.dependencies.eventHistory.queryByEntityInCurrentTransaction(
         RELATION_ASSERTION_ENTITY_TYPE,
         assertion.assertion_id
       );
       verifyAdmissionEvent(events, assertion);
+      this.assertFormationInputs(assertion, true);
       const history = resolutions.filter(resolution => resolution.assertion_id === assertion.assertion_id);
       const ids = new Set(history.map(resolution => resolution.resolution_id));
       if (ids.size !== history.length) throw new CoreError("CONFLICT", "Relation resolution history repeats an immutable identity.");
@@ -384,12 +391,6 @@ function assertSameAdmission(
   }
 }
 
-function sortEvidenceReceipts(
-  receipts: RelationAssertion["evidence_receipts"]
-): RelationAssertion["evidence_receipts"] {
-  return [...receipts].sort((left, right) => left.evidence_id.localeCompare(right.evidence_id));
-}
-
 function assertReplayIdentity(
   byId: Readonly<RelationAssertion> | null,
   byIdentity: Readonly<RelationAssertion> | null
@@ -411,86 +412,5 @@ function assertSameResolution(
     (request.resolvedAt !== undefined && compareUtcInstants(existing.resolved_at, request.resolvedAt) !== 0)
   ) {
     throw new Error(`Relation assertion ${existing.assertion_id} already has a different immutable resolution.`);
-  }
-}
-
-function verifyAdmissionEvent(
-  events: readonly RelationAssertionEventEntry[],
-  assertion: Readonly<RelationAssertion>
-): void {
-  const matching = events.filter((event) =>
-    event.event_type === RuntimeGovernanceEventType.RELATION_ASSERTION_ADMITTED
-  );
-  if (matching.length !== 1) {
-    throw new Error(`Relation assertion ${assertion.assertion_id} has no unique admission EventLog entry.`);
-  }
-  const event = matching[0]!;
-  const payload = parseAdmissionPayload(event.payload_json, assertion.assertion_id);
-  const expected = RelationAssertionAdmissionSchema.parse({
-    assertion_id: assertion.assertion_id,
-    workspace_id: assertion.workspace_id,
-    evidence_receipts: assertion.evidence_receipts,
-    formation_receipt: assertion.formation_receipt,
-    anchors: assertion.anchors,
-    relation_kind: assertion.relation_kind,
-    validity: assertion.validity,
-    admitted_at: assertion.admitted_at
-  });
-  if (
-    event.event_id !== assertion.admission_event_id ||
-    event.entity_type !== RELATION_ASSERTION_ENTITY_TYPE ||
-    event.entity_id !== assertion.assertion_id ||
-    event.workspace_id !== assertion.workspace_id ||
-    stableStringify({ ...payload, evidence_receipts: sortEvidenceReceipts(payload.evidence_receipts) }) !==
-      stableStringify({ ...expected, evidence_receipts: sortEvidenceReceipts(expected.evidence_receipts) })
-  ) {
-    throw new Error(`Relation assertion ${assertion.assertion_id} admission EventLog payload is not canonical.`);
-  }
-}
-
-function verifyResolutionEvent(
-  events: readonly RelationAssertionEventEntry[],
-  resolution: Readonly<RelationAssertionResolution>
-): void {
-  const matching = events.filter((event) =>
-    event.event_type === RuntimeGovernanceEventType.RELATION_ASSERTION_RESOLVED && event.event_id === resolution.event_id
-  );
-  if (matching.length !== 1) {
-    throw new Error(`Relation assertion ${resolution.assertion_id} has no unique resolution EventLog entry.`);
-  }
-  const event = matching[0]!;
-  const payload = parseResolutionPayload(event.payload_json, resolution.assertion_id);
-  const expected = RelationAssertionResolvedPayloadSchema.parse({
-    resolution_id: resolution.resolution_id,
-    assertion_id: resolution.assertion_id,
-    workspace_id: resolution.workspace_id,
-    resolution_kind: resolution.resolution_kind,
-    resolved_at: resolution.resolved_at,
-    reason: resolution.reason
-  });
-  if (
-    event.event_id !== resolution.event_id ||
-    event.entity_type !== RELATION_ASSERTION_ENTITY_TYPE ||
-    event.entity_id !== resolution.assertion_id ||
-    event.workspace_id !== resolution.workspace_id ||
-    stableStringify(payload) !== stableStringify(expected)
-  ) {
-    throw new Error(`Relation assertion ${resolution.assertion_id} resolution EventLog payload is not canonical.`);
-  }
-}
-
-function parseAdmissionPayload(payload: unknown, assertionId: string) {
-  try {
-    return RelationAssertionAdmittedPayloadSchema.parse(payload);
-  } catch {
-    throw new Error(`Relation assertion ${assertionId} admission EventLog payload is not canonical.`);
-  }
-}
-
-function parseResolutionPayload(payload: unknown, assertionId: string) {
-  try {
-    return RelationAssertionResolvedPayloadSchema.parse(payload);
-  } catch {
-    throw new Error(`Relation assertion ${assertionId} resolution EventLog payload is not canonical.`);
   }
 }

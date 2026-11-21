@@ -26,7 +26,16 @@ export async function materializeAcceptedSignal(
   expectedTriageRevision?: number
 ): Promise<SignalServiceReceiveResult> {
   const materializer = dependencies.postTriageMaterializer;
-  if (materializer === undefined) return { signal, triage_result: triageResult, materialization: null };
+  if (materializer === undefined) {
+    if (claimToken !== undefined) {
+      return await completeDeferredMaterialization({
+        dependencies, warn, signal, claimToken,
+        materialization: { signal_id: signal.signal_id, created_objects: [], success: true,
+          target_kind: "deferred", routing_reason: "materializer_unavailable" }
+      });
+    }
+    return { signal, triage_result: triageResult, materialization: null };
+  }
   if (claimToken === undefined && signal.signal_state !== SignalState.TRIAGED && signal.signal_state !== SignalState.DEFERRED) {
     throw new CoreError("CONFLICT", "Materialization requires an unclaimed triaged or eligible deferred signal.");
   }

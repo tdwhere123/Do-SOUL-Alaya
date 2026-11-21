@@ -46,7 +46,7 @@ function createHarness(options?: {
     const appended: EventLogEntry = {
       event_id: `evt_${appendCallCount}`,
       created_at: "2026-07-14T00:00:00.000Z",
-      revision: 0,
+      revision: appendCallCount,
       ...event
     };
     appendedEvents.push(appended);

@@ -164,6 +164,10 @@ describe("RelationAssertionService", () => {
     const sourceEvent = await appendSourceSignalEvent(harness);
     await createAnchoredEvidence(harness, sourceEvent.event_id);
     const admitted = await harness.service.admit(admissionRequest(sourceEvent));
+    const projectionReader = new SqliteTemporalPathProjectionReader(harness.relationRepo);
+    const afterResolution = { asOf: "2026-07-18T12:00:00.000Z" };
+    await harness.service.verifyAndRebuild(afterResolution.asOf);
+    await expect(projectionReader.findByWorkspace("workspace-1", afterResolution)).resolves.toHaveLength(1);
     const resolved = await harness.service.resolve({
       assertionId: admitted.assertion.assertion_id,
       workspaceId: "workspace-1",
@@ -178,6 +182,10 @@ describe("RelationAssertionService", () => {
     // A future effective resolution cannot retire the current-time projection yet.
     expect(resolved.activeProjectionCount).toBe(1);
     expect(await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1")).toHaveLength(1);
+    await expect(projectionReader.findByWorkspace("workspace-1", afterResolution))
+      .rejects.toThrow(/No verified temporal projection/);
+    await harness.service.verifyAndRebuild(afterResolution.asOf);
+    await expect(projectionReader.findByWorkspace("workspace-1", afterResolution)).resolves.toEqual([]);
 
     await expect(harness.service.verifyAndRebuild("2026-07-17T12:00:00.000Z"))
       .resolves.toMatchObject({ activeProjectionCount: 1 });
@@ -186,7 +194,6 @@ describe("RelationAssertionService", () => {
       "workspace-1",
       "2026-07-17T12:00:00.000Z"
     )).toHaveLength(1);
-    const projectionReader = new SqliteTemporalPathProjectionReader(harness.relationRepo);
     await expect(projectionReader.findByAnchors(
       "workspace-1",
       [{ kind: "object", object_id: "memory-1" }],
