@@ -8,15 +8,10 @@ import {
   type ProjectMappingTransitionAction,
   type ProjectMappingState
 } from "@do-soul/alaya-protocol";
-import type { Context, Hono } from "hono";
+import type { Hono } from "hono";
 import { CoreError, StrictConfirmationRequired } from "@do-soul/alaya-core";
-import { throwInvalidRequestBody } from "../shared/shared.js";
-import {
-  isWorkspaceGrantDenied,
-  REQUEST_TOKEN_GRANT_CONTEXT_KEY,
-  WORKSPACE_TOKEN_DENIED_MESSAGE,
-  type RequestTokenGrant
-} from "../../runtime/request-token-binding.js";
+import { jsonError, parseJsonObject, parseRequiredString } from "../shared/shared.js";
+import { respondIfWorkspaceGrantDenied } from "../../runtime/request-token-binding.js";
 
 export interface ProjectMappingRouteServices {
   readonly workspaceService: WorkspaceService;
@@ -36,8 +31,8 @@ function registerProjectMappingListRoute(
 ): void {
   app.get("/soul/project-mapping-anchors", async (context) => {
     const workspaceId = parseRequiredString(context.req.query("workspace_id"), "workspace_id is required");
-    const forbidden = denyUnauthorizedWorkspace(context, workspaceId);
-    if (forbidden !== null) return forbidden;
+    const forbidden = respondIfWorkspaceGrantDenied(context, workspaceId);
+    if (forbidden !== undefined) return forbidden;
     await services.workspaceService.getById(workspaceId);
 
     const mappingState = parseOptionalProjectMappingState(context.req.query("mapping_state"));
@@ -62,8 +57,8 @@ function registerProjectMappingSuggestRoute(
 ): void {
   app.post("/soul/project-mapping-anchors", async (context) => {
     const body = await parseCreateRequest(context.req.json.bind(context.req));
-    const forbidden = denyUnauthorizedWorkspace(context, body.workspace_id);
-    if (forbidden !== null) return forbidden;
+    const forbidden = respondIfWorkspaceGrantDenied(context, body.workspace_id);
+    if (forbidden !== undefined) return forbidden;
     await services.workspaceService.getById(body.workspace_id);
 
     const anchor = await services.projectMappingService.suggest(
@@ -90,8 +85,8 @@ function registerProjectMappingTransitionRoute(
 ): void {
   app.patch("/workspaces/:wsId/soul/project-mapping-anchors/:id/transition", async (context) => {
     const workspaceId = parseRequiredString(context.req.param("wsId"), "wsId is required");
-    const forbidden = denyUnauthorizedWorkspace(context, workspaceId);
-    if (forbidden !== null) return forbidden;
+    const forbidden = respondIfWorkspaceGrantDenied(context, workspaceId);
+    if (forbidden !== undefined) return forbidden;
     await services.workspaceService.getById(workspaceId);
     const mappingId = parseRequiredString(context.req.param("id"), "id is required");
     const body = await parseTransitionRequest(context.req.json.bind(context.req));
@@ -120,8 +115,8 @@ function registerProjectMappingBatchAcceptRoute(
 ): void {
   app.post("/soul/project-mapping-anchors/batch-accept", async (context) => {
     const body = await parseBatchAcceptRequest(context.req.json.bind(context.req));
-    const forbidden = denyUnauthorizedWorkspace(context, body.workspace_id);
-    if (forbidden !== null) return forbidden;
+    const forbidden = respondIfWorkspaceGrantDenied(context, body.workspace_id);
+    if (forbidden !== undefined) return forbidden;
     await services.workspaceService.getById(body.workspace_id);
 
     try {
@@ -138,14 +133,9 @@ function registerProjectMappingBatchAcceptRoute(
       );
     } catch (error) {
       if (error instanceof StrictConfirmationRequired) {
-        return context.json(
-          {
-            success: false,
-            error: "Strict confirmation required",
-            strictIds: error.mappingIds
-          },
-          422
-        );
+        return jsonError(context, 422, "Strict confirmation required", {
+          strictIds: error.mappingIds
+        });
       }
 
       throw error;
@@ -223,46 +213,6 @@ async function parseBatchAcceptRequest(readJson: () => Promise< unknown>): Promi
     workspace_id: parseRequiredString(body.workspace_id, "workspace_id is required"),
     accepted_by: parseOptionalAcceptedBy(body.accepted_by) ?? AcceptedBy.USER
   };
-}
-
-async function parseJsonObject(
-  readJson: () => Promise< unknown>,
-  objectMessage: string
-): Promise<Record<string, unknown>> {
-  let body: unknown;
-
-  try {
-    body = await readJson();
-  } catch (error) {
-    throwInvalidRequestBody(error);
-  }
-
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    throw new CoreError("VALIDATION", objectMessage);
-  }
-
-  return body as Record<string, unknown>;
-}
-
-function denyUnauthorizedWorkspace(context: Context, workspaceId: string): Response | null {
-  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
-  if (!isWorkspaceGrantDenied(grant, workspaceId)) {
-    return null;
-  }
-  return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
-}
-
-function parseRequiredString(value: unknown, message: string): string {
-  if (typeof value !== "string") {
-    throw new CoreError("VALIDATION", message);
-  }
-
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    throw new CoreError("VALIDATION", message);
-  }
-
-  return trimmed;
 }
 
 function parseOptionalAcceptedBy(value: unknown): AcceptedBy | undefined {

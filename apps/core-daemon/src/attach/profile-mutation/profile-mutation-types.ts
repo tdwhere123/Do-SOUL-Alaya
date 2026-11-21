@@ -3,24 +3,16 @@ export type ProfileMutationDirection = "add" | "remove";
 
 export interface ProfilePaths {
   readonly mcpConfigPath: string;
-  readonly slashCommandsPath: string;
-  readonly slashPathCandidates: readonly string[];
-}
-
-export interface ProfileMutationConflict {
-  readonly message: string;
-  readonly existingCommand: string;
 }
 
 export interface ProfileMutationOperation {
-  readonly recordKind: "mcp_server_entry" | "slash_alias";
+  readonly recordKind: "mcp_server_entry";
   readonly label: string;
   readonly path: string;
   readonly before: string | undefined;
   readonly after: string | undefined;
   readonly changed: boolean;
   readonly alreadyAbsent: boolean;
-  readonly conflict?: ProfileMutationConflict;
 }
 
 export interface ProfileMutationPlan {
@@ -66,7 +58,6 @@ export interface ProfileMutationBuildOptions extends ResolveProfilePathsOptions 
 export interface ProfileMutationApplyOptions {
   readonly fs?: ProfileMutationFs;
   readonly auditWriter?: ProfileMutationAuditWriter;
-  readonly allowConflicts?: boolean;
   readonly nowIso?: () => string;
 }
 

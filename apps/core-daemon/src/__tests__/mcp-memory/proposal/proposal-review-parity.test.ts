@@ -55,7 +55,7 @@ describe("proposal review mcp http cli parity", () => {
     const mcpResult = await callAlayaMcpMemoryTool(
       {
         memoryToolHandler: createReviewHandler(),
-        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "inspector", sessionId: "review-parity-mcp-session" })
+        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "http-reviewer", sessionId: "review-parity-mcp-session" })
       },
       "soul.review_memory_proposal",
       reviewerArgs
@@ -169,8 +169,8 @@ describe("proposal review mcp http cli parity", () => {
         {
           workspaceId: "ws1",
           runId: null,
-          agentTarget: "inspector",
-          sessionId: "inspector-no-binding-review"
+          agentTarget: "http-reviewer",
+          sessionId: "http-reviewer-no-binding-review"
         }
       )
     ).rejects.toMatchObject({ code: "VALIDATION", message: "reviewer binding not configured" });

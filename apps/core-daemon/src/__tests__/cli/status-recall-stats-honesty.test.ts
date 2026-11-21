@@ -5,6 +5,7 @@ import {
   type AlayaCliDaemonRuntime
 } from "../../cli/bridge.js";
 import { createStatusCommand } from "../../cli/status.js";
+import { HTTP_REVIEWER_AGENT_TARGET } from "../../mcp-memory/proposal/reviewer-surfaces.js";
 import type { RecallUtilizationStats } from "../../services/status/recall-utilization-service.js";
 
 const EMPTY_LATENCY_STATS: RecallUtilizationStats = {
@@ -12,7 +13,7 @@ const EMPTY_LATENCY_STATS: RecallUtilizationStats = {
     workspace_id: "ws1",
     since: "2026-07-29T00:00:00.000Z",
     until: "2026-07-30T00:00:00.000Z",
-    excluded_agent_targets: ["cli", "inspector", "tools-cli"]
+    excluded_agent_targets: ["cli", HTTP_REVIEWER_AGENT_TARGET, "tools-cli"]
   },
   recall: {
     total: 0,

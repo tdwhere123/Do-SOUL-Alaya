@@ -1,126 +1,24 @@
 import { Hono } from "hono";
-
 import { describe, expect, it, vi } from "vitest";
-
 import { CoreError } from "@do-soul/alaya-core";
-
-import {
-  RecallContextEventType,
-  type EventLogEntry,
-  type RecallContextEventTypeValue
-} from "@do-soul/alaya-protocol";
-
+import { RecallContextEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
 import {
   registerRecallUtilizationRoutes,
   type RecallUtilizationRouteServices,
+  type SingleUsedAnchorDeliveryReader,
+  type SingleUsedAnchorEmitInput,
   type SingleUsedAnchorTelemetryEmitter
 } from "../../routes/memory/recall/recall-utilization.js";
-
-import type { RecallUtilizationEventLogPort } from "../../services/status/recall-utilization-service.js";
-
 import { registerErrorHandler } from "../../middleware/error-handler.js";
+import {
+  deliveredPayload,
+  fakeRecallUtilizationEventLogRepo,
+  makeMalformedRecallUtilizationRow,
+  makeRecallUtilizationRow,
+  usagePayload
+} from "../support/recall-utilization-fixtures.js";
 
 const WORKSPACE_ID = "ws-1";
-
-const ISO = "2026-05-10T00:00:00.000Z";
-
-function makeRow(input: {
-  readonly type: RecallContextEventTypeValue;
-  readonly entityId: string;
-  readonly runId: string | null;
-  readonly payload: Record<string, unknown>;
-  readonly createdAt?: string;
-  readonly workspaceId?: string;
-}): EventLogEntry {
-  return {
-    event_id: `evt_${input.entityId}_${input.type}_${Math.random().toString(16).slice(2, 8)}`,
-    event_type: input.type,
-    entity_type: "context_delivery",
-    entity_id: input.entityId,
-    workspace_id: input.workspaceId ?? WORKSPACE_ID,
-    run_id: input.runId,
-    caused_by: "claude-code",
-    revision: 1,
-    payload_json: input.payload,
-    created_at: input.createdAt ?? ISO
-  };
-}
-
-function makeMalformedRow(input: {
-  readonly type: RecallContextEventTypeValue;
-  readonly entityId: string;
-  readonly runId: string | null;
-  readonly payload: unknown;
-}): EventLogEntry {
-  return {
-    event_id: `evt_${input.entityId}_${input.type}_malformed`,
-    event_type: input.type,
-    entity_type: "context_delivery",
-    entity_id: input.entityId,
-    workspace_id: WORKSPACE_ID,
-    run_id: input.runId,
-    caused_by: "claude-code",
-    revision: 1,
-    payload_json: input.payload as EventLogEntry["payload_json"],
-    created_at: ISO
-  };
-}
-
-function deliveredPayload(input: {
-  readonly deliveryId: string;
-  readonly runId: string | null;
-  readonly pointerCount: number;
-  readonly latencyMs?: number;
-  readonly agentTarget?: string;
-  readonly sessionId?: string;
-  readonly workspaceId?: string;
-}): Record<string, unknown> {
-  return {
-    delivery_id: input.deliveryId,
-    session_id: input.sessionId ?? `session-${input.deliveryId}`,
-    run_id: input.runId,
-    agent_target: input.agentTarget ?? "claude-code",
-    query_hash: "abc1234567890abc",
-    pointer_count: input.pointerCount,
-    latency_ms: input.latencyMs ?? 50,
-    workspace_id: input.workspaceId ?? WORKSPACE_ID,
-    occurred_at: ISO
-  };
-}
-
-function usagePayload(input: {
-  readonly deliveryId: string;
-  readonly runId: string | null;
-  readonly usageState: "used" | "skipped" | "not_applicable";
-  readonly agentTarget?: string;
-  readonly sessionId?: string;
-  readonly workspaceId?: string;
-  readonly occurredAt?: string;
-}): Record<string, unknown> {
-  return {
-    delivery_id: input.deliveryId,
-    session_id: input.sessionId ?? `session-${input.deliveryId}`,
-    run_id: input.runId,
-    agent_target: input.agentTarget ?? "claude-code",
-    usage_state: input.usageState,
-    workspace_id: input.workspaceId ?? WORKSPACE_ID,
-    occurred_at: input.occurredAt ?? ISO
-  };
-}
-
-function fakeEventLogRepo(rows: readonly EventLogEntry[]): RecallUtilizationEventLogPort {
-  return {
-    async queryByWorkspaceAndType(workspaceId, eventType, sinceIso, untilIso) {
-      return rows.filter((row) => {
-        if (row.workspace_id !== workspaceId) return false;
-        if (row.event_type !== eventType) return false;
-        if (sinceIso !== undefined && !(row.created_at > sinceIso)) return false;
-        if (untilIso !== undefined && !(row.created_at <= untilIso)) return false;
-        return true;
-      });
-    }
-  };
-}
 
 function buildApp(services: RecallUtilizationRouteServices): Hono {
   const app = new Hono();
@@ -156,11 +54,10 @@ interface RouteResponseShape {
 }
 
 describe("recall-utilization route", () => {
-
   it("returns empty cohorts when EventLog is empty", async () => {
     const app = buildApp({
       workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo([])
+      eventLogRepo: fakeRecallUtilizationEventLogRepo([])
     });
     const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
     expect(response.status).toBe(200);
@@ -179,7 +76,7 @@ describe("recall-utilization route", () => {
       workspaceService: {
         getById: vi.fn().mockRejectedValue(new CoreError("NOT_FOUND", "ws missing"))
       },
-      eventLogRepo: fakeEventLogRepo([])
+      eventLogRepo: fakeRecallUtilizationEventLogRepo([])
     });
     const response = await app.request(`/workspaces/ws-missing/recall-utilization`);
     expect(response.status).toBe(404);
@@ -204,8 +101,8 @@ describe("recall-utilization route", () => {
   ])("returns a typed validation response for malformed $type payload_json", async ({ type, entityId, payload }) => {
     const app = buildApp({
       workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo([
-        makeMalformedRow({
+      eventLogRepo: fakeRecallUtilizationEventLogRepo([
+        makeMalformedRecallUtilizationRow({
           type,
           entityId,
           runId: "run-1",
@@ -226,31 +123,31 @@ describe("recall-utilization route", () => {
 
   it("partitions deliveries across delivered_not_reported / skipped_or_na / used", async () => {
     const rows = [
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d1",
         runId: "run-1",
         payload: deliveredPayload({ deliveryId: "d1", runId: "run-1", pointerCount: 4 })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d2",
         runId: "run-1",
         payload: deliveredPayload({ deliveryId: "d2", runId: "run-1", pointerCount: 2 })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d3",
         runId: "run-1",
         payload: deliveredPayload({ deliveryId: "d3", runId: "run-1", pointerCount: 6 })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
         entityId: "d1",
         runId: "run-1",
         payload: usagePayload({ deliveryId: "d1", runId: "run-1", usageState: "used" })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
         entityId: "d2",
         runId: "run-1",
@@ -259,7 +156,7 @@ describe("recall-utilization route", () => {
     ];
     const app = buildApp({
       workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo(rows)
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows)
     });
     const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
     const body = (await response.json()) as RouteResponseShape;
@@ -278,7 +175,6 @@ describe("recall-utilization route", () => {
       orphan_report_count: 0,
       orphan_session_count: 0
     });
-    // stop condition: 3-of-5 buckets sum to deliveries
     expect(
       cohort.buckets.delivered_not_reported +
         cohort.buckets.reported_skipped_or_na +
@@ -288,13 +184,13 @@ describe("recall-utilization route", () => {
 
   it("counts empty_recall as a carve-out of delivered_not_reported when pointer_count is 0", async () => {
     const rows = [
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d_empty",
         runId: "run-1",
         payload: deliveredPayload({ deliveryId: "d_empty", runId: "run-1", pointerCount: 0 })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d_nonempty",
         runId: "run-1",
@@ -303,7 +199,7 @@ describe("recall-utilization route", () => {
     ];
     const app = buildApp({
       workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo(rows)
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows)
     });
     const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
     const body = (await response.json()) as RouteResponseShape;
@@ -314,7 +210,7 @@ describe("recall-utilization route", () => {
 
   it("groups cohorts by (workspace_id, agent_target)", async () => {
     const rows = [
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d1",
         runId: "run-1",
@@ -325,7 +221,7 @@ describe("recall-utilization route", () => {
           agentTarget: "claude-code"
         })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d2",
         runId: "run-2",
@@ -339,7 +235,7 @@ describe("recall-utilization route", () => {
     ];
     const app = buildApp({
       workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo(rows)
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows)
     });
     const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
     const body = (await response.json()) as RouteResponseShape;
@@ -350,13 +246,13 @@ describe("recall-utilization route", () => {
 
   it("isolates cohorts per workspace via the query workspace filter", async () => {
     const rows = [
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d1",
         runId: "run-1",
         payload: deliveredPayload({ deliveryId: "d1", runId: "run-1", pointerCount: 3 })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d_other",
         runId: "run-9",
@@ -371,7 +267,7 @@ describe("recall-utilization route", () => {
     ];
     const app = buildApp({
       workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo(rows)
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows)
     });
     const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
     const body = (await response.json()) as RouteResponseShape;
@@ -394,7 +290,7 @@ describe("recall-utilization route", () => {
       }
     };
     const rows = [
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d_single",
         runId: "run-1",
@@ -405,7 +301,7 @@ describe("recall-utilization route", () => {
           sessionId: "sess-1"
         })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d_multi",
         runId: "run-1",
@@ -416,7 +312,7 @@ describe("recall-utilization route", () => {
           sessionId: "sess-2"
         })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
         entityId: "d_single",
         runId: "run-1",
@@ -427,7 +323,7 @@ describe("recall-utilization route", () => {
           sessionId: "sess-1"
         })
       }),
-      makeRow({
+      makeRecallUtilizationRow({
         type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
         entityId: "d_multi",
         runId: "run-1",
@@ -441,7 +337,7 @@ describe("recall-utilization route", () => {
     ];
     const app = buildApp({
       workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
-      eventLogRepo: fakeEventLogRepo(rows),
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows),
       singleUsedAnchorEmitter: emitter
     });
     const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
@@ -454,5 +350,210 @@ describe("recall-utilization route", () => {
     expect(emitted[0]?.runId).toBe("run-1");
     const cohort = body.data.cohorts[0]!;
     expect(cohort.single_used_anchor_count).toBe(1);
+  });
+
+  it("does not emit single_used_anchor when the report is skipped or not_applicable", async () => {
+    const emitter: SingleUsedAnchorTelemetryEmitter = { emit: vi.fn().mockResolvedValue(undefined) };
+    const rows = [
+      makeRecallUtilizationRow({
+        type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+        entityId: "d_single",
+        runId: "run-1",
+        payload: deliveredPayload({ deliveryId: "d_single", runId: "run-1", pointerCount: 1 })
+      }),
+      makeRecallUtilizationRow({
+        type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+        entityId: "d_single",
+        runId: "run-1",
+        payload: usagePayload({
+          deliveryId: "d_single",
+          runId: "run-1",
+          usageState: "skipped"
+        })
+      })
+    ];
+    const app = buildApp({
+      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows),
+      singleUsedAnchorEmitter: emitter
+    });
+    await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
+    expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
+  it("swallows emitter errors so the route response stays 200", async () => {
+    const emitter: SingleUsedAnchorTelemetryEmitter = {
+      emit: vi.fn().mockRejectedValue(new Error("publish failed"))
+    };
+    const rows = [
+      makeRecallUtilizationRow({
+        type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+        entityId: "d_single",
+        runId: "run-1",
+        payload: deliveredPayload({ deliveryId: "d_single", runId: "run-1", pointerCount: 1 })
+      }),
+      makeRecallUtilizationRow({
+        type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+        entityId: "d_single",
+        runId: "run-1",
+        payload: usagePayload({ deliveryId: "d_single", runId: "run-1", usageState: "used" })
+      })
+    ];
+    const app = buildApp({
+      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows),
+      singleUsedAnchorEmitter: emitter
+    });
+    const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
+    expect(response.status).toBe(200);
+    expect(emitter.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts orphan-report sessions as no_recall", async () => {
+    const rows = [
+      makeRecallUtilizationRow({
+        type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+        entityId: "orphan_a",
+        runId: "run-1",
+        payload: usagePayload({
+          deliveryId: "orphan_a",
+          runId: "run-1",
+          usageState: "not_applicable",
+          sessionId: "sess-A"
+        })
+      }),
+      makeRecallUtilizationRow({
+        type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+        entityId: "orphan_b",
+        runId: "run-1",
+        payload: usagePayload({
+          deliveryId: "orphan_b",
+          runId: "run-1",
+          usageState: "skipped",
+          sessionId: "sess-B"
+        })
+      })
+    ];
+    const app = buildApp({
+      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows)
+    });
+    const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
+    const body = (await response.json()) as RouteResponseShape;
+    const cohort = body.data.cohorts[0]!;
+    expect(cohort.buckets.no_recall).toBe(2);
+    expect(cohort.delivery_total).toBe(0);
+  });
+
+  it("respects since and until window filters", async () => {
+    const rows = [
+      makeRecallUtilizationRow({
+        type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+        entityId: "d_in",
+        runId: "run-1",
+        payload: deliveredPayload({
+          deliveryId: "d_in",
+          runId: "run-1",
+          pointerCount: 3,
+          occurredAt: "2026-05-10T12:00:00.000Z"
+        }),
+        createdAt: "2026-04-01T00:00:00.000Z"
+      }),
+      makeRecallUtilizationRow({
+        type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+        entityId: "d_out",
+        runId: "run-2",
+        payload: deliveredPayload({
+          deliveryId: "d_out",
+          runId: "run-2",
+          pointerCount: 7,
+          occurredAt: "2026-04-01T00:00:00.000Z"
+        }),
+        createdAt: "2026-05-10T12:00:00.000Z"
+      })
+    ];
+    const app = buildApp({
+      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows)
+    });
+    const response = await app.request(
+      `/workspaces/${WORKSPACE_ID}/recall-utilization?since=2026-05-01T00:00:00.000Z&until=2026-05-31T23:59:59.000Z`
+    );
+    const body = (await response.json()) as RouteResponseShape;
+    expect(body.data.cohorts).toHaveLength(1);
+    expect(body.data.cohorts[0]?.delivery_total).toBe(1);
+    expect(body.data.window.since).toBe("2026-05-01T00:00:00.000Z");
+    expect(body.data.window.until).toBe("2026-05-31T23:59:59.000Z");
+  });
+
+  it("looks up 1000 single-used anchors with one batch query", async () => {
+    const matchCount = 1000;
+    const rows: EventLogEntry[] = [];
+    for (let index = 0; index < matchCount; index += 1) {
+      const deliveryId = `d_${index}`;
+      rows.push(
+        makeRecallUtilizationRow({
+          type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+          entityId: deliveryId,
+          runId: "run-1",
+          payload: deliveredPayload({ deliveryId, runId: "run-1", pointerCount: 1 })
+        }),
+        makeRecallUtilizationRow({
+          type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+          entityId: deliveryId,
+          runId: "run-1",
+          payload: usagePayload({ deliveryId, runId: "run-1", usageState: "used" })
+        })
+      );
+    }
+    let queryCount = 0;
+    const findDeliveredObjectIds = vi.fn(
+      async (_deliveryId: string): Promise<readonly string[] | null> => {
+        throw new Error("serial lookup must not run when a batch port exists");
+      }
+    );
+    const findDeliveredObjectIdsMany = vi.fn(
+      async (
+        deliveryIds: readonly string[]
+      ): Promise<ReadonlyMap<string, readonly string[] | null>> => {
+        queryCount += 1;
+        return new Map(
+          deliveryIds.map((deliveryId): readonly [string, readonly string[]] => [
+            deliveryId,
+            [`obj-${deliveryId}`]
+          ])
+        );
+      }
+    );
+    const emitMany = vi.fn(
+      async (_inputs: readonly SingleUsedAnchorEmitInput[]): Promise<void> => undefined
+    );
+    const anchorReader: SingleUsedAnchorDeliveryReader = {
+      findDeliveredObjectIds,
+      findDeliveredObjectIdsMany
+    };
+    const emitter: SingleUsedAnchorTelemetryEmitter = {
+      emit: vi.fn(
+        async (_input: SingleUsedAnchorEmitInput): Promise<void> => {
+          throw new Error("serial emit must not run when emitMany exists");
+        }
+      ),
+      emitMany
+    };
+    const app = buildApp({
+      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
+      eventLogRepo: fakeRecallUtilizationEventLogRepo(rows),
+      singleUsedAnchorEmitter: emitter,
+      deliveryAnchorReader: anchorReader
+    });
+    const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
+    expect(response.status).toBe(200);
+    expect(queryCount).toBe(1);
+    expect(findDeliveredObjectIdsMany).toHaveBeenCalledOnce();
+    expect(emitMany).toHaveBeenCalledOnce();
+    const emittedBatch = emitMany.mock.calls.at(0)?.at(0);
+    expect(emittedBatch).toHaveLength(matchCount);
+    expect(findDeliveredObjectIds).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalled();
   });
 });

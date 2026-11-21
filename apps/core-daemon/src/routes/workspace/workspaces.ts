@@ -14,6 +14,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { resolveRequestWorkspaceGrantScope } from "../../runtime/request-token-binding.js";
 import {
+  jsonError,
   parseJsonBody,
   parseListPagination,
   rejectUnexpectedRequestBody,
@@ -149,10 +150,7 @@ async function updateWorkspaceGitBinding(
   }
   const validation = await validateWorkspaceGitBindingInput(update.repo_path, services.gitBindingValidation);
   if (!validation.ok) {
-    return context.json(
-      { success: false, error: { code: validation.code, detail: validation.detail } },
-      400
-    );
+    return jsonError(context, 400, { code: validation.code, detail: validation.detail });
   }
   return await writeGitBindingUpdate(context, repo, workspaceId, validation.repo_path, services);
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ProposalResolutionState } from "@do-soul/alaya-protocol";
+import { HTTP_REVIEWER_AGENT_TARGET } from "../../../mcp-memory/proposal/reviewer-surfaces.js";
 import {
   assertReviewCallerIsAllowed,
   createWorkflowError
@@ -28,14 +29,14 @@ describe("assertReviewCallerIsAllowed", () => {
     ).toThrowError(
       createWorkflowError(
         "VALIDATION",
-        "Review requires a human reviewer surface (Inspector/alaya review); attached agents cannot review."
+        "Review requires a human reviewer surface (HTTP reviewer / alaya review); attached agents cannot review."
       )
     );
   });
 
-  it("allows Inspector when reviewer binding is configured", () => {
+  it("allows HTTP reviewer when reviewer binding is configured", () => {
     expect(() =>
-      assertReviewCallerIsAllowed(createReviewContext("inspector"), reviewerBinding)
+      assertReviewCallerIsAllowed(createReviewContext(HTTP_REVIEWER_AGENT_TARGET), reviewerBinding)
     ).not.toThrow();
   });
 
@@ -66,11 +67,11 @@ describe("proposal review caller authorization", () => {
     });
   });
 
-  it("allows Inspector review with a valid reviewer token when binding is configured", async () => {
+  it("allows HTTP reviewer review with a valid reviewer token when binding is configured", async () => {
     const result = await callAlayaMcpMemoryTool(
       {
         memoryToolHandler: createReviewHandler(),
-        contextProvider: () => createReviewContext("inspector")
+        contextProvider: () => createReviewContext(HTTP_REVIEWER_AGENT_TARGET)
       },
       "soul.review_memory_proposal",
       reviewerArgs
@@ -89,7 +90,7 @@ describe("proposal review caller authorization", () => {
     const result = await callAlayaMcpMemoryTool(
       {
         memoryToolHandler: createReviewHandler(),
-        contextProvider: () => createReviewContext("inspector")
+        contextProvider: () => createReviewContext(HTTP_REVIEWER_AGENT_TARGET)
       },
       "soul.review_memory_proposal",
       {

@@ -1,4 +1,5 @@
 import type { MemoryService } from "@do-soul/alaya-core";
+import { resolveListAndCount } from "../../shared/shared.js";
 import type { WorkspaceMemoryListInput } from "./memories-workspace-list.js";
 
 type MemoryListRow = Awaited<ReturnType<MemoryService["findByWorkspaceId"]>>[number];
@@ -70,18 +71,4 @@ async function listWorkspaceOnlyWithConflict(
     memoryService.countByWorkspaceIdWithConflict(workspaceId)
   );
   return { memories, totalCount };
-}
-
-async function resolveListAndCount<T>(
-  listPromise: Promise<readonly T[]>,
-  countPromise: Promise<number>
-): Promise<readonly [readonly T[], number]> {
-  const [listResult, countResult] = await Promise.allSettled([listPromise, countPromise]);
-  if (listResult.status === "rejected") {
-    throw listResult.reason;
-  }
-  if (countResult.status === "rejected") {
-    throw countResult.reason;
-  }
-  return [listResult.value, countResult.value] as const;
 }

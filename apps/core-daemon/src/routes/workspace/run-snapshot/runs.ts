@@ -9,9 +9,11 @@ import {
 } from "@do-soul/alaya-core";
 import { resolveRequestRun } from "../../../runtime/request-token-binding.js";
 import {
+  jsonError,
   parseJsonBody,
   parseListPagination,
   rejectUnexpectedRequestBody,
+  resolveListAndCount,
   writeListPaginationHeaders
 } from "../../shared/shared.js";
 import { boundedPathParams, readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
@@ -151,20 +153,6 @@ function registerRunMessageRoutes(app: Hono, services: RunRouteServices): void {
   });
 }
 
-async function resolveListAndCount<T>(
-  listPromise: Promise<readonly T[]>,
-  countPromise: Promise<number>
-): Promise<readonly [readonly T[], number]> {
-  const [listResult, countResult] = await Promise.allSettled([listPromise, countPromise]);
-  if (listResult.status === "rejected") {
-    throw listResult.reason;
-  }
-  if (countResult.status === "rejected") {
-    throw countResult.reason;
-  }
-  return [listResult.value, countResult.value] as const;
-}
-
 function registerRunLifecycleRoutes(app: Hono, services: RunRouteServices): void {
   app.post("/runs/:id/interrupt", boundedPathParams("id"), async (context) => {
     const unexpectedBody = await rejectUnexpectedRequestBody(context);
@@ -243,11 +231,9 @@ async function snapshotCompactionFailure(
     },
     error
   );
-  return context.json({
-    success: false,
-    error: "Failed to compact run snapshot",
+  return jsonError(context, 500, "Failed to compact run snapshot", {
     code: "SNAPSHOT_COMPACTION_FAILED"
-  }, 500);
+  });
 }
 
 async function deleteRun(context: Context, services: RunRouteServices): Promise<Response> {

@@ -20,7 +20,7 @@ export interface AttachCodexCommandSpec {
 export function createAttachCodexCommandSpec(deps: AttachCodexCommandDeps = {}): AttachCodexCommandSpec {
   return {
     target: "codex",
-    description: "Attach Alaya MCP + /alaya-inspect to Codex profile files.",
+    description: "Attach Alaya MCP to Codex profile files.",
     execute: async (ctx) => await executeAttachCodex(ctx, deps)
   };
 }

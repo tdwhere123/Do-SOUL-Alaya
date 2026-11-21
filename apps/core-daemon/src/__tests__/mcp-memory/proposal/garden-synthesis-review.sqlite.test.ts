@@ -18,7 +18,7 @@ import { createClaimForm, createClaimInput } from "../../../../../../packages/co
 
 afterEach(() => { for (const db of trackedDatabases) db.close(); trackedDatabases.clear(); });
 const NOW = "2026-05-02T00:00:00.000Z";
-const context = { workspaceId: "workspace-1", runId: null, agentTarget: "inspector", sessionId: "review" };
+const context = { workspaceId: "workspace-1", runId: null, agentTarget: "http-reviewer", sessionId: "review" };
 
 async function fixture(filename?: string, afterGist?: (id: string) => void) {
   const storage = await createRecallRealStorage(db => trackedDatabases.add(db), filename);

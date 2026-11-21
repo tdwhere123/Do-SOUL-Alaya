@@ -5,10 +5,10 @@ import {
   MemoryProfileAuditWriter,
   MemoryProfileFs
 } from "./profile-command-fixtures.js";
-import { codexConfigPath, codexSlashCommandsPath, slashCommandContainsAlayaBin } from "../support/profile-test-home.js";
+import { codexConfigPath } from "../support/profile-test-home.js";
 
 describe("attach codex", () => {
-  it("writes MCP/slash profile records, audits, and records trust state", async () => {
+  it("writes MCP profile records, audits, and records trust state", async () => {
     const fs = new MemoryProfileFs();
     const auditWriter = new MemoryProfileAuditWriter();
     const trustStateRecorder = {
@@ -29,8 +29,6 @@ describe("attach codex", () => {
 
     expect(result.exitCode).toBe(0);
     expect(fs.files.get(codexConfigPath())).toContain("[mcp_servers.alaya]");
-    expect(slashCommandContainsAlayaBin(fs.files.get(codexSlashCommandsPath()) ?? "")).toBe(true);
-    expect(fs.files.get(codexSlashCommandsPath())).toContain("inspect --open");
     expect(auditWriter.rows).toHaveLength(1);
     expect(trustStateRecorder.recordInstalled).toHaveBeenCalledWith("codex");
     expect(trustStateRecorder.recordConfigured).toHaveBeenCalledWith("codex");

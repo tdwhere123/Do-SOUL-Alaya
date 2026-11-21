@@ -1,16 +1,12 @@
 import type { Hono } from "hono";
 import { CoreError, type WorkspaceService } from "@do-soul/alaya-core";
 import {
-  rollUpUtilizationBucketsByCohort,
-  type UtilizationBucketDelivery,
-  type UtilizationBucketReport
-} from "@do-soul/alaya-eval";
-import {
   RecallContextEventType,
   SoulSingleUsedAnchorPayloadSchema,
   parseRecallContextEventPayload,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
+import { rollUpUtilizationBucketsByCohort } from "../../../services/status/recall-utilization-buckets.js";
 import type { RecallUtilizationEventLogPort } from "../../../services/status/recall-utilization-service.js";
 
 export interface RecallUtilizationRouteServices {
@@ -86,8 +82,8 @@ export function registerRecallUtilizationRoutes(
     const reports = projectReports(usageRows);
 
     const rows = rollUpUtilizationBucketsByCohort({
-      deliveries: deliveries as readonly (UtilizationBucketDelivery & { readonly workspace_id: string })[],
-      reports: reports as readonly (UtilizationBucketReport & { readonly workspace_id: string })[]
+      deliveries,
+      reports
     }) satisfies readonly RecallUtilizationCohortRow[];
 
     if (services.singleUsedAnchorEmitter !== undefined) {

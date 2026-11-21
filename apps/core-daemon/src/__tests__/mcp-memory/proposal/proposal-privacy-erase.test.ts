@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 describe("privacy erase proposal review", () => {
-  it.each(["cli", "inspector"])("applies the source closure on runless %s approval", async (agentTarget) => {
+  it.each(["cli", "http-reviewer"])("applies the source closure on runless %s approval", async (agentTarget) => {
     const harness = createHarness();
     const created = await proposePrivacyErase(harness.workflow);
 
@@ -355,7 +355,7 @@ function reviewContext(runId: string | null = RUN_ID) {
   return {
     workspaceId: WORKSPACE_ID,
     runId,
-    agentTarget: "inspector",
+    agentTarget: "http-reviewer",
     sessionId: "session-1"
   } as const;
 }

@@ -229,9 +229,6 @@ importers:
       '@do-soul/alaya-engine-gateway':
         specifier: workspace:*
         version: link:../../packages/engine-gateway
-      '@do-soul/alaya-eval':
-        specifier: workspace:*
-        version: link:../../packages/eval
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

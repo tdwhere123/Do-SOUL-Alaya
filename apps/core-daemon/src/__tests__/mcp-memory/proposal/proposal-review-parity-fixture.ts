@@ -64,7 +64,7 @@ export async function runReviewParityScenario(
   const mcpResult = await callAlayaMcpMemoryTool(
     {
       memoryToolHandler: buildHandler(),
-      contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "inspector", sessionId: "review-parity-buildhandler-session" })
+      contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "http-reviewer", sessionId: "review-parity-buildhandler-session" })
     },
     "soul.review_memory_proposal",
     reviewerArgs

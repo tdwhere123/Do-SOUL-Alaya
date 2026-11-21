@@ -1,5 +1,5 @@
 import path, { dirname } from "node:path";
-import { ALAYA_MCP_ARGS, ALAYA_MCP_COMMAND, ALAYA_SLASH_ARGS } from "./profile-mutation-constants.js";
+import { ALAYA_MCP_ARGS, ALAYA_MCP_COMMAND } from "./profile-mutation-constants.js";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 
 type AlayaLauncherRootInput =
@@ -25,21 +25,6 @@ export function resolveAlayaMcpLauncher(
   return { command: "node", args: [binPath, ...ALAYA_MCP_ARGS] };
 }
 
-export function resolveAlayaSlashCommand(
-  env: NodeJS.ProcessEnv = processEnvLookup(),
-  rootInput?: AlayaLauncherRootInput
-): string {
-  const override = env.ALAYA_SLASH_LAUNCHER?.trim();
-  if (override !== undefined && override.length > 0) {
-    assertAllowedLauncherCommand(override.split(/\s+/u)[0] ?? "", "ALAYA_SLASH_LAUNCHER");
-    assertNoShellControlChars(override, "ALAYA_SLASH_LAUNCHER");
-    return [override, ...ALAYA_SLASH_ARGS].join(" ");
-  }
-
-  const binPath = resolveAlayaBinPath(rootInput);
-  return ["node", alwaysSingleQuote(binPath), ...ALAYA_SLASH_ARGS].join(" ");
-}
-
 const ALLOWED_LAUNCHER_BASENAMES = new Set(["node", "npx", "pnpm"]);
 
 // Launcher overrides are written verbatim into agent profiles; restrict the
@@ -54,16 +39,10 @@ function assertAllowedLauncherCommand(command: string, envName: string): string 
   );
 }
 
-// The slash override is joined into a shell-interpreted profile field, so a
-// passing first-token allowlist must not let later tokens smuggle a second command.
 function assertNoShellControlChars(override: string, envName: string): void {
   if (/[;|&$`<>(){}\n\r]/u.test(override)) {
     throw new Error(`${envName} must not contain shell control characters.`);
   }
-}
-
-function alwaysSingleQuote(value: string): string {
-  return `'${value.replace(/'/gu, "'\\''")}'`;
 }
 
 function resolveAlayaBinPath(rootInput: AlayaLauncherRootInput | undefined): string {

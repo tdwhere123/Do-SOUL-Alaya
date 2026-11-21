@@ -231,7 +231,7 @@ describe("cli registration", () => {
 
   it.each([
     { spoof: "cli" as const },
-    { spoof: "inspector" as const }
+    { spoof: "http-reviewer" as const }
   ])(
     "ignores ALAYA_AGENT_TARGET=$spoof and pins agentTarget to \"mcp\" with a stderr warning",
     async ({ spoof }) => {

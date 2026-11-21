@@ -353,6 +353,43 @@ describe("files upload route", () => {
     emitWarning.mockRestore();
   });
 
+  it("rejects upload with 500 and writes nothing when resolved scope workspace_id is null", async () => {
+    const createWithEvent = vi.fn();
+    const app = new Hono();
+    app.onError((error, context) => context.json({ success: false, error: error.message }, 500));
+    registerFileRoutes(app, {
+      workspaceService: {
+        getById: vi.fn(async () => ({ workspace_id: null as unknown as string }))
+      },
+      runService: {
+        getById: vi.fn(async () => ({ run_id: "run-1", workspace_id: null as unknown as string }))
+      },
+      fileRepo: {
+        findById: vi.fn(),
+        createWithEvent
+      } as never,
+      eventLogRepo: {
+        append: createAuditEventLogAppend()
+      },
+      runtimeNotifier: {
+        notifyEntry: vi.fn()
+      },
+      filesDirectory: FILES_DIR
+    });
+
+    const response = await app.request("/files", {
+      method: "POST",
+      body: uploadFormData({
+        file: new File(["hello"], "notes.txt", { type: "text/plain" }),
+        workspace_id: "ws-1"
+      })
+    });
+
+    expect(response.status).toBe(500);
+    expect(mockedWriteFile).not.toHaveBeenCalled();
+    expect(createWithEvent).not.toHaveBeenCalled();
+  });
+
   it("persists notifier failures through the real SQLite event log", async () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     const database = initDatabase({ filename: ":memory:" });

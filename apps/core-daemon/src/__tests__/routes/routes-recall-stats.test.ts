@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { CoreError } from "@do-soul/alaya-core";
 import { registerRecallStatsRoutes } from "../../routes/memory/recall/recall-stats.js";
+import { HTTP_REVIEWER_AGENT_TARGET } from "../../mcp-memory/proposal/reviewer-surfaces.js";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
 
 const SAMPLE_STATS = {
@@ -9,7 +10,7 @@ const SAMPLE_STATS = {
     workspace_id: "ws1",
     since: "2026-05-07T00:00:00.000Z",
     until: null,
-    excluded_agent_targets: ["inspector", "cli", "tools-cli"]
+    excluded_agent_targets: [HTTP_REVIEWER_AGENT_TARGET, "cli", "tools-cli"]
   },
   recall: {
     total: 42,
@@ -64,7 +65,7 @@ describe("recall-stats route", () => {
     });
 
     const response = await app.request(
-      "/workspaces/ws1/recall-stats?since=2026-05-07T00:00:00.000Z&until=2026-05-14T00:00:00.000Z&excludeAgentTargets=inspector,cli"
+      `/workspaces/ws1/recall-stats?since=2026-05-07T00:00:00.000Z&until=2026-05-14T00:00:00.000Z&excludeAgentTargets=${HTTP_REVIEWER_AGENT_TARGET},cli`
     );
 
     expect(response.status).toBe(200);
@@ -74,7 +75,7 @@ describe("recall-stats route", () => {
       workspaceId: "ws1",
       since: "2026-05-07T00:00:00.000Z",
       until: "2026-05-14T00:00:00.000Z",
-      excludeAgentTargets: ["inspector", "cli"]
+      excludeAgentTargets: [HTTP_REVIEWER_AGENT_TARGET, "cli"]
     });
   });
 

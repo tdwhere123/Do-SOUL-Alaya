@@ -65,7 +65,7 @@ function runtimeProbe(env: NodeJS.ProcessEnv, mode: string) {
           const review = await runtime.services.mcpMemoryToolHandler.call({
             toolName: "soul.resolve",
             arguments: { target_object_id: "missing", delivery_id: "missing", resolution: "reject", reviewer_identity: "user:operator", reviewer_token: "wrong" },
-            context: { workspaceId: "default", agentTarget: "inspector", runId: null, sessionId: "native-config-review" }
+            context: { workspaceId: "default", agentTarget: "http-reviewer", runId: null, sessionId: "native-config-review" }
           });
           assert.equal(review.ok, false);
           assert.match(JSON.stringify(review), /reviewer.token|reviewer token|FORBIDDEN/i);

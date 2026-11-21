@@ -1,9 +1,20 @@
 import { randomUUID } from "node:crypto";
+import type { PublicToolError } from "@do-soul/alaya-protocol";
+import { HTTP_REVIEWER_AGENT_TARGET } from "../../../mcp-memory/proposal/reviewer-surfaces.js";
 import type { ProposalRouteServices } from "./proposals-types.js";
 
-export function createInspectorToolContext(workspaceId: string) {
-  return { workspaceId, runId: null, agentTarget: "inspector", sessionId: `inspector-${randomUUID()}` };
+export function createHttpReviewerToolContext(workspaceId: string) {
+  return {
+    workspaceId,
+    runId: null,
+    agentTarget: HTTP_REVIEWER_AGENT_TARGET,
+    sessionId: `${HTTP_REVIEWER_AGENT_TARGET}-${randomUUID()}`
+  };
 }
+
+export type PendingMatchResult =
+  | { readonly ok: true; readonly proposalId: string | null }
+  | { readonly ok: false; readonly error: PublicToolError };
 
 export async function findExistingPendingMatch(
   services: ProposalRouteServices,
@@ -12,18 +23,15 @@ export async function findExistingPendingMatch(
     readonly memoryId: string;
     readonly proposed_changes: Record<string, unknown>;
   }
-): Promise<string | null> {
+): Promise<PendingMatchResult> {
   const result = await services.mcpMemoryToolHandler.call({
     toolName: "soul.list_pending_proposals",
     arguments: { limit: 100 },
-    context: {
-      workspaceId: input.workspaceId,
-      runId: null,
-      agentTarget: "inspector",
-      sessionId: `inspector-${randomUUID()}`
-    }
+    context: createHttpReviewerToolContext(input.workspaceId)
   });
-  if (!result.ok) return null;
+  if (!result.ok) {
+    return { ok: false, error: result.error };
+  }
   const output = result.output as
     | {
         readonly proposals?: ReadonlyArray<{
@@ -35,16 +43,16 @@ export async function findExistingPendingMatch(
     | null
     | undefined;
   const proposals = output?.proposals ?? [];
-  if (proposals.length === 0) return null;
+  if (proposals.length === 0) return { ok: true, proposalId: null };
   const targetKey = canonicalizeChanges(input.proposed_changes);
   for (const proposal of proposals) {
     if (proposal.target_object_id !== input.memoryId) continue;
     if (proposal.proposed_changes === null) continue;
     if (canonicalizeChanges(proposal.proposed_changes) === targetKey) {
-      return proposal.proposal_id;
+      return { ok: true, proposalId: proposal.proposal_id };
     }
   }
-  return null;
+  return { ok: true, proposalId: null };
 }
 
 function canonicalizeChanges(value: Record<string, unknown>): string {

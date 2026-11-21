@@ -17,13 +17,9 @@ import {
   type AsyncSideEffectAuditEventLogPort
 } from "@do-soul/alaya-core";
 import type { FileRepo } from "@do-soul/alaya-storage";
-import {
-  isWorkspaceGrantDenied,
-  REQUEST_TOKEN_GRANT_CONTEXT_KEY,
-  WORKSPACE_TOKEN_DENIED_MESSAGE,
-  type RequestTokenGrant
-} from "../../../runtime/request-token-binding.js";
+import { respondIfWorkspaceGrantDenied } from "../../../runtime/request-token-binding.js";
 import { boundedPathParams, readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
+import { jsonError } from "../../shared/shared.js";
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
@@ -140,8 +136,8 @@ async function uploadFile(context: Context, services: FileRouteServices): Promis
   const scope = await resolveScope(services, upload.requestedRunId, upload.requestedWorkspaceId);
   const mismatch = rejectWorkspaceRunMismatch(context, upload, scope);
   if (mismatch !== null) return mismatch;
-  const forbidden = denyUnauthorizedWorkspace(context, scope.workspace_id);
-  if (forbidden !== null) return forbidden;
+  const forbidden = respondIfWorkspaceGrantDenied(context, scope.workspace_id);
+  if (forbidden !== undefined) return forbidden;
   const record = buildFileRecord(upload.file, upload.normalizedMimeType, scope);
   const absolutePath = join(services.filesDirectory, record.storage_path);
   await mkdir(services.filesDirectory, { recursive: true, mode: 0o700 });
@@ -164,18 +160,18 @@ async function uploadFile(context: Context, services: FileRouteServices): Promis
 async function readUploadRequest(context: Context): Promise<FileUploadRequest | Response> {
   const body = await context.req.parseBody();
   const file = getUploadedFile(body.file);
-  if (file === null) return context.json({ success: false, error: "file is required" }, 400);
+  if (file === null) return jsonError(context, 400, "file is required");
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    return context.json({ success: false, error: "File exceeds the 20 MB limit" }, 422);
+    return jsonError(context, 422, "File exceeds the 20 MB limit");
   }
   const normalizedMimeType = normalizeMimeType(file.name, file.type);
   if (normalizedMimeType === null) {
-    return context.json({ success: false, error: "Unsupported file type" }, 422);
+    return jsonError(context, 422, "Unsupported file type");
   }
   const requestedWorkspaceId = normalizeOptionalBodyString(body.workspace_id);
   const requestedRunId = normalizeOptionalBodyString(body.run_id);
   if (requestedRunId === null && requestedWorkspaceId === null) {
-    return context.json({ success: false, error: "run_id or workspace_id is required" }, 400);
+    return jsonError(context, 400, "run_id or workspace_id is required");
   }
   return { file, normalizedMimeType, requestedWorkspaceId, requestedRunId };
 }
@@ -190,11 +186,11 @@ type FileUploadRequest = {
 function rejectWorkspaceRunMismatch(
   context: Context,
   upload: FileUploadRequest,
-  scope: Readonly<{ workspace_id: string | null; run_id: string | null }>
+  scope: Readonly<{ workspace_id: string; run_id: string | null }>
 ): Response | null {
   if (upload.requestedRunId === null || upload.requestedWorkspaceId === null) return null;
   if (upload.requestedWorkspaceId === scope.workspace_id) return null;
-  return context.json({ success: false, error: "workspace_id does not match the run workspace" }, 422);
+  return jsonError(context, 422, "workspace_id does not match the run workspace");
 }
 
 function buildFileRecord(
@@ -219,15 +215,15 @@ async function downloadFile(context: Context, services: FileRouteServices): Prom
   const fileId = readBoundedPathParam(context, "id");
   const workspaceId = context.req.query("workspace_id")?.trim();
   if (workspaceId === undefined || workspaceId.length === 0) {
-    return context.json({ success: false, error: "workspace_id is required" }, 400);
+    return jsonError(context, 400, "workspace_id is required");
   }
   try {
     await services.workspaceService.getById(workspaceId);
   } catch (error) {
     return mapLookupErrorToResponse(context, error, "workspace");
   }
-  const forbidden = denyUnauthorizedWorkspace(context, workspaceId);
-  if (forbidden !== null) return forbidden;
+  const forbidden = respondIfWorkspaceGrantDenied(context, workspaceId);
+  if (forbidden !== undefined) return forbidden;
   const record = await services.fileRepo.findById(fileId);
   if (record === null || record.workspace_id !== workspaceId) {
     return fileNotFound(context);
@@ -247,9 +243,9 @@ function mapFileReadErrorToResponse(context: Context, error: unknown): Response 
     return fileNotFound(context);
   }
   if (classification === "forbidden") {
-    return context.json({ success: false, error: "File access denied" }, 403);
+    return jsonError(context, 403, "File access denied");
   }
-  return context.json({ success: false, error: "Failed to read stored file" }, 500);
+  return jsonError(context, 500, "Failed to read stored file");
 }
 
 function classifyFileReadError(error: unknown): "not_found" | "forbidden" | "storage_failure" {
@@ -276,7 +272,7 @@ async function sendStoredFile(context: Context, record: FileRecord, absolutePath
 }
 
 function fileNotFound(context: Context): Response {
-  return context.json({ success: false, error: "File not found" }, 404);
+  return jsonError(context, 404, "File not found");
 }
 
 function mapLookupErrorToResponse(
@@ -287,10 +283,7 @@ function mapLookupErrorToResponse(
   if (error instanceof CoreError && error.code === "NOT_FOUND") {
     return fileNotFound(context);
   }
-  return context.json(
-    { success: false, error: `Failed to load ${resource}` },
-    500
-  );
+  return jsonError(context, 500, `Failed to load ${resource}`);
 }
 
 function getUploadedFile(value: UploadBodyValue | UploadBodyValue[] | undefined): File | null {
@@ -309,24 +302,16 @@ function getUploadedFile(value: UploadBodyValue | UploadBodyValue[] | undefined)
   return null;
 }
 
-function denyUnauthorizedWorkspace(context: Context, workspaceId: string | null): Response | null {
-  if (workspaceId === null) {
-    return null;
-  }
-  const grant = context.get(REQUEST_TOKEN_GRANT_CONTEXT_KEY) as RequestTokenGrant | undefined;
-  if (!isWorkspaceGrantDenied(grant, workspaceId)) {
-    return null;
-  }
-  return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
-}
-
 async function resolveScope(
   services: FileRouteServices,
   requestedRunId: string | null,
   requestedWorkspaceId: string | null
-): Promise<Readonly<{ workspace_id: string | null; run_id: string | null }>> {
+): Promise<Readonly<{ workspace_id: string; run_id: string | null }>> {
   if (requestedRunId !== null) {
     const run = await services.runService.getById(requestedRunId);
+    if (typeof run.workspace_id !== "string" || run.workspace_id.trim().length === 0) {
+      throw new AlayaError("INTERNAL", "Invariant violation: run workspace_id must be resolved before persisting a file");
+    }
     return {
       workspace_id: run.workspace_id,
       run_id: run.run_id
@@ -335,16 +320,16 @@ async function resolveScope(
 
   if (requestedWorkspaceId !== null) {
     const workspace = await services.workspaceService.getById(requestedWorkspaceId);
+    if (typeof workspace.workspace_id !== "string" || workspace.workspace_id.trim().length === 0) {
+      throw new AlayaError("INTERNAL", "Invariant violation: workspace_id must be resolved before persisting a file");
+    }
     return {
       workspace_id: workspace.workspace_id,
       run_id: null
     };
   }
 
-  return {
-    workspace_id: null,
-    run_id: null
-  };
+  throw new CoreError("VALIDATION", "run_id or workspace_id is required");
 }
 
 async function persistFileRecord(

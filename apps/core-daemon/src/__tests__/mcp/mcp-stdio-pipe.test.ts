@@ -153,7 +153,7 @@ describe("Alaya MCP stdio pipe", () => {
       contextProvider: () => ({
         workspaceId: "workspace-1",
         runId: null,
-        agentTarget: "inspector",
+        agentTarget: "http-reviewer",
         sessionId: "stdio-pipe-effective-description"
       }),
       stdin: clientToServer,

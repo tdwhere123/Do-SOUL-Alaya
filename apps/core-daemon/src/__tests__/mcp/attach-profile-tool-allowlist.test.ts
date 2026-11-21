@@ -43,11 +43,11 @@ describe("attach-profile memory tool allowlist", () => {
     expect(resolveToolCatalogProfileForAgentTarget("mcp")).toBe("consumer");
     expect(resolveToolCatalogProfileForAgentTarget("garden-worker")).toBe("consumer");
     expect(resolveToolCatalogProfileForAgentTarget("bench-runner")).toBe("consumer");
-    expect(resolveToolCatalogProfileForAgentTarget("inspector")).toBe("host");
+    expect(resolveToolCatalogProfileForAgentTarget("http-reviewer")).toBe("host");
     expect(resolveToolCatalogProfileForAgentTarget("cli")).toBe("host");
     expect(resolveToolCatalogProfileForAgentTarget(HOST_INTERPRETATION_AGENT_TARGET)).toBe("host");
     expect(resolveToolCatalogProfileForAgentTarget("codex", "host")).toBe("host");
-    expect(resolveToolCatalogProfileForAgentTarget("inspector", "consumer")).toBe("consumer");
+    expect(resolveToolCatalogProfileForAgentTarget("http-reviewer", "consumer")).toBe("consumer");
     expect(listAlayaMemoryToolsForAgentTarget("codex").map((tool) => tool.name)).toEqual([
       ...ATTACHED_AGENT_MEMORY_TOOL_NAMES
     ]);
@@ -58,7 +58,7 @@ describe("attach-profile memory tool allowlist", () => {
     expect(hostInterpretationTools).toContain("soul.interpretation");
     expect(hostInterpretationTools).not.toContain("soul.review_memory_proposal");
     expect(hostInterpretationTools).not.toContain("soul.batch_review_edge_proposals");
-    expect(listAlayaMemoryToolsForAgentTarget("inspector").map((tool) => tool.name)).toEqual([
+    expect(listAlayaMemoryToolsForAgentTarget("http-reviewer").map((tool) => tool.name)).toEqual([
       ...ALAYA_MEMORY_TOOL_NAMES
     ]);
   });
@@ -98,12 +98,12 @@ describe("attach-profile memory tool allowlist", () => {
       expect(names).not.toContain("soul.review_memory_proposal");
       expect(names).not.toContain("soul.interpretation");
 
-      activeTarget = "inspector";
-      const inspectorListed = await client.listTools();
+      activeTarget = "http-reviewer";
+      const httpReviewerListed = await client.listTools();
       const consumerBytes = Buffer.byteLength(JSON.stringify(consumerListed.tools), "utf8");
-      const inspectorBytes = Buffer.byteLength(JSON.stringify(inspectorListed.tools), "utf8");
-      expect(inspectorBytes - consumerBytes).toBeGreaterThanOrEqual(75_000);
-      expect((inspectorBytes - consumerBytes) / inspectorBytes).toBeGreaterThan(0.6);
+      const httpReviewerBytes = Buffer.byteLength(JSON.stringify(httpReviewerListed.tools), "utf8");
+      expect(httpReviewerBytes - consumerBytes).toBeGreaterThanOrEqual(75_000);
+      expect((httpReviewerBytes - consumerBytes) / httpReviewerBytes).toBeGreaterThan(0.6);
 
       activeTarget = "codex";
       const dispatched = await client.callTool({

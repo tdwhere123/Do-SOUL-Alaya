@@ -145,7 +145,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
           reviewer_identity: "user:reviewer",
           reviewer_token: "reviewer-token"
         },
-        { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector", sessionId: "session-1" }
+        { workspaceId: "ws-cas-create", runId: null, agentTarget: "http-reviewer", sessionId: "session-1" }
       )
     ).resolves.toMatchObject({ resolution_state: ProposalResolutionState.ACCEPTED });
 
@@ -158,7 +158,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
           reviewer_identity: "user:reviewer",
           reviewer_token: "reviewer-token"
         },
-        { workspaceId: "ws-cas-create", runId: null, agentTarget: "inspector", sessionId: "session-1" }
+        { workspaceId: "ws-cas-create", runId: null, agentTarget: "http-reviewer", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({
       code: "VALIDATION",
@@ -222,7 +222,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
           reviewer_identity: "user:reviewer",
           reviewer_token: "reviewer-token"
         },
-        { workspaceId: "ws-cas-1", runId: null, agentTarget: "inspector", sessionId: "session-1" }
+        { workspaceId: "ws-cas-1", runId: null, agentTarget: "http-reviewer", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({
       code: "VALIDATION",
@@ -295,7 +295,7 @@ describe("proposal accept-and-apply cross-proposal CAS predicate", () => {
         reviewer_identity: "user:reviewer",
         reviewer_token: "reviewer-token"
       },
-      { workspaceId: "ws-cas-2", runId: null, agentTarget: "inspector", sessionId: "session-1" }
+      { workspaceId: "ws-cas-2", runId: null, agentTarget: "http-reviewer", sessionId: "session-1" }
     );
 
     expect(review.resolution_state).toBe(ProposalResolutionState.ACCEPTED);

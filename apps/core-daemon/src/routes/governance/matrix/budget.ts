@@ -1,7 +1,7 @@
 import { resolveRequestRun } from "../../../runtime/request-token-binding.js";
 import type { Hono } from "hono";
 import { CoreError, type BudgetBankruptcyService, type RunService } from "@do-soul/alaya-core";
-import { throwInvalidRequestBody } from "../../shared/shared.js";
+import { parseJsonObject, parseRequiredString } from "../../shared/shared.js";
 
 export interface BudgetRouteServices {
   readonly budgetBankruptcyService: BudgetBankruptcyService;
@@ -36,37 +36,19 @@ export function registerBudgetRoutes(app: Hono, services: BudgetRouteServices): 
   });
 }
 
-async function parseResolveBody(readJson: () => Promise< unknown>): Promise<{
+async function parseResolveBody(readJson: () => Promise<unknown>): Promise<{
   readonly option_id: string;
   readonly action: "accept" | "reject";
 }> {
-  let body: unknown;
-
-  try {
-    body = await readJson();
-  } catch (error) {
-    throwInvalidRequestBody(error);
-  }
-
-  if (body === null || typeof body !== "object") {
-    throw new CoreError("VALIDATION", "Resolve request body must be an object");
-  }
-
-  const candidate = body as {
-    readonly option_id?: unknown;
-    readonly action?: unknown;
-  };
-
-  if (typeof candidate.option_id !== "string" || candidate.option_id.trim().length === 0) {
-    throw new CoreError("VALIDATION", "option_id is required");
-  }
+  const candidate = await parseJsonObject(readJson, "Resolve request body must be an object");
+  const optionId = parseRequiredString(candidate.option_id, "option_id is required");
 
   if (candidate.action !== "accept" && candidate.action !== "reject") {
     throw new CoreError("VALIDATION", "action must be accept or reject");
   }
 
   return {
-    option_id: candidate.option_id.trim(),
+    option_id: optionId,
     action: candidate.action
   };
 }

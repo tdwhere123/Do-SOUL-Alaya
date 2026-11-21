@@ -57,7 +57,6 @@ function buildApplyOptions(deps: AttachCommandDeps): ProfileMutationApplyOptions
   return {
     fs: deps.fs,
     auditWriter: deps.auditWriter,
-    allowConflicts: true,
     nowIso: deps.nowIso
   };
 }

@@ -172,7 +172,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       target_anchor: { kind: "object", object_id: foreignTargetMemoryId },
       constitution: {
         relation_kind: "supports",
-        why_this_relation_exists: ["inspector requested associative link"]
+        why_this_relation_exists: ["http-reviewer requested associative link"]
       },
       effect_vector: {
         salience: 0.5,
@@ -190,7 +190,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       },
       lifecycle: { status: "active", retirement_rule: "manual" },
       legitimacy: {
-        evidence_basis: ["inspector:object-anchor-proposal"],
+        evidence_basis: ["http-reviewer:object-anchor-proposal"],
         governance_class: "recall_allowed"
       }
     };
@@ -236,7 +236,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
           entity_id: proposalId,
           workspace_id: "ws-1",
           run_id: null,
-          caused_by: "inspector",
+          caused_by: "http-reviewer",
           payload_json: SoulProposalCreatedPayloadSchema.parse({
             object_id: proposalId,
             object_kind: ControlPlaneObjectKind.PROPOSAL,
@@ -253,7 +253,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       eventLogRepo,
       proposalRepo,
       runtimeNotifier: { notifyEntry: vi.fn() },
-      reviewerIdentityBinding: { token: "reviewer-token", identity: "user:inspector" },
+      reviewerIdentityBinding: { token: "reviewer-token", identity: "user:http-reviewer" },
       memoryService: {
         findByIdScoped: async (objectId, workspaceId) => {
           const memory = await memoryEntryRepo.findById(objectId);
@@ -272,14 +272,14 @@ describe("proposal routes (HTTP surface narrowed)", () => {
           proposal_id: proposalId,
           verdict: "accept",
           reason: "approved associative link",
-          reviewer_identity: "user:inspector",
+          reviewer_identity: "user:http-reviewer",
           reviewer_token: "reviewer-token"
         },
         {
           workspaceId: "ws-1",
           runId: null,
-          agentTarget: "inspector",
-          sessionId: "inspector-foreign-anchor-review"
+          agentTarget: "http-reviewer",
+          sessionId: "http-reviewer-foreign-anchor-review"
         }
       )
     ).rejects.toMatchObject({ code: "VALIDATION" });

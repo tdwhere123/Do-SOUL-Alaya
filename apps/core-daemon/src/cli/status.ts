@@ -94,7 +94,6 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: StatusReport):
       `garden source-grounding defers: queue_total=${defers.queue_depth} cap_per_workspace=${defers.queue_cap_per_workspace} hard_limit_per_workspace=${defers.queue_hard_limit_per_workspace} blocked_total=${defers.capacity_blocked_depth} capacity=${defers.capacity_state} scope=${defers.queue_scope} by_reason: ${reasons}\n`
     );
   }
-  stream.write("memory inspector: run `alaya inspect --open` to launch the loopback UI (http://127.0.0.1:5174).\n");
   if (report.recall_stats !== undefined) {
     writeRecallStatsSummary(stream, report.recall_stats);
   }

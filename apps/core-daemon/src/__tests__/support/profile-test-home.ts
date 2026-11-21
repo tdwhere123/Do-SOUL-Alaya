@@ -1,6 +1,5 @@
 import os from "node:os";
 import path from "node:path";
-import { quoteSingle, toPosixPath } from "./test-paths.js";
 
 export const PROFILE_TEST_HOME = path.join(os.tmpdir(), "alaya-test-profile-home");
 export const REPO_LAYOUT_ROOT = path.join(os.tmpdir(), "Do SOUL Alaya");
@@ -17,24 +16,8 @@ export function codexConfigPath(home: string = PROFILE_TEST_HOME): string {
   return path.join(home, ".codex", "config.toml");
 }
 
-export function codexSlashCommandsPath(home: string = PROFILE_TEST_HOME): string {
-  return path.join(home, ".codex", "slash-commands.toml");
-}
-
-export function codexSlashCommandsInCommandsDir(home: string = PROFILE_TEST_HOME): string {
-  return path.join(home, ".codex", "commands", "slash-commands.toml");
-}
-
 export function claudeJsonPath(home: string = PROFILE_TEST_HOME): string {
   return path.join(home, ".claude.json");
-}
-
-export function claudeSlashCommandsPath(home: string = PROFILE_TEST_HOME): string {
-  return path.join(home, ".claude", "slash-commands.json");
-}
-
-export function claudeSlashCommandsInCommandsDir(home: string = PROFILE_TEST_HOME): string {
-  return path.join(home, ".claude", "commands", "slash-commands.json");
 }
 
 export function repoSourceAttachDir(repoRoot: string = REPO_LAYOUT_ROOT): string {
@@ -65,17 +48,4 @@ export function expectedMcpLauncher(repoRoot: string): {
     command: "node",
     args: [repoBinPath(repoRoot), "mcp", "stdio"]
   };
-}
-
-export function expectedSlashCommand(repoRoot: string): string {
-  return `node ${quoteSingle(repoBinPath(repoRoot))} inspect --open`;
-}
-
-export function expectedInstalledPackageSlashCommand(): string {
-  return `node ${quoteSingle(installedPackageBinPath())} inspect --open`;
-}
-
-export function slashCommandContainsAlayaBin(content: string): boolean {
-  const normalized = content.replace(/\\\\/g, "\\");
-  return /[/\\]bin[/\\]alaya\.mjs/i.test(normalized);
 }

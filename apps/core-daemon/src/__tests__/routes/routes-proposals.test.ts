@@ -106,7 +106,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     });
   });
 
-  it("creates Inspector memory-action proposals through the MCP proposal workflow", async () => {
+  it("creates HTTP reviewer memory-action proposals through the MCP proposal workflow", async () => {
     const { app, mcpMemoryToolHandler, memoryService } = buildApp();
 
     const response = await app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/downgrade", {
@@ -124,13 +124,13 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       arguments: {
         target_object_id: "mem-1",
         proposed_changes: { confidence: 0.4 },
-        reason: "Downgrade memory mem-1: Inspector user requested weaker trust."
+        reason: "Downgrade memory mem-1: HTTP reviewer requested weaker trust."
       },
       context: {
         workspaceId: "ws-1",
         runId: null,
-        agentTarget: "inspector",
-        sessionId: expect.stringMatching(/^inspector-/)
+        agentTarget: "http-reviewer",
+        sessionId: expect.stringMatching(/^http-reviewer-/)
       }
     });
   });
@@ -156,7 +156,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     );
   });
 
-  // A second click of the same Inspector action on the same memory must
+  // A second click of the same HTTP reviewer action on the same memory must
   // not create duplicate pending proposals. The route should detect an
   // existing pending proposal whose target + proposed_changes match and
   // return its proposal_id with status=already_pending.
@@ -215,6 +215,50 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       data: { proposal_id: "existing-tombstone-proposal", status: "already_pending" }
     });
     // The propose_memory_update path must NOT be invoked when a duplicate is detected.
+    expect(propose).not.toHaveBeenCalled();
+  });
+
+  it("propagates list_pending_proposals failure as an explicit HTTP error instead of creating a duplicate proposal", async () => {
+    const app = new Hono();
+    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
+    const memoryService = {
+      findByIdScoped: vi.fn(async () => ({ object_id: "mem-1", confidence: 0.6 }))
+    };
+    const proposalService = {
+      findByWorkspaceId: vi.fn(async () => []),
+      findPending: vi.fn(async () => [])
+    };
+    const propose = vi.fn(async () => ({
+      ok: true as const,
+      output: { proposal_id: "fresh-proposal", status: "created" }
+    }));
+    const mcpMemoryToolHandler = {
+      call: vi.fn(async (input: { toolName: string }) => {
+        if (input.toolName === "soul.list_pending_proposals") {
+          return {
+            ok: false as const,
+            error: { code: "NEEDS_CONTEXT" as const, message: "Additional context is required." }
+          };
+        }
+        return await propose();
+      })
+    };
+    registerProposalRoutes(app, proposalRouteServices({
+      workspaceService,
+      memoryService,
+      proposalService,
+      mcpMemoryToolHandler
+    }));
+
+    const response = await app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/retire", {
+      method: "POST"
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: { code: "NEEDS_CONTEXT", message: "Additional context is required." }
+    });
     expect(propose).not.toHaveBeenCalled();
   });
 

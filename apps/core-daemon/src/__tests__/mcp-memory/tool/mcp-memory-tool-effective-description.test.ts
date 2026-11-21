@@ -66,14 +66,14 @@ describe("MCP client-visible memory tool descriptions", () => {
     expect(hostListed.find((tool) => tool.name === "soul.interpretation")?.description).toBe(
       expectedByName.get("soul.interpretation")
     );
-    const inspectorListed = await listToolsForAgentTarget("inspector");
-    expect(inspectorListed.find((tool) => tool.name === "soul.interpretation")?.description).toBe(
+    const httpReviewerListed = await listToolsForAgentTarget("http-reviewer");
+    expect(httpReviewerListed.find((tool) => tool.name === "soul.interpretation")?.description).toBe(
       expectedByName.get("soul.interpretation")
     );
   });
 
   it("lists an empty in-process catalog as no tools and still rejects unknown calls", async () => {
-    const listed = await listToolsForAgentTarget("inspector", []);
+    const listed = await listToolsForAgentTarget("http-reviewer", []);
     expect(listed).toEqual([]);
 
     const server = createAlayaMcpServer({
