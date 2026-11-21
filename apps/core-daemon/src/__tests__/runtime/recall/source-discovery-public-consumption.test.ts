@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
-import { sourceDisclosure, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+import { SoulMemorySearchResponseSchema, sourceDisclosure, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import { assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
 import { WS, RUN, NOW } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
@@ -284,7 +284,7 @@ async function runPair(input: Readonly<{
   expect(request.enumeration_policy).toBe(LIVE_ORDINARY_ENUMERATION);
   const started = input.receipts.length;
   const trace = await consumePublicSources({
-    handler: input.handler,
+    handler: async (request, context) => SoulMemorySearchResponseSchema.parse(await input.handler(request, context)),
     context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" },
     request,
     receipts: input.receipts
@@ -379,7 +379,7 @@ async function consumePairTrace(
   let initial: SoulMemorySearchResponse | undefined;
   const trace = await consumePublicSources({
     handler: async (request, context) => {
-      const response = await handler(request, context);
+      const response = SoulMemorySearchResponseSchema.parse(await handler(request, context));
       initial ??= response;
       for (const row of response.results) {
         if (row.target.kind === "source_evidence") {

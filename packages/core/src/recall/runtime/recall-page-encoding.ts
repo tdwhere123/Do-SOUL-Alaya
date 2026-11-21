@@ -1,5 +1,8 @@
-import { AlayaError, MILLIGRADE_TOP, ORDINARY_NATIVE_FIELD_RESULT_VERSION, SoulMemorySearchResponseSchema, indexEntryCacheKey, indexEntryObjectKind, indexMemoryObjectId,
-  type InformationIndex, type MemorySearchResult, type RecallCandidate, type StagedWarningArray } from "@do-soul/alaya-protocol";
+import { AlayaError, MILLIGRADE_TOP, ORDINARY_NATIVE_FIELD_RESULT_VERSION, SoulMemorySearchResponseWireSchema,
+  encodePageSourceDisclosure, indexEntryCacheKey, indexEntryObjectKind, indexMemoryObjectId,
+  sourceDisclosureFieldByteSavings,
+  type InformationIndex, type MemorySearchResult, type RecallCandidate, type SourceDisclosure,
+  type SoulMemorySearchResponseWire, type StagedWarningArray } from "@do-soul/alaya-protocol";
 import { RECALL_CONSUMER_PROTOCOL_VERSION } from "./recall-consumer-compatibility.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
 import { completeSourceDeliveryEnd, sourceDeliveryEnds, sourceDeliveryPrefix } from "./source-delivery-prefix.js";
@@ -13,8 +16,16 @@ export function encodeRecallPageResponse(input: Readonly<{
   active_constraints_count: number | null; active_constraints_completeness?: "complete" | "incomplete";
   degradation_reason: import("@do-soul/alaya-protocol").SoulMemorySearchDegradationReason | null;
   member_index?: readonly import("@do-soul/alaya-protocol").RecallMemberIndexLine[];
-}>) {
-  return SoulMemorySearchResponseSchema.parse({ ...input, protocol_version: RECALL_CONSUMER_PROTOCOL_VERSION, total_count: input.results.length,
+}>): SoulMemorySearchResponseWire {
+  let anchorDisclosure: SourceDisclosure | undefined;
+  const results = input.results.map(row => {
+    if (row.source_disclosure === undefined) return row;
+    const encoded = encodePageSourceDisclosure(row.source_disclosure, anchorDisclosure);
+    anchorDisclosure ??= row.source_disclosure;
+    return { ...row, source_disclosure: encoded };
+  });
+  return SoulMemorySearchResponseWireSchema.parse({ ...input, results, protocol_version: RECALL_CONSUMER_PROTOCOL_VERSION,
+    total_count: results.length,
     ...(input.index.order_status === undefined ? {} : { order_status: input.index.order_status }),
     ...(input.index.page_purpose === undefined ? {} : { page_purpose: input.index.page_purpose }),
     ...(input.index.product_updates === undefined ? {} : { product_updates: input.index.product_updates }) });
@@ -54,6 +65,8 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
   if (index.entries.some(entry => entry.interpretation_node !== undefined)) {
     throw new AlayaError("CONFLICT", "conditional interpretation results require the qualified interpretation result capability");
   }
+  const usePageDelta = index.representation.disclosure_codec === "page_delta";
+  let anchorDisclosure: SourceDisclosure | undefined;
   const rows = index.entries.slice(0, index.representation.page_budget).map(entry => {
     onEntry?.();
     const cacheKey = indexEntryCacheKey(entry), objectId = indexMemoryObjectId(entry);
@@ -67,7 +80,14 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
     const disclosure = entry.target.kind !== "source_evidence" ? undefined : metadata?.source_disclosure
       ?? projectSourceDisclosure({ material_kind: entry.target.root_kind === "source_record" ? "original_body"
         : entry.target.span?.retained_extent === "gist" ? "retained_gist" : "retained_excerpt", evaluated_as_of: sourceClock(index) });
-    const disclosureBytes = disclosure === undefined ? 0 : Buffer.byteLength(JSON.stringify({ source_disclosure: disclosure }));
+    let disclosureBytes = disclosure === undefined ? 0 : Buffer.byteLength(JSON.stringify({ source_disclosure: disclosure }));
+    if (usePageDelta && disclosure !== undefined) {
+      if (anchorDisclosure === undefined) {
+        anchorDisclosure = disclosure;
+      } else {
+        disclosureBytes -= sourceDisclosureFieldByteSavings(disclosure, anchorDisclosure);
+      }
+    }
     const essentialBytes = disclosureBytes + (evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0
       ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings })));
     const reasonedBytes = reasons === undefined ? essentialBytes : disclosureBytes

@@ -25,7 +25,7 @@ import {
   type SoulExploreGraphResponse,
   type SoulListPendingEdgeProposalsResponse,
   type SoulListPendingProposalsResponse,
-  type SoulMemorySearchResponse,
+  type SoulMemorySearchResponseWire,
   type SoulOpenPointerResponse,
   type SoulProposeEdgeResponse,
   type SoulProposeMemoryUpdateRequest,
@@ -319,7 +319,7 @@ export interface McpMemoryToolHandlerDependencies {
 }
 
 export type McpMemoryToolResponseByName = {
-  readonly "soul.recall": SoulMemorySearchResponse;
+  readonly "soul.recall": SoulMemorySearchResponseWire;
   readonly "soul.open_pointer": SoulOpenPointerResponse;
   readonly "soul.emit_candidate_signal": SoulEmitCandidateSignalResponse;
   readonly "soul.propose_memory_update": SoulProposeMemoryUpdateResponse;

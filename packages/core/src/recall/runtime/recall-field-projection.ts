@@ -26,6 +26,7 @@ import { governanceManifestationCeilings, governanceManifestationFor } from "./g
 import { continuationConsumerIdentity } from "./recall-consumer-compatibility.js";
 import { CoreError } from "../../shared/errors.js";
 import { sourceDeliveryConditions } from "./source-delivery-prefix.js";
+import { prepareInitialPageDeltaPacking } from "./page-delta-packing.js";
 
 const RESULT_VERSION = ORDINARY_NATIVE_FIELD_RESULT_VERSION;
 type ProjectionContext = Readonly<{
@@ -292,10 +293,41 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
   let width = context.input.budget.page_budget;
   let droppedNonEmpty = false;
   let refusedMembershipFit: RecallPageFitObservation | undefined;
+  let allowPageDelta = true;
   for (;;) {
-    const candidate = projectMembershipCandidate({ ...current,
+    let candidate = projectMembershipCandidate({ ...current,
       input: { ...current.input, budget: { ...current.input.budget, page_budget: width } } });
     refuseUnfundedPageWork(current, candidate);
+    const packing = allowPageDelta
+      ? prepareInitialPageDeltaPacking({
+        input: current.input,
+        projectionProgress: context.projectionProgress,
+        candidate,
+        cost: context.cost,
+        remainingWorkFields,
+        projectAtWidth: (nextAvailableWork, nextMemoryBytes, nextWidth) => {
+          const nextContext: ProjectionContext = {
+            ...current,
+            state: {
+              ...candidate.retained,
+              ...remainingWorkFields(candidate.retained, nextAvailableWork),
+              remaining_memory_bytes: nextMemoryBytes
+            },
+            input: { ...current.input, budget: { ...current.input.budget, page_budget: nextWidth } },
+            projectionProgress: context.projectionProgress,
+            navigation: candidate.navigation
+          };
+          const reprojected = projectMembershipCandidate(nextContext);
+          refuseUnfundedPageWork(nextContext, reprojected);
+          return reprojected;
+        }
+      })
+      : { candidate, packed: false as const };
+    allowPageDelta = false;
+    candidate = packing.candidate;
+    if (packing.packed) {
+      width = packing.j;
+    }
     // Assemble the final page (continuation, sealed token, hydrated visible spans)
     // before measuring it, so the fit sees exactly what the caller would receive.
     const prepared = prepareIndexCommit({
@@ -311,6 +343,12 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
       close_when: (retained, index) => candidate.navigation?.status !== "resource_refused"
         && closeIdlePage(retained, index, current.input, context.restored)
     });
+    const indexForFit = !packing.packed
+      ? prepared.index
+      : {
+        ...prepared.index,
+        representation: { ...prepared.index.representation, disclosure_codec: "page_delta" as const }
+      };
     const available = candidate.retained.remaining_exploration + candidate.retained.remaining_reserve;
     // Delivery retention is already known, but not yet committed. Keep it out of
     // the codec allowance; a rejected/shrunk page releases this hold exactly once.
@@ -319,13 +357,13 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     const allowance = { work_units: meter.work, memory_bytes: meter.bytes };
     let fitted: RecallPageFit;
     try {
-      fitted = context.cost.time("index", () => fitProjectedRecallPage({ index: prepared.index,
+      fitted = context.cost.time("index", () => fitProjectedRecallPage({ index: indexForFit,
         previews: candidate.payload.previews, metadata: candidate.payload.sourceMetadata,
         request: current.input, request_digest: context.requestDigest, meter }));
     } finally {
       context.cost.add("index", { budget_work: meter.spentWork, charged_retained_bytes: meter.spentBytes });
     }
-    try { current.input.observe_page_attempt?.(() => captureRecallPageAttempt({ index: prepared.index,
+    try { current.input.observe_page_attempt?.(() => captureRecallPageAttempt({ index: indexForFit,
       previews: candidate.payload.previews, metadata: candidate.payload.sourceMetadata, request: current.input,
       request_digest: context.requestDigest, allowance, fit: fitted })); }
     catch { /* Diagnostic consumers cannot change fitting or issuance. */ }
@@ -343,13 +381,14 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     }
     // Dropping every member of a nonempty page is a resource refusal, not a
     // valid-empty delivery: the field still holds undelivered membership.
-    if (fitted.fits && !(droppedNonEmpty && prepared.index.entries.length === 0)) {
+    if (fitted.fits && !(droppedNonEmpty && indexForFit.entries.length === 0)) {
       const committed = commitPreparedIndex({ prepared: { ...prepared, retained: {
         ...prepared.retained, ...remainingWorkFields(prepared.retained, remaining) } },
         index: fitted.index, previews: fitted.previews, payload: candidate.payload, cost: context.cost });
       context.retain?.(committed.retained);
       return committed.index;
     }
+    if (packing.packed) packing.restoreFragments();
     if (candidate.index.entries.length > 0) {
       droppedNonEmpty = true;
       refusedMembershipFit = fitted.observation;
@@ -360,7 +399,9 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     }
     // A failed fit commits nothing. Carry the post-fit remaining allowance into the
     // narrower retry so framing and hydration work is never restored or double-spent.
-    width = Math.min(width - 1, fitted.result_count, candidate.index.entries.length - 1);
+    width = packing.packed && packing.anyNextExtended
+      ? width
+      : Math.min(width - 1, fitted.result_count, candidate.index.entries.length - 1);
     current = { ...context, state: {
       ...candidate.retained, ...remainingWorkFields(candidate.retained, remaining),
       remaining_memory_bytes: candidate.payload.remainingMemoryBytes },

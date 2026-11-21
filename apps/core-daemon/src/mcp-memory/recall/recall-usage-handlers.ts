@@ -23,6 +23,7 @@ import {
   type SoulMemorySearchDegradationReason,
   type SoulMemorySearchRequest,
   type SoulMemorySearchResponse,
+  type SoulMemorySearchResponseWire,
   type SoulRecallHostContext,
   type SoulReportContextUsageRequest,
   type UsageProofRecord,
@@ -172,7 +173,7 @@ async function executeRecall(
   params: RecallHandlerParams,
   request: SoulMemorySearchRequest,
   context: RecallUsageToolCallContext
-): Promise<SoulMemorySearchResponse> {
+): Promise<SoulMemorySearchResponseWire> {
   const recallStartedAt = Date.now();
   const taskSurface = buildTaskSurface(request, params.generateId);
   const policyOverride = buildRecallPolicy(request, taskSurface.runtime_id, params.generateId());
@@ -310,7 +311,7 @@ function buildRecallResponse(
   results: readonly RecallSearchResult[],
   recallResult: RecallServiceResult,
   explainabilityPartial: boolean
-): SoulMemorySearchResponse {
+): SoulMemorySearchResponseWire {
   const honestyDiagnostics = selectRecallMcpHonestyDiagnostics(recallResult.diagnostics);
   return encodeRecallPageResponse({
     delivery_id: deliveryId,

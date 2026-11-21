@@ -59,11 +59,12 @@ import { deriveJsonSchema } from "./mcp-json-schema.js";
 import {
   SoulMemorySearchRequestSchema,
   SoulMemorySearchResponseSchema,
+  SoulMemorySearchResponseWireSchema,
   SourceOpenTargetSchema
 } from "./mcp-memory-search-types.js";
 import { SoulInterpretationRequestSchema } from "./mcp-interpretation-types.js";
 
-export { SoulMemorySearchResponseSchema };
+export { SoulMemorySearchResponseSchema, SoulMemorySearchResponseWireSchema };
 
 export {
   SOUL_INTERPRETATION_TOOL_NAME,
@@ -91,6 +92,7 @@ export {
   CallerQuestionTimeSchema,
   SoulMemorySearchDegradationReasonSchema,
   MemorySearchResultSchema,
+  MemorySearchPageResultWireSchema,
   SoulActiveConstraintGovernanceStateSchema,
   SoulActiveConstraintSchema,
   RecallTimeFieldSchema,
@@ -102,12 +104,14 @@ export {
   type CallerQueryCoordinates,
   type RecallMemberIndexLine,
   type MemorySearchResult,
+  type MemorySearchPageResultWire,
   type SoulActiveConstraintGovernanceState,
   type SoulActiveConstraint,
   type SoulMemorySearchDegradationReason,
   type SoulRecallTokenizerHint,
   type SoulRecallHostContext,
   type SoulMemorySearchRequest,
+  type SoulMemorySearchResponseWire,
   type SoulMemorySearchResponse,
   type SourceOpenTarget
 } from "./mcp-memory-search-types.js";

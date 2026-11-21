@@ -175,15 +175,27 @@ reaches the prefix and tail).
 ## Ordinary Native Field Delivery
 
 Field pages and continuations carry `ORDINARY_NATIVE_FIELD_RESULT_VERSION`
-(`ordinary-native-field.v16`, Protocol 43.0.0; library field protocol 15;
+(`ordinary-native-field.v16`, Protocol 44.0.0; library field protocol 15;
 invariant §25 major). Native vector hits locate roots while initial payloads
 begin at byte `0` (or the condition witness span) and respect UTF-8 byte budgets
 via `BoundedIndexPayload` and `recall-page-encoding.ts`:
 
-- **Ten-slot bounded byte delivery:** `BoundedIndexPayload` sizes entries up to
-  `page_budget` (default ten-slot delivery window / `max_results`) within the
-  UTF-8 `max_total_tokens` byte cap, clipping previews at the coarsest recorded
-  structural boundary (`message` span, else `line` span, else UTF-8 prefix).
+- **Ten-slot bounded byte delivery & Page-1 fixed-fragment `Delta + Next` packing:**
+  `BoundedIndexPayload` sizes entries up to `page_budget` (default ten-slot
+  delivery window / `max_results`) within the UTF-8 `max_total_tokens` byte cap,
+  clipping previews at the coarsest recorded structural boundary (`message` span,
+  else `line` span, else UTF-8 prefix). On an initial ordinary membership page
+  (`continuation == null`, `offset === 0`), Stage 1 (`Delta`) partitions up to 5
+  entries into unmodified literal virtual pages (`V_1, V_2, ...`), widens to the
+  largest consecutive prefix `j` (`>= |V_1|`) whose cumulative bytes minus
+  `sourceDisclosureFieldByteSavings` fit `max_total_tokens` with
+  `disclosure_codec: "page_delta"`, and locks those exact fragment boundaries
+  without pre-segmentation truncation; Stage 2 (`Next`) uses any remaining
+  residual bytes in head order to extend incomplete `source_record` `"body"`
+  slots to their next complete `"message"` right boundary only when
+  dependency/preceding-prompt checks confirm every prerequisite lies within
+  `[content_start, next_end)`. Outer-envelope refusal falls back cleanly to the
+  literal shrink loop.
 - **Atomic condition-witness page deferral:** When a later
   `evidence_variant.condition` entry would expose only a partial fragment on a
   shared page while its complete witness unit fits a fresh page,
@@ -259,7 +271,12 @@ material kind (`original_body`, `retained_excerpt`, `retained_gist`,
 `interpretation`), `evaluated_as_of`, checked source interval (exclusive end;
 unknown ≠ `expired`), and proof use (`not_current_proof` vs
 `conditional_support` with unreviewed/world-unknown qualifiers). Disclosure
-never overrides source authorization, currentness, or erasure.
+never overrides source authorization, currentness, or erasure. On multi-row
+`soul.recall` pages (`SoulMemorySearchResponseWireSchema`), rows after the
+page's first disclosed v1 9-tuple may emit lossless Codec v2 page-local deltas
+(`SOURCE_DISCLOSURE_DELTA_CODEC_VERSION = 2`, `{ v: 2, "1"?: ..., ..., "8"?: ... }`)
+when strictly shorter in UTF-8 field bytes; `SoulMemorySearchResponseSchema.parse`
+accepts both v1 and v2 pages and decodes every slot back to a full v1 9-tuple.
 
 ## Governance, accounting and recovery
 

@@ -15,7 +15,7 @@ import {
   type SoulListPendingEdgeProposalsRequest,
   type SoulListPendingProposalsRequest,
   type SoulMemorySearchRequest,
-  type SoulMemorySearchResponse,
+  type SoulMemorySearchResponseWire,
   type SoulOpenPointerRequest,
   type SoulProposeEdgeRequest,
   type SoulProposeMemoryUpdateRequest,
@@ -51,7 +51,7 @@ export function createMcpMemoryToolDispatcher(input: Readonly<{
   readonly recall: (
     request: SoulMemorySearchRequest,
     context: McpMemoryToolCallContext
-  ) => Promise<SoulMemorySearchResponse>;
+  ) => Promise<SoulMemorySearchResponseWire>;
   readonly reportContextUsage: (
     request: SoulReportContextUsageRequest,
     context: McpMemoryToolCallContext

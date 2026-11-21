@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { EventPublisher, RecallService, snapshotIdFromPin, type ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
-import { sourceDisclosure, MemoryDimension, SNAPSHOT_PIN_NATIVE_WORK, SoulMemorySearchRequestSchema, sourceEvidenceRootTarget, type ContextDeliveryRecord } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, MemoryDimension, SNAPSHOT_PIN_NATIVE_WORK, SoulMemorySearchRequestSchema, SoulMemorySearchResponseSchema, sourceEvidenceRootTarget, type ContextDeliveryRecord } from "@do-soul/alaya-protocol";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteTrustStateRepo, SqliteFieldSourceRecordRepo, SqliteIndexedRecallProjection } from "@do-soul/alaya-storage";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
@@ -124,7 +124,7 @@ it("expands the remaining bytes of a final source clipped by the real public res
   const body = `needle ${"x".repeat(3000)}`;
   const fixture = await sourceWorkerFixture(body);
   try {
-    const first = await fixture.handler(fixture.request, fixture.context);
+    const first = SoulMemorySearchResponseSchema.parse(await fixture.handler(fixture.request, fixture.context));
     expect(first.results, JSON.stringify(first)).toHaveLength(1);
     const result = first.results[0]!;
     expect(result.target?.kind).toBe("source_evidence");
@@ -136,9 +136,9 @@ it("expands the remaining bytes of a final source clipped by the real public res
     expect(deliveredEnd).toBeLessThan(Buffer.byteLength(body));
     expect(sourceDisclosure(result.source_disclosure!)).toMatchObject({ material_kind: "original_body", source_binding: "checked_record" });
     expect(first.index?.continuation).not.toBeNull();
-    const tail = await fixture.handler({ ...fixture.request, continuation: first.index!.continuation!,
+    const tail = SoulMemorySearchResponseSchema.parse(await fixture.handler({ ...fixture.request, continuation: first.index!.continuation!,
       payload_continuation: { schema_version: 1, purpose: "payload_expansion", target: sourceEvidenceRootTarget(result.target),
-        start_offset: deliveredEnd, byte_budget: 2000 } }, fixture.context);
+        start_offset: deliveredEnd, byte_budget: 2000 } }, fixture.context));
     expect(tail.page_purpose).toBe("payload");
     expect(tail.results).toHaveLength(1);
     expect(tail.results[0]?.target).toMatchObject({ root_id: result.target.root_id, span: { content_start: deliveredEnd,

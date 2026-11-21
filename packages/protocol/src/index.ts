@@ -41,9 +41,12 @@ export * from "./recall/source-index.js";
 export * from "./recall/source-index-lexical.js";
 export type * from "./recall/source-index-query.js";
 export { SourceIndexQueryResourcesSchema } from "./recall/source-index-query.js";
-export { SOURCE_DISCLOSURE_CODEC_VERSION, SourceDisclosureSchema, SourceDisclosureSemanticSchema,
-  encodeSourceDisclosure, qualifySourceDisclosure, sourceDisclosureProofUse, sourceDisclosure, decodeHistoricalSourceDisclosure, EvidenceTextDisclosuresSchema,
-  type SourceDisclosure, type SourceDisclosureSemantic, type EvidenceTextDisclosures } from "./recall/source-disclosure.js";
+export { SOURCE_DISCLOSURE_CODEC_VERSION, SOURCE_DISCLOSURE_DELTA_CODEC_VERSION, SourceDisclosureSchema,
+  SourceDisclosureDeltaSchema, SourceDisclosurePageSlotSchema, SourceDisclosureSemanticSchema,
+  encodeSourceDisclosure, encodePageSourceDisclosure, decodePageSourceDisclosure, sourceDisclosureFieldByteSavings,
+  qualifySourceDisclosure, sourceDisclosureProofUse, sourceDisclosure, decodeHistoricalSourceDisclosure, EvidenceTextDisclosuresSchema,
+  type SourceDisclosure, type SourceDisclosureDelta, type SourceDisclosurePageSlot, type SourceDisclosureSemantic,
+  type EvidenceTextDisclosures } from "./recall/source-disclosure.js";
 export * from "./garden/source-semantic-resources.js";
 export { sourceSemanticStructuralEdges, sourceSemanticContextContains, sourceSemanticSlotNodeId } from "./garden/source-semantic-structure.js";
 export {

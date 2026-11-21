@@ -1,11 +1,13 @@
 import {
   MemoryDimension,
   ScopeClass,
+  canonicalJson,
   indexEntryCacheKey,
   indexMemoryObjectId,
   sameSourceEvidenceRoot,
   sourceEvidenceRootKey,
   sourceRecallTarget,
+  type HostDependencyExposure,
   type IndexEntry,
   type InformationIndex,
   type ManifestationState,
@@ -258,6 +260,200 @@ export class BoundedIndexPayload {
     return { ...index, entries: index.entries.map((entry) => this.stampDeliveredSpan(entry)) };
   }
 
+  public lockDeliveredFragment(
+    entry: IndexEntry,
+    contentPreview: string,
+    span?: SourceDeliveredSpan
+  ): void {
+    const cacheKey = indexEntryCacheKey(entry);
+    const objectId = indexMemoryObjectId(entry);
+    if (entry.target.kind === "source_evidence") {
+      const rawPreview = contentPreview === "[empty source]" && this.previews.get(cacheKey) === ""
+        ? ""
+        : contentPreview;
+      rememberPreview(this.previews, cacheKey, objectId, rawPreview);
+      this.sourcePreviewKeys.add(cacheKey);
+      if (span !== undefined) this.deliveredSpans.set(sourceEvidenceRootKey(entry.target), span);
+      return;
+    }
+    rememberPreview(this.previews, cacheKey, objectId, contentPreview);
+  }
+
+  public snapshotDeliveredFragments(entries: readonly IndexEntry[]): () => void {
+    const savedPreviews = new Map<string, string | undefined>();
+    const savedSpans = new Map<string, SourceDeliveredSpan | undefined>();
+    const savedUnits = new Map<string, Readonly<{ start_byte: number; end_byte: number }> | undefined>();
+    const savedMetadata = new Map<string, RecallSourceMetadata | undefined>();
+    const savedSourceKeys = new Set(this.sourcePreviewKeys);
+    for (const entry of entries) {
+      const cacheKey = indexEntryCacheKey(entry);
+      const objectId = indexMemoryObjectId(entry);
+      savedPreviews.set(cacheKey, this.previews.get(cacheKey));
+      savedMetadata.set(cacheKey, this.sourceMetadata[cacheKey]);
+      if (objectId !== undefined) {
+        savedPreviews.set(objectId, this.previews.get(objectId));
+        savedMetadata.set(objectId, this.sourceMetadata[objectId]);
+      }
+      if (entry.target.kind === "source_evidence") {
+        const rootKey = sourceEvidenceRootKey(entry.target);
+        savedSpans.set(rootKey, this.deliveredSpans.get(rootKey));
+        savedUnits.set(rootKey, this.deliveryUnits.get(rootKey));
+      }
+    }
+    return () => {
+      for (const [key, value] of savedPreviews) {
+        if (value === undefined) this.previews.delete(key);
+        else this.previews.set(key, value);
+      }
+      for (const [key, value] of savedMetadata) {
+        if (value === undefined) delete this.sourceMetadata[key];
+        else this.sourceMetadata[key] = value;
+      }
+      for (const [rootKey, span] of savedSpans) {
+        if (span === undefined) this.deliveredSpans.delete(rootKey);
+        else this.deliveredSpans.set(rootKey, span);
+      }
+      for (const [rootKey, unit] of savedUnits) {
+        if (unit === undefined) this.deliveryUnits.delete(rootKey);
+        else this.deliveryUnits.set(rootKey, unit);
+      }
+      this.sourcePreviewKeys.clear();
+      for (const key of savedSourceKeys) this.sourcePreviewKeys.add(key);
+    };
+  }
+
+  public extendNextMessageBoundary(input: Readonly<{
+    entry: IndexEntry;
+    residualBytes: number;
+    availableWork: number;
+    framingReserve: number;
+    retentionBytes: number;
+  }>): Readonly<{ extendedBytes: number; spentWork: number }> {
+    const { entry } = input;
+    if (entry.target.kind !== "source_evidence" || entry.target.root_kind !== "source_record") {
+      return { extendedBytes: 0, spentWork: 0 };
+    }
+    const rootKey = sourceEvidenceRootKey(entry.target);
+    const cacheKey = indexEntryCacheKey(entry);
+    const span = this.deliveredSpans.get(rootKey) ?? entry.target.span;
+    const existingPreview = this.previews.get(cacheKey);
+    const boundaries = this.sourceMetadata[cacheKey]?.delivery_boundaries;
+    const reader = this.input.readers.sourceRoot;
+    if (span === undefined || span.content_complete !== false || span.retained_extent !== "body"
+      || span.original_complete !== true || existingPreview === undefined || reader === undefined
+      || boundaries?.status !== "available"
+      || (!boundaries.spans.some(s => s.purpose === "message")
+        && !(boundaries.spans.length === 0 && boundaries.first_end_offset !== undefined))) {
+      return { extendedBytes: 0, spentWork: 0 };
+    }
+    const availMem = this.remainingMemoryBytes - input.retentionBytes;
+    const metadataReserve = this.input.readers.sourceRootMetadataByteLimit ?? 0;
+    if (input.residualBytes < 1 || availMem <= metadataReserve || input.availableWork - input.framingReserve < 7) {
+      return { extendedBytes: 0, spentWork: 0 };
+    }
+    const extPage = reader({
+      purpose: "payload",
+      firstDeliveryUnit: true,
+      workspaceId: this.input.workspaceId,
+      rootKind: "source_record",
+      rootId: entry.target.root_id,
+      revision: entry.target.source_version,
+      digest: entry.target.content_digest,
+      evidenceObjectId: entry.target.evidence_object_id,
+      offset: span.content_end,
+      byteLimit: Math.max(1, Math.min(65536, input.residualBytes)),
+      nativeByteLimit: Math.max(0, availMem),
+      workLimit: Math.max(0, input.availableWork - input.framingReserve - 2)
+    });
+    const nativeVisits = Math.max(1, extPage.nativeWork ?? extPage.rowsRead);
+    const readWork = nativeVisits + 2;
+    this.nativeVisits += nativeVisits;
+    this.nativeRows += extPage.rowsRead;
+    this.nativeBytes += extPage.bytesRead + (extPage.metadataBytes ?? 0);
+    this.consumeSourceMemory(extPage.bytesRead + (extPage.metadataBytes ?? 0), cacheKey);
+    if (extPage.unavailable || extPage.row?.content === undefined
+      || extPage.row.delivery_boundaries?.status !== "available") {
+      return { extendedBytes: 0, spentWork: readWork };
+    }
+    const nextEnd = extPage.row.delivery_boundaries.spans.find(
+      s => s.purpose === "message" && s.end_offset > span.content_end
+    )?.end_offset;
+    const extContentBytes = Buffer.byteLength(extPage.row.content, "utf8");
+    const extraBytes = nextEnd === undefined ? 0 : nextEnd - span.content_end;
+    if (nextEnd === undefined || extraBytes < 1 || extraBytes > input.residualBytes || extraBytes > extContentBytes) {
+      return { extendedBytes: 0, spentWork: readWork };
+    }
+    const depCheck = this.verifyNextExtensionDependencies(entry.target, cacheKey, span, nextEnd,
+      input.availableWork - readWork - input.framingReserve - 2, input.retentionBytes);
+    if (!depCheck.safe) return { extendedBytes: 0, spentWork: readWork + depCheck.work };
+    this.applyNextMessageExtension({ rootKey, cacheKey, span, existingPreview, nextEnd, extraBytes,
+      extContent: extPage.row.content, extComplete: extPage.row.content_complete === true && extraBytes === extContentBytes });
+    return { extendedBytes: extraBytes, spentWork: readWork + depCheck.work };
+  }
+
+  private verifyNextExtensionDependencies(
+    target: SourceEvidenceTarget,
+    cacheKey: string,
+    span: SourceDeliveredSpan,
+    nextEnd: number,
+    workLimit: number,
+    retentionBytes: number
+  ): Readonly<{ safe: boolean; work: number }> {
+    if (this.input.readers.sourceDependencies === undefined || this.input.authorizedScopes === undefined) {
+      return { safe: true, work: 0 };
+    }
+    const depRead = this.input.readers.sourceDependencies({
+      target,
+      span: [span.content_end, nextEnd],
+      authorizedScopes: this.input.authorizedScopes,
+      byteLimit: 0,
+      budget: {
+        work_units: Math.max(0, workLimit),
+        memory_bytes: Math.max(0, this.remainingMemoryBytes - retentionBytes)
+      }
+    });
+    this.nativeVisits += depRead.resources.work;
+    this.nativeBytes += depRead.resources.native_bytes;
+    this.consumeSourceMemory(depRead.resources.memory_bytes, cacheKey);
+    return { safe: nextExtensionDependenciesSafe(depRead.exposure, target, span.content_start, nextEnd),
+      work: depRead.resources.work };
+  }
+
+  private applyNextMessageExtension(input: Readonly<{
+    rootKey: string;
+    cacheKey: string;
+    span: SourceDeliveredSpan;
+    existingPreview: string;
+    nextEnd: number;
+    extraBytes: number;
+    extContent: string;
+    extComplete: boolean;
+  }>): void {
+    const extraText = Buffer.from(input.extContent, "utf8").subarray(0, input.extraBytes).toString("utf8");
+    rememberPreview(this.previews, input.cacheKey, undefined, input.existingPreview + extraText);
+    this.deliveredSpans.set(input.rootKey, {
+      ...input.span,
+      content_end: input.nextEnd,
+      content_complete: input.extComplete
+    });
+    if (this.deliveryUnits.has(input.rootKey)) {
+      this.deliveryUnits.set(input.rootKey, { start_byte: input.span.content_start, end_byte: input.nextEnd });
+    }
+    const existingMeta = this.sourceMetadata[input.cacheKey];
+    if (existingMeta?.delivery_boundaries?.status === "available") {
+      const spans = existingMeta.delivery_boundaries.spans;
+      if (!spans.some(s => s.purpose === "message" && s.end_offset === input.nextEnd)) {
+        this.sourceMetadata[input.cacheKey] = {
+          ...existingMeta,
+          delivery_boundaries: {
+            ...existingMeta.delivery_boundaries,
+            spans: [...spans, { purpose: "message", end_offset: input.nextEnd }]
+          }
+        };
+      }
+    }
+  }
+
   private payloadContinuationFor(target: IndexEntry["target"]): PayloadContinuationRequest | undefined {
     const continuation = this.input.payloadContinuation;
     if (continuation === undefined || continuation.purpose !== "payload_expansion") return undefined;
@@ -505,4 +701,31 @@ function retainedExtentFromHydrate(
   // Observer hydrate currently drops retained_extent; incomplete originals are
   // retained reductions, never the body.
   return originalComplete ? "body" : "excerpt";
+}
+
+function nextExtensionDependenciesSafe(
+  exposure: HostDependencyExposure,
+  target: SourceEvidenceTarget,
+  contentStart: number,
+  nextEnd: number
+): boolean {
+  if (exposure.roots.length === 0) return false;
+  if (exposure.roots.some(r => r.utf8_span[0] < contentStart || r.utf8_span[1] > nextEnd)) return false;
+  if (exposure.prerequisites.some(p => p.status !== "delivered" && p.status !== "partial")) return false;
+  if (exposure.prerequisites.some(p =>
+    (p.reference !== undefined && (p.reference.root_id !== target.root_id || p.reference.source_version !== target.source_version))
+    || (p.utf8_span !== undefined && (p.utf8_span[0] < contentStart || p.utf8_span[1] > nextEnd)))) {
+    return false;
+  }
+  for (const rootOcc of exposure.roots) {
+    for (const ref of rootOcc.dependencies ?? []) {
+      if (ref.root_id !== target.root_id || ref.source_version !== target.source_version) return false;
+      const refKey = canonicalJson(ref);
+      const prereq = exposure.prerequisites.find(p => p.reference !== undefined && canonicalJson(p.reference) === refKey);
+      const rootMatch = exposure.roots.find(r => r.occurrence_id === ref.occurrence_id);
+      const depSpan = prereq?.utf8_span ?? rootMatch?.utf8_span;
+      if (depSpan === undefined || depSpan[0] < contentStart || depSpan[1] > nextEnd) return false;
+    }
+  }
+  return true;
 }

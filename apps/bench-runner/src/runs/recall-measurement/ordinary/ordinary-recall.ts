@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { AlayaError, canonicalJson, decodeHistoricalSourceDisclosure, encodeSourceDisclosure, SoulMemorySearchResponseSchema, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, decodeHistoricalSourceDisclosure, encodeSourceDisclosure, SoulMemorySearchResponseSchema, SoulMemorySearchResponseWireSchema, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { chainIdentity } from "../contract.js";
 import { canonicalPath, isContainedPath } from "../../fs/opened-contained-path.js";
 import { boundedArtifactEntryExists, decodeCanonicalUtf8Artifact, readBoundedStableRegularFile } from
@@ -241,8 +241,14 @@ function decodeEnvelope(envelope: OrdinaryRecallEnvelope | null, transportError:
       ...(row.source_disclosure === undefined ? {} : { source_disclosure: encodeSourceDisclosure(
         decodeHistoricalSourceDisclosure(row.source_disclosure, major as 14 | 15 | 16 | 17 | 18)) }) })) };
   }
+  if (major >= 44) {
+    const wire = SoulMemorySearchResponseWireSchema.parse(current);
+    same(wire, current, "public output cannot be normalized during archive admission");
+  }
   const output = SoulMemorySearchResponseSchema.parse(current);
-  same(output, current, "public output cannot be normalized during archive admission");
+  if (major < 44) {
+    same(output, current, "public output cannot be normalized during archive admission");
+  }
   const nativeSemantics = nativeRecallArchiveSemantics(protocolVersion);
   if (nativeSemantics !== undefined) {
     const index = output.index, continuation = index?.continuation;

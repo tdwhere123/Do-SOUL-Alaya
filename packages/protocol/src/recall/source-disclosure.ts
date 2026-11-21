@@ -2,6 +2,7 @@ import { z } from "zod";
 import { IsoDatetimeStringSchema } from "../shared/schema-primitives.js";
 import { SourceRepresentationSchema } from "./field-contract/source-span.js";
 import { AlayaError } from "../shared/alaya-error.js";
+import { canonicalJson } from "./selection/capture/canonical-json.js";
 
 const PROOF_USE = {
   source_only: Object.freeze({ kind: "source_only", qualification: "not_current_proof" }),
@@ -133,3 +134,83 @@ export const EvidenceTextDisclosuresSchema = z.object({
   excerpt: SourceDisclosureSchema.optional()
 }).strict().readonly();
 export type EvidenceTextDisclosures = z.infer<typeof EvidenceTextDisclosuresSchema>;
+
+/** Page-local delta wire format referencing the page's first disclosed full SourceDisclosure tuple. */
+export const SOURCE_DISCLOSURE_DELTA_CODEC_VERSION = 2 as const;
+export const SourceDisclosureDeltaSchema = z.object({
+  v: z.literal(SOURCE_DISCLOSURE_DELTA_CODEC_VERSION),
+  "1": fields.material_kind.optional(),
+  "2": fields.source_binding.optional(),
+  "3": fields.source_representation.unwrap().nullable().optional(),
+  "4": fields.evaluated_as_of.optional(),
+  "5": fields.source_time.unwrap().nullable().optional(),
+  "6": fields.validity.optional(),
+  "7": fields.temporal_state.optional(),
+  "8": fields.proof_use.optional()
+}).strict().readonly();
+export type SourceDisclosureDelta = z.infer<typeof SourceDisclosureDeltaSchema>;
+export const SourceDisclosurePageSlotSchema = z.union([SourceDisclosureSchema, SourceDisclosureDeltaSchema]);
+export type SourceDisclosurePageSlot = z.infer<typeof SourceDisclosurePageSlotSchema>;
+
+const utf8Encoder = new TextEncoder();
+
+function utf8FieldBytes(slot: SourceDisclosurePageSlot): number {
+  return utf8Encoder.encode(JSON.stringify({ source_disclosure: slot })).length;
+}
+
+/** Reconstruct a full SourceDisclosure v1 tuple from a page slot and the page anchor. */
+export function decodePageSourceDisclosure(
+  slot: SourceDisclosurePageSlot,
+  anchor: SourceDisclosure | undefined
+): SourceDisclosure {
+  if (Array.isArray(slot)) {
+    return Object.freeze(SourceDisclosureSchema.parse(slot)) as SourceDisclosure;
+  }
+  const delta = SourceDisclosureDeltaSchema.parse(slot);
+  if (anchor === undefined) {
+    throw new AlayaError("VALIDATION", "source disclosure delta requires a preceding full disclosure on the page");
+  }
+  assertCodecVersion(anchor[0]);
+  const tuple = [
+    SOURCE_DISCLOSURE_CODEC_VERSION,
+    Object.hasOwn(delta, "1") && delta["1"] !== undefined ? delta["1"] : anchor[1],
+    Object.hasOwn(delta, "2") && delta["2"] !== undefined ? delta["2"] : anchor[2],
+    Object.hasOwn(delta, "3") && delta["3"] !== undefined ? delta["3"] : anchor[3],
+    Object.hasOwn(delta, "4") && delta["4"] !== undefined ? delta["4"] : anchor[4],
+    Object.hasOwn(delta, "5") && delta["5"] !== undefined ? delta["5"] : anchor[5],
+    Object.hasOwn(delta, "6") && delta["6"] !== undefined ? delta["6"] : anchor[6],
+    Object.hasOwn(delta, "7") && delta["7"] !== undefined ? delta["7"] : anchor[7],
+    Object.hasOwn(delta, "8") && delta["8"] !== undefined ? delta["8"] : anchor[8]
+  ] as const;
+  return Object.freeze(SourceDisclosureSchema.parse(tuple)) as SourceDisclosure;
+}
+
+/** Encode a page slot as a minimal v2 delta iff strictly shorter in UTF-8 field bytes than the literal tuple. */
+export function encodePageSourceDisclosure(
+  wire: SourceDisclosure,
+  anchor: SourceDisclosure | undefined
+): SourceDisclosurePageSlot {
+  assertCodecVersion(wire[0]);
+  if (anchor === undefined) return wire;
+  assertCodecVersion(anchor[0]);
+  const rawDelta: Record<string, unknown> = { v: SOURCE_DISCLOSURE_DELTA_CODEC_VERSION };
+  for (let slot = 1; slot <= 8; slot++) {
+    if (canonicalJson(wire[slot]) !== canonicalJson(anchor[slot])) {
+      rawDelta[String(slot)] = wire[slot];
+    }
+  }
+  const delta = Object.freeze(SourceDisclosureDeltaSchema.parse(rawDelta)) as SourceDisclosureDelta;
+  if (canonicalJson(decodePageSourceDisclosure(delta, anchor)) !== canonicalJson(wire)) {
+    throw new AlayaError("CONFLICT", "source disclosure delta round-trip mismatch");
+  }
+  return utf8FieldBytes(delta) < utf8FieldBytes(wire) ? delta : wire;
+}
+
+/** Exact UTF-8 field byte savings from page-local delta encoding against the page anchor. */
+export function sourceDisclosureFieldByteSavings(
+  wire: SourceDisclosure,
+  anchor: SourceDisclosure | undefined
+): number {
+  const encoded = encodePageSourceDisclosure(wire, anchor);
+  return Math.max(0, utf8FieldBytes(wire) - utf8FieldBytes(encoded));
+}

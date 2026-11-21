@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 43.0.0, engine gateway 4.0.1
+## Unreleased — protocol 44.0.0, engine gateway 4.0.1
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -17,6 +17,10 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `4.0.1`; app packages remain `0.3.11`.
 Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
+
+Protocol `44.0.0` records a **SemVer major** under invariant §25 (`ORDINARY_NATIVE_FIELD_RESULT_VERSION` remains `"ordinary-native-field.v16"`):
+- **Lossless page-local `SourceDisclosure` Codec v2 delta wire encoding & Page-1 fixed-fragment `Delta + Next` packing (`@do-soul/alaya-protocol` `44.0.0`):**
+  adds `SOURCE_DISCLOSURE_DELTA_CODEC_VERSION` (`2`), `SourceDisclosureDeltaSchema`, `SourceDisclosurePageSlotSchema`, `encodePageSourceDisclosure`, `decodePageSourceDisclosure`, and `sourceDisclosureFieldByteSavings`; extends `RepresentationDecisionSchema` with optional `disclosure_codec` (`"literal" | "page_delta"`); adds `MemorySearchPageResultWireSchema` and `SoulMemorySearchResponseWireSchema` with `SoulMemorySearchResponseSchema` validating and decoding page-local delta disclosures back to full `SourceDisclosure` 9-tuples; and activates Page-1 fixed-fragment `Delta` widening (up to 5 virtual-page fragments) plus residual `Next` right-boundary single-message completion (`BoundedIndexPayload` + `encodeIndexResults` / `encodeRecallPageResponse`).
 
 Engine Gateway `4.0.1` records a **SemVer patch** under invariant §25 (description-only MCP surface update, no JSON schema change):
 - **Caller-coordinate & pointer-resume guidance (`@do-soul/alaya-engine-gateway` `4.0.1`):**

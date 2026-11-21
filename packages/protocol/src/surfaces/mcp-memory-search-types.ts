@@ -14,7 +14,13 @@ import {
 import { MemoryDimensionSchema } from "../memory/memory-entry.js";
 import { ScopeClassSchema } from "../memory/object-kind.js";
 import { ClaimLifecycleStateSchema } from "../memory/claim-form.js";
-import { SourceDisclosureSchema, sourceDisclosure } from "../recall/source-disclosure.js";
+import {
+  SourceDisclosurePageSlotSchema,
+  SourceDisclosureSchema,
+  decodePageSourceDisclosure,
+  sourceDisclosure,
+  type SourceDisclosure
+} from "../recall/source-disclosure.js";
 import { HostDependencyExposureSchema } from "../conversation/host-dependency-exposure.js";
 import { PathGovernanceClassSchema } from "../relations/path-relation.js";
 import {
@@ -61,80 +67,111 @@ export const SoulMemorySearchDegradationReasonSchema = z.enum([
   "no_stored_vectors"
 ]);
 
+const memorySearchResultFields = {
+  object_id: NonEmptyStringSchema.optional(),
+  object_kind: NonEmptyStringSchema,
+  target: RecallTargetRefSchema,
+  // Not ranking authority. Delivery order is the parent `results` array.
+  // Do not re-sort on this field or score_factors.relevance.
+  relevance_score: z.number().min(0).max(1),
+  content_preview: NonEmptyStringSchema,
+  // Absent on historical results; display text never proves payload availability.
+  payload_available: z.boolean().optional(),
+  semantic_dependencies: HostDependencyExposureSchema.optional(),
+  evidence_pointers: z.array(NonEmptyStringSchema).readonly(),
+  hypothesis_id: NonEmptyStringSchema.optional(),
+  program_state: NonEmptyStringSchema.optional(),
+  time_state: NonEmptyStringSchema.optional(),
+  output_binding: NonEmptyStringSchema.optional(),
+  source_lookup_reasons: SourceLookupReasonsSchema.optional(),
+  // Diagnostic-only prose. Agents must not branch on its wording or use it
+  // as a ranking key. The information index owns association and ordering.
+  selection_reason: BoundedReasonSchema,
+  source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+  // Public numeric explainability API for soul.recall consumers.
+  score_factors: RecallScoreFactorsSchema,
+  budget_state: RecallBudgetStateSchema,
+  pending_incomplete: z.boolean().optional(),
+  unfinishedness_bias: z.number().min(0).max(1).optional(),
+  // invariant: optional governance warnings forwarded from the
+  // RecallCandidate. Older agents that do not understand the field
+  // simply skip it; soul.resolve-aware agents and the Inspector
+  // Health Inbox branch on the listed kind / severity / policy.
+  // see also: staged-warning.ts (schema),
+  // recall-candidate.ts (producer-side field).
+  staged_warnings: StagedWarningArraySchema.optional()
+} as const;
+
+function refineMemorySearchResultTarget(
+  value: Readonly<{
+    object_id?: string;
+    object_kind: string;
+    target: z.infer<typeof RecallTargetRefSchema>;
+  }>,
+  context: z.RefinementCtx
+): "memory_entry" | "source_evidence" {
+  if (value.target.kind === "memory_entry") {
+    if (value.object_id !== value.target.object_id) {
+      context.addIssue({
+        code: "custom",
+        path: ["object_id"],
+        message: "memory_entry object_id must match target.object_id"
+      });
+    }
+    if (value.object_kind !== "memory_entry") {
+      context.addIssue({
+        code: "custom",
+        path: ["object_kind"],
+        message: "memory_entry target requires object_kind memory_entry"
+      });
+    }
+    return "memory_entry";
+  }
+  if (value.object_id !== undefined) {
+    // Source-record-only products have no memory object identity.
+    context.addIssue({
+      code: "custom",
+      path: ["object_id"],
+      message: "source_evidence must not fill object_id"
+    });
+  }
+  if (value.object_kind !== "source_evidence" && value.object_kind !== SOURCE_SEMANTIC_PROOF_OBJECT_KIND) {
+    context.addIssue({
+      code: "custom",
+      path: ["object_kind"],
+      message: "source_evidence target requires object_kind source_evidence or semantic_proof"
+    });
+  }
+  return "source_evidence";
+}
+
 export const MemorySearchResultSchema = z
   .object({
-    object_id: NonEmptyStringSchema.optional(),
-    object_kind: NonEmptyStringSchema,
-    target: RecallTargetRefSchema,
-    // Not ranking authority. Delivery order is the parent `results` array.
-    // Do not re-sort on this field or score_factors.relevance.
-    relevance_score: z.number().min(0).max(1),
-    content_preview: NonEmptyStringSchema,
-    // Absent on historical results; display text never proves payload availability.
-    payload_available: z.boolean().optional(),
-    source_disclosure: SourceDisclosureSchema.optional(),
-    semantic_dependencies: HostDependencyExposureSchema.optional(),
-    evidence_pointers: z.array(NonEmptyStringSchema).readonly(),
-    hypothesis_id: NonEmptyStringSchema.optional(),
-    program_state: NonEmptyStringSchema.optional(),
-    time_state: NonEmptyStringSchema.optional(),
-    output_binding: NonEmptyStringSchema.optional(),
-    source_lookup_reasons: SourceLookupReasonsSchema.optional(),
-    // Diagnostic-only prose. Agents must not branch on its wording or use it
-    // as a ranking key. The information index owns association and ordering.
-    selection_reason: BoundedReasonSchema,
-    source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
-    // Public numeric explainability API for soul.recall consumers.
-    score_factors: RecallScoreFactorsSchema,
-    budget_state: RecallBudgetStateSchema,
-    pending_incomplete: z.boolean().optional(),
-    unfinishedness_bias: z.number().min(0).max(1).optional(),
-    // invariant: optional governance warnings forwarded from the
-    // RecallCandidate. Older agents that do not understand the field
-    // simply skip it; soul.resolve-aware agents and the Inspector
-    // Health Inbox branch on the listed kind / severity / policy.
-    // see also: staged-warning.ts (schema),
-    // recall-candidate.ts (producer-side field).
-    staged_warnings: StagedWarningArraySchema.optional()
+    ...memorySearchResultFields,
+    source_disclosure: SourceDisclosureSchema.optional()
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.target.kind === "memory_entry") {
-      if (value.object_id !== value.target.object_id) {
-        context.addIssue({
-          code: "custom",
-          path: ["object_id"],
-          message: "memory_entry object_id must match target.object_id"
-        });
-      }
-      if (value.object_kind !== "memory_entry") {
-        context.addIssue({
-          code: "custom",
-          path: ["object_kind"],
-          message: "memory_entry target requires object_kind memory_entry"
-        });
-      }
-      return;
-    }
+    const kind = refineMemorySearchResultTarget(value, context);
+    if (kind !== "source_evidence") return;
     if (value.source_disclosure === undefined) {
       context.addIssue({ code: "custom", path: ["source_disclosure"], message: "source result requires disclosure" });
     } else if (sourceDisclosure(value.source_disclosure).proof_use.kind !== (value.object_kind === SOURCE_SEMANTIC_PROOF_OBJECT_KIND ? "conditional_support" : "source_only")) {
       context.addIssue({ code: "custom", path: ["source_disclosure", "proof_use"], message: "disclosure must match delivered proof kind" });
     }
-    if (value.object_id !== undefined) {
-      // Source-record-only products have no memory object identity.
-      context.addIssue({
-        code: "custom",
-        path: ["object_id"],
-        message: "source_evidence must not fill object_id"
-      });
-    }
-    if (value.object_kind !== "source_evidence" && value.object_kind !== SOURCE_SEMANTIC_PROOF_OBJECT_KIND) {
-      context.addIssue({
-        code: "custom",
-        path: ["object_kind"],
-        message: "source_evidence target requires object_kind source_evidence or semantic_proof"
-      });
+  })
+  .readonly();
+
+export const MemorySearchPageResultWireSchema = z
+  .object({
+    ...memorySearchResultFields,
+    source_disclosure: SourceDisclosurePageSlotSchema.optional()
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const kind = refineMemorySearchResultTarget(value, context);
+    if (kind === "source_evidence" && value.source_disclosure === undefined) {
+      context.addIssue({ code: "custom", path: ["source_disclosure"], message: "source result requires disclosure" });
     }
   })
   .readonly();
@@ -374,43 +411,112 @@ export const RecallMemberIndexLineSchema = z
   .readonly();
 export type RecallMemberIndexLine = z.infer<typeof RecallMemberIndexLineSchema>;
 
-export const SoulMemorySearchResponseSchema = z
+const soulMemorySearchResponseCommonFields = {
+  delivery_id: NonEmptyStringSchema,
+  // Additive response marker for sibling consumers. Older daemons omit it;
+  // newer ones emit the current protocol value without changing the rest of
+  // the recall payload shape.
+  protocol_version: NonNegativeIntSchema.min(1).optional(),
+  active_constraints: z.array(SoulActiveConstraintSchema).readonly().optional(),
+  active_constraints_count: NonNegativeIntSchema.nullable().optional(),
+  active_constraints_completeness: z.enum(["complete", "incomplete"]).optional(),
+  total_count: NonNegativeIntSchema,
+  degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional(),
+  /** @deprecated Historical response reader only; current delivery uses index. */
+  delivery_path: z.enum(["legacy", "canonical"]).optional(),
+  /** @deprecated Historical response reader only. Live ranking ignores this field. Keep parseable in 0.3.x; do not delete until a protocol major after the compatibility ledger expires. */
+  ranking_authority: z.enum(["prefix_sk", "select_gamma"]).optional(),
+  capture_identity: z.object({
+    algorithm_id: NonEmptyStringSchema,
+    version: NonEmptyStringSchema,
+    digest: NonEmptyStringSchema
+  }).strict().readonly().optional(),
+  capture_execution: CaptureExecutionSchema.optional(),
+  index: InformationIndexSchema.optional(),
+  order_status: OrderStatusSchema.optional(),
+  page_purpose: PagePurposeSchema.optional(),
+  product_updates: z.array(ProductUpdateSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
+  member_index: z.array(RecallMemberIndexLineSchema).max(128).readonly().optional()
+} as const;
+
+const DecodedSoulMemorySearchResponseSchema = z
   .object({
-    delivery_id: NonEmptyStringSchema,
-    // Additive response marker for sibling consumers. Older daemons omit it;
-    // newer ones emit the current protocol value without changing the rest of
-    // the recall payload shape.
-    protocol_version: NonNegativeIntSchema.min(1).optional(),
-    results: z.array(MemorySearchResultSchema).readonly(),
-    active_constraints: z.array(SoulActiveConstraintSchema).readonly().optional(),
-    active_constraints_count: NonNegativeIntSchema.nullable().optional(),
-    active_constraints_completeness: z.enum(["complete", "incomplete"]).optional(),
-    total_count: NonNegativeIntSchema,
-    degradation_reason: SoulMemorySearchDegradationReasonSchema.nullable().optional(),
-    /** @deprecated Historical response reader only; current delivery uses index. */
-    delivery_path: z.enum(["legacy", "canonical"]).optional(),
-    /** @deprecated Historical response reader only. Live ranking ignores this field. Keep parseable in 0.3.x; do not delete until a protocol major after the compatibility ledger expires. */
-    ranking_authority: z.enum(["prefix_sk", "select_gamma"]).optional(),
-    capture_identity: z.object({
-      algorithm_id: NonEmptyStringSchema,
-      version: NonEmptyStringSchema,
-      digest: NonEmptyStringSchema
-    }).strict().readonly().optional(),
-    capture_execution: CaptureExecutionSchema.optional(),
-    index: InformationIndexSchema.optional(),
-    order_status: OrderStatusSchema.optional(),
-    page_purpose: PagePurposeSchema.optional(),
-    product_updates: z.array(ProductUpdateSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
-    member_index: z.array(RecallMemberIndexLineSchema).max(128).readonly().optional()
+    ...soulMemorySearchResponseCommonFields,
+    results: z.array(MemorySearchResultSchema).readonly()
   })
   .strict()
   .readonly();
 
+export const SoulMemorySearchResponseWireSchema = z
+  .object({
+    ...soulMemorySearchResponseCommonFields,
+    results: z.array(MemorySearchPageResultWireSchema).readonly()
+  })
+  .strict()
+  .superRefine((response, context) => {
+    let anchor: SourceDisclosure | undefined;
+    for (let index = 0; index < response.results.length; index++) {
+      const row = response.results[index]!;
+      const slot = row.source_disclosure;
+      if (slot === undefined) continue;
+      if (anchor === undefined && !Array.isArray(slot)) {
+        context.addIssue({
+          code: "custom",
+          path: ["results", index, "source_disclosure"],
+          message: "first disclosed row on page must carry a full source disclosure tuple"
+        });
+        return;
+      }
+      try {
+        const decoded = decodePageSourceDisclosure(slot, anchor);
+        anchor ??= decoded;
+        if (row.target.kind === "source_evidence") {
+          const expected = row.object_kind === SOURCE_SEMANTIC_PROOF_OBJECT_KIND
+            ? "conditional_support"
+            : "source_only";
+          if (sourceDisclosure(decoded).proof_use.kind !== expected) {
+            context.addIssue({
+              code: "custom",
+              path: ["results", index, "source_disclosure", "proof_use"],
+              message: "disclosure must match delivered proof kind"
+            });
+          }
+        }
+      } catch (error) {
+        context.addIssue({
+          code: "custom",
+          path: ["results", index, "source_disclosure"],
+          message: error instanceof Error ? error.message : "invalid page source disclosure"
+        });
+      }
+    }
+  })
+  .readonly();
+
+function decodePageDisclosures(
+  response: z.output<typeof SoulMemorySearchResponseWireSchema>
+): z.input<typeof DecodedSoulMemorySearchResponseSchema> {
+  let anchor: SourceDisclosure | undefined;
+  const results = response.results.map((row) => {
+    if (row.source_disclosure === undefined) return row;
+    const decoded = decodePageSourceDisclosure(row.source_disclosure, anchor);
+    anchor ??= decoded;
+    return { ...row, source_disclosure: decoded };
+  });
+  return { ...response, results };
+}
+
+export const SoulMemorySearchResponseSchema = SoulMemorySearchResponseWireSchema
+  .transform(decodePageDisclosures)
+  .pipe(DecodedSoulMemorySearchResponseSchema);
+
 export type MemorySearchResult = z.infer<typeof MemorySearchResultSchema>;
+export type MemorySearchPageResultWire = z.infer<typeof MemorySearchPageResultWireSchema>;
 export type SoulActiveConstraintGovernanceState = z.infer<typeof SoulActiveConstraintGovernanceStateSchema>;
 export type SoulActiveConstraint = z.infer<typeof SoulActiveConstraintSchema>;
 export type SoulMemorySearchDegradationReason = z.infer<typeof SoulMemorySearchDegradationReasonSchema>;
 export type SoulRecallTokenizerHint = z.infer<typeof SoulRecallTokenizerHintSchema>;
 export type SoulRecallHostContext = z.infer<typeof SoulRecallHostContextSchema>;
 export type SoulMemorySearchRequest = z.output<typeof SoulMemorySearchRequestSchema>;
+export type SoulMemorySearchResponseWire = z.infer<typeof SoulMemorySearchResponseWireSchema>;
 export type SoulMemorySearchResponse = z.infer<typeof SoulMemorySearchResponseSchema>;

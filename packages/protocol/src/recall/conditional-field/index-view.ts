@@ -197,7 +197,8 @@ export const RepresentationDecisionSchema = z
     schema_version: SchemaVersionSchema,
     policy: z.literal("construct_index_then_page_then_payload"),
     page_budget: NonNegativeIntSchema,
-    identity_tie_break: z.literal("serialization")
+    identity_tie_break: z.literal("serialization"),
+    disclosure_codec: z.enum(["literal", "page_delta"]).optional()
   })
   .strict()
   .readonly();
