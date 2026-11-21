@@ -28,7 +28,7 @@ import {
 } from "./temporal-verified-bind-key.js";
 import { bindEmbeddingOverlayIfPresent } from "./embedding-overlay-bind.js";
 import { restrictSqliteFileModes } from "./sqlite-file-modes.js";
-import { openSqliteConnection, SqliteConnectionCleanupError } from "./open-sqlite-connection.js";
+import { openReadOnlySqliteConnection, openSqliteConnection, SqliteConnectionCleanupError } from "./open-sqlite-connection.js";
 import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-digest.js";
 import { registerUtcInstantComparison } from "./utc-instant-comparison.js";
@@ -86,6 +86,7 @@ interface MigrationStatements {
 export class StorageDatabase {
   public readonly filename: string;
   public connection: SqliteConnection;
+  readonly #accessMode: "readonly" | "readwrite";
   private closed = false;
   private failedReopenCleanup: SqliteConnectionCleanupError | null = null;
   private connectionVersion = 0;
@@ -99,6 +100,7 @@ export class StorageDatabase {
   ) {
     this.filename = filename;
     this.connection = connection;
+    this.#accessMode = connection.readonly ? "readonly" : "readwrite";
     registerRetainedSourceChunkDigest(connection);
     registerUtcInstantComparison(connection);
     this.reopenTemporalMode = reopenTemporalMode;
@@ -111,6 +113,10 @@ export class StorageDatabase {
 
   public getConnectionVersion(): number {
     return this.connectionVersion;
+  }
+
+  public get accessMode(): "readonly" | "readwrite" {
+    return this.#accessMode;
   }
 
   public getBusyTimeoutMs(): number {
@@ -129,16 +135,17 @@ export class StorageDatabase {
     this.closeFailedReopen();
     let database: SqliteConnection | undefined;
     try {
-      if (this.filename !== ":memory:" && this.reopenTemporalMode === "runtime") {
-        assertRuntimeTemporalDatabaseReady(this.filename, knownMigrationMaxVersion());
+      if (this.#accessMode === "readonly") {
+        database = openReadOnlySqliteConnection(this.filename);
+      } else {
+        if (this.filename !== ":memory:" && this.reopenTemporalMode === "runtime") {
+          assertRuntimeTemporalDatabaseReady(this.filename, knownMigrationMaxVersion());
+        }
+        database = openDatabase(this.filename);
+        configureDatabaseConnection(database, this.reopenBusyTimeoutMs);
+        restrictSqliteFileModes(this.filename);
+        bindEmbeddingOverlayIfPresent(database, this.filename);
       }
-      database = openDatabase(this.filename);
-      applySqliteWritePragmas(database, {
-        busyTimeoutMs: this.reopenBusyTimeoutMs,
-        analysisLimit: 400
-      });
-      restrictSqliteFileModes(this.filename);
-      bindEmbeddingOverlayIfPresent(database, this.filename);
       registerRetainedSourceChunkDigest(database);
       registerUtcInstantComparison(database);
     } catch (error) {
@@ -155,7 +162,7 @@ export class StorageDatabase {
     this.connection = database;
     this.connectionVersion += 1;
     this.closed = false;
-    if (this.filename !== ":memory:") {
+    if (this.#accessMode === "readwrite" && this.filename !== ":memory:") {
       evictDatabaseCacheIfNeeded(this.filename);
       databaseCache.set(this.filename, this, {
         blocksEviction: (filename) => sqliteWriteQueuePort?.blocksEviction(filename) === true
@@ -176,7 +183,7 @@ export class StorageDatabase {
   // (set at init) caps sampling so this stays in the millisecond range even on a
   // multi-GB database; callers run it periodically as the database grows.
   public optimize(): void {
-    if (this.closed) {
+    if (this.closed || this.#accessMode === "readonly") {
       return;
     }
     this.connection.pragma("optimize");
@@ -191,7 +198,7 @@ export class StorageDatabase {
     // Final stats refresh on close (SQLite-recommended) so a reopened DB starts
     // with a healthy plan. Slice snapshot sealing skips this so hashed bytes
     // cannot change after the last intentional write.
-    if (options?.optimize !== false) {
+    if (this.#accessMode === "readwrite" && options?.optimize !== false) {
       try {
         this.connection.pragma("optimize");
       } catch {

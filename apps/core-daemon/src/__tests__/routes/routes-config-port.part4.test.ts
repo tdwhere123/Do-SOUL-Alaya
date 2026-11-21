@@ -41,6 +41,49 @@ const RecordConfigParser = Object.freeze({
 
 describe("routes-config port batch", () => {
 
+  it("merges interleaved manifestation budget patches in SQLite with consecutive versions", async () => {
+    const database = initDatabase();
+    try {
+      const eventLogRepo = new SqliteEventLogRepo(database);
+      const configService = createConfigService({
+        configRepo: new SqliteConfigRepo(database),
+        eventPublisher: new EventPublisher({
+          eventLogRepo,
+          runHotStateService: { apply: vi.fn() },
+          runtimeNotifier: { notify: vi.fn(), notifyEntry: vi.fn() }
+        }),
+        configPathsProvider: () => resolveAlayaConfigPaths(tmpdir()),
+        clock: () => "2026-05-01T00:00:00.000Z"
+      });
+      const [first, second] = await Promise.all([
+        configService.patchManifestationBudgetConfig("ws-budget", {
+          stance_bias_cap: 8,
+          escalation_policy: { nudge_min_pressure: 0.5 }
+        }),
+        configService.patchManifestationBudgetConfig("ws-budget", {
+          dialogue_nudge_cap: 4,
+          escalation_policy: { lens_min_confidence: 0.8 }
+        })
+      ]);
+      expect([first.config_version, second.config_version]).toEqual([1, 2]);
+      await expect(configService.getManifestationBudgetConfig("ws-budget")).resolves.toMatchObject({
+        source: "stored",
+        config: {
+          config_version: 2,
+          stance_bias_cap: 8,
+          dialogue_nudge_cap: 4,
+          escalation_policy: { nudge_min_pressure: 0.5, lens_min_confidence: 0.8 }
+        }
+      });
+      const audits = await eventLogRepo.queryByEntityAll("workspace_config", "workspace:ws-budget:manifestation_budget");
+      expect(audits.map((audit) => audit.event_type)).toEqual([
+        "soul.health_journal.recorded", "soul.health_journal.recorded"
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("round-trips soul, strategy, and environment patches through real SqliteConfigRepo without mocking the service", async () => {
     const database = initDatabase();
     try {

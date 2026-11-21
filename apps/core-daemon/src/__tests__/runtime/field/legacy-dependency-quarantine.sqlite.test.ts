@@ -91,7 +91,7 @@ it("quarantines unindexed tombstone descendants on upgrade and retains independe
   await expect(memory.updateDynamics(MEMORY, {
     activation_score: 0.1, retention_score: 0.8, manifestation_state: "full_eligible"
   }, NOW)).rejects.toMatchObject({ code: "CONFLICT" });
-  expect(() => claim.updateStatusSync(CLAIM, "active", NOW, "winner")).toThrow(/provenance/u);
+  expect(() => claim.updateStatusSync(CLAIM, "active", NOW, "winner", "workspace-1")).toThrow(/provenance/u);
   expect(() => slot.updateWinner(SLOT, HEALTHY_CLAIM, NOW, NOW, CLAIM)).toThrow(/provenance/u);
   expect(() => reopened.connection.prepare("UPDATE memory_entries SET content = 'stale caller text' WHERE object_id = ?")
     .run(MEMORY)).toThrow(/provenance unavailable/u);

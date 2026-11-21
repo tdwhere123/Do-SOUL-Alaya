@@ -208,22 +208,24 @@ describe("garden background data ports", () => {
       10 * 24 * 60 * 60 * 1000
     );
     expect(expiring).toEqual([
-      {
+      expect.objectContaining({
         green_status_id: "green-expiring",
         memory_entry_id: "memory-green",
         dimension: "fact",
         valid_until: "2026-04-20T00:00:00.000Z"
-      },
-      {
+      }),
+      expect.objectContaining({
         green_status_id: "green-revoke",
         memory_entry_id: "memory-revoke",
         dimension: "constraint",
         valid_until: "2026-04-20T00:00:00.000Z"
-      }
+      })
     ]);
 
-    await ports.greenMaintenancePort.renewGreenPassiveStable("green-expiring", "task-1");
-    await ports.greenMaintenancePort.requestActiveVerification("green-expiring", "task-2");
+    const maintenance = ports.greenMaintenancePort;
+    const [expiringStatus, revokedStatus] = expiring;
+    expect(maintenance.requestActiveVerification(expiringStatus!, "workspace-1")).toBe(true);
+    expect(maintenance.renewGreenPassiveStable(expiringStatus!, "workspace-1")).toBe(false);
     const revokeResult = ports.greenMaintenancePort.revokeGreen(
       "memory-revoke",
       "verification_fail",
@@ -231,6 +233,8 @@ describe("garden background data ports", () => {
       "workspace-1"
     );
     expect(revokeResult).toEqual({ affected: 1 });
+    expect(maintenance.renewGreenPassiveStable(revokedStatus!, "workspace-1")).toBe(false);
+    expect(maintenance.requestActiveVerification(revokedStatus!, "workspace-1")).toBe(false);
 
     const noopResult = ports.greenMaintenancePort.revokeGreen(
       "memory-revoke",

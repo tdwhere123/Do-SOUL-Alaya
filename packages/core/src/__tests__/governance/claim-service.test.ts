@@ -212,7 +212,8 @@ describe("ClaimService", () => {
       existing.object_id,
       ClaimLifecycleState.ACTIVE,
       "review_accept",
-      TransitionCausedBy.REVIEW
+      TransitionCausedBy.REVIEW,
+      { expectedFromStatus: existing.claim_status }
     );
 
     expect(updated.claim_status).toBe(ClaimLifecycleState.ACTIVE);
@@ -273,6 +274,7 @@ describe("ClaimService", () => {
       "review_accept",
       TransitionCausedBy.REVIEW,
       {
+        expectedFromStatus: existing.claim_status,
         skipSlotElection: true,
         additionalEventInputs: [
           lifecycleAuditInput(existing, "resolution.audit"),
@@ -287,7 +289,8 @@ describe("ClaimService", () => {
       existing.object_id,
       ClaimLifecycleState.ACTIVE,
       "2026-03-21T01:00:00.000Z",
-      ClaimLifecycleState.DRAFT
+      ClaimLifecycleState.DRAFT,
+      existing.workspace_id
     );
     expect(publishedBatches[0]?.map((event) => event.event_type)).toEqual([
       "soul.claim.lifecycle_changed",
@@ -369,7 +372,7 @@ describe("ClaimService", () => {
       ClaimLifecycleState.CONTESTED,
       "manual_review",
       TransitionCausedBy.REVIEW,
-      { skipSlotElection: true }
+      { expectedFromStatus: existing.claim_status, skipSlotElection: true }
     );
 
     expect(updated.claim_status).toBe(ClaimLifecycleState.CONTESTED);
@@ -424,7 +427,8 @@ describe("ClaimService", () => {
       existing.object_id,
       ClaimLifecycleState.ACTIVE,
       "proposal_accepted",
-      TransitionCausedBy.REVIEW
+      TransitionCausedBy.REVIEW,
+      { expectedFromStatus: existing.claim_status }
     );
 
     expect(updated.claim_status).toBe(ClaimLifecycleState.CONTESTED);
@@ -466,7 +470,9 @@ describe("ClaimService", () => {
     const service = new ClaimService(dependencies);
 
     await expect(
-      service.transitionLifecycle(existing.object_id, ClaimLifecycleState.ACTIVE, "activate", TransitionCausedBy.REVIEW)
+      service.transitionLifecycle(existing.object_id, ClaimLifecycleState.ACTIVE, "activate", TransitionCausedBy.REVIEW, {
+        expectedFromStatus: existing.claim_status
+      })
     ).rejects.toMatchObject({
       name: "CoreError",
       code: "CONFLICT",
@@ -559,7 +565,9 @@ describe("ClaimService", () => {
     const service = new ClaimService(dependencies);
 
     await expect(
-      service.transitionLifecycle(existing.object_id, ClaimLifecycleState.WINNER, "invalid", TransitionCausedBy.REVIEW)
+      service.transitionLifecycle(existing.object_id, ClaimLifecycleState.WINNER, "invalid", TransitionCausedBy.REVIEW, {
+        expectedFromStatus: existing.claim_status
+      })
     ).rejects.toMatchObject({
       name: "CoreError",
       code: "VALIDATION"
@@ -621,7 +629,7 @@ describe("ClaimService", () => {
         ClaimLifecycleState.ACTIVE,
         "review_accept",
         TransitionCausedBy.REVIEW,
-        { skipSlotElection: true }
+        { expectedFromStatus: existing.claim_status, skipSlotElection: true }
       )
     ).rejects.toMatchObject({
       name: "CoreError",

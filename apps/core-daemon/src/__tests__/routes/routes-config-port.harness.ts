@@ -22,11 +22,11 @@ export async function createServiceHarness(options: {
   const configDir = await mkdtemp(path.join(tmpdir(), "daemon-config-"));
   const paths = resolveAlayaConfigPaths(configDir);
   const publishedEvents: EventLogEntry[] = [];
-  const appendManyWithMutation = vi.fn(
-    async <T>(
+  const eventPublisher: Parameters<typeof createConfigService>[0]["eventPublisher"] = {
+    async appendManyWithMutation<T>(
       events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
       mutate: (entries: readonly EventLogEntry[]) => T
-    ): Promise<T> => {
+    ): Promise<T> {
       const persisted = events.map(
         (event, idx) =>
           ({
@@ -47,15 +47,18 @@ export async function createServiceHarness(options: {
         publishedEvents.length = before;
         throw error;
       }
+    },
+    async decideAppendThenApply(decide) {
+      const decision = decide();
+      return await eventPublisher.appendManyWithMutation(decision.eventInputs, decision.apply);
     }
-  );
+  };
+  const appendManyWithMutation = vi.spyOn(eventPublisher, "appendManyWithMutation");
   let tempIndex = 0;
   return {
     service: createConfigService({
       configRepo: repo,
-      eventPublisher: {
-        appendManyWithMutation
-      } as Parameters<typeof createConfigService>[0]["eventPublisher"],
+      eventPublisher,
       configPathsProvider: () => paths,
       clock: () => "2026-05-01T00:00:00.000Z",
       platform: options.platform,

@@ -91,8 +91,8 @@ describe("Auditor evidence check — GreenStatus revoke guard", () => {
       },
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
-        renewGreenPassiveStable: vi.fn(() => undefined),
-        requestActiveVerification: vi.fn(() => undefined),
+        renewGreenPassiveStable: vi.fn(() => true),
+        requestActiveVerification: vi.fn(() => true),
         revokeGreen
       },
       bootstrappingPort: {
@@ -136,8 +136,8 @@ describe("Auditor evidence check — GreenStatus revoke guard", () => {
       },
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
-        renewGreenPassiveStable: vi.fn(() => undefined),
-        requestActiveVerification: vi.fn(() => undefined),
+        renewGreenPassiveStable: vi.fn(() => true),
+        requestActiveVerification: vi.fn(() => true),
         revokeGreen
       },
       bootstrappingPort: {

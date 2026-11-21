@@ -80,8 +80,8 @@ export interface GardenAuditorPointerHealthPort {
 
 export interface GardenAuditorGreenMaintenancePort {
   findExpiringGreenStatuses(workspaceId: string, lookaheadMs: number): Promise<readonly ExpiringGreenStatus[]>;
-  renewGreenPassiveStable(greenStatusId: string, taskId: string): void;
-  requestActiveVerification(greenStatusId: string, taskId: string): void;
+  renewGreenPassiveStable(status: ExpiringGreenStatus, workspaceId: string): boolean;
+  requestActiveVerification(status: ExpiringGreenStatus, workspaceId: string): boolean;
   revokeGreen(
     memoryEntryId: string,
     reason: "verification_fail",

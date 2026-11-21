@@ -28,7 +28,7 @@ export interface DriftLeaseRepo {
     workspaceId: string,
     leaseId: string
   ): Promise<Readonly<GovernanceDriftLease> | null>;
-  delete(leaseId: string): void;
+  delete(leaseId: string, workspaceId: string, grantedTo: string): boolean;
   deleteExpired(beforeDate: string): number;
 }
 
@@ -86,7 +86,7 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
 
     this.deleteStatement = db.connection.prepare(`
       DELETE FROM drift_leases
-      WHERE lease_id = ?
+      WHERE lease_id = ? AND workspace_id = ? AND granted_to = ?
     `);
 
     this.deleteExpiredStatement = db.connection.prepare(`
@@ -166,11 +166,13 @@ export class SqliteDriftLeaseRepo implements DriftLeaseRepo {
     }
   }
 
-  public delete(leaseId: string): void {
+  public delete(leaseId: string, workspaceId: string, grantedTo: string): boolean {
     const parsedLeaseId = parseNonEmptyString(leaseId, "lease id");
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+    const parsedGrantedTo = parseNonEmptyString(grantedTo, "granted to");
 
     try {
-      this.deleteStatement.run(parsedLeaseId);
+      return this.deleteStatement.run(parsedLeaseId, parsedWorkspaceId, parsedGrantedTo).changes === 1;
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to delete drift lease ${parsedLeaseId}.`, error);
     }

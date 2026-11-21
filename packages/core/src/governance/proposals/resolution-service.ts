@@ -102,6 +102,7 @@ export class ResolutionService {
         input.reason ?? "soul_resolve_confirm",
         TransitionCausedBy.USER,
         {
+          expectedFromStatus: claim.claim_status,
           additionalEventInputs: [auditEventInput, buildEffectAuditEventInput(decision)],
           additionalEventsSink: auditEventsSink,
           effectDecisionReceipt: decision,
@@ -198,6 +199,7 @@ export class ResolutionService {
       input.reason ?? "soul_resolve_reject",
       TransitionCausedBy.USER,
       {
+        expectedFromStatus: claim.claim_status,
         additionalEventInputs,
         additionalEventsSink: auditEventsSink,
         effectDecisionReceipt: decision

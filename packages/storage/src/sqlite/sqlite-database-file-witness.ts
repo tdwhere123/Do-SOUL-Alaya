@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { StorageError } from "../shared/errors.js";
 
 export const SQLITE_DATABASE_FILE_WITNESS_ROLES = Object.freeze(["database", "journal", "wal"] as const);
 
@@ -9,6 +10,20 @@ export interface SqliteDatabaseFileWitness {
   readonly role: SqliteDatabaseFileWitnessRole;
   readonly bytes: number;
   readonly sha256: string;
+}
+
+export function assertEmptySqliteWal(filename: string): void {
+  const wal = fs.lstatSync(`${filename}-wal`, { throwIfNoEntry: false });
+  if (wal !== undefined && (!wal.isFile() || wal.size !== 0)) {
+    throw new StorageError("CONFLICT", "Temporal candidate has a non-empty or invalid SQLite WAL sidecar.");
+  }
+}
+
+export function readSealedSqliteDatabaseDigest(filename: string): string {
+  assertEmptySqliteWal(filename);
+  const digest = createHash("sha256").update(fs.readFileSync(filename)).digest("hex");
+  assertEmptySqliteWal(filename);
+  return digest;
 }
 
 function sqliteDatabaseFileWitnessPath(

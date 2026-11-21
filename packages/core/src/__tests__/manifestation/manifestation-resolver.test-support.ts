@@ -59,6 +59,7 @@ export function createBudgetConfig(
 ): Readonly<ManifestationBudgetConfig> {
   return Object.freeze({
     workspace_id: "workspace-1",
+    config_version: 0,
     stance_bias_cap: 10,
     dialogue_nudge_cap: 3,
     lens_entry_cap: 1,

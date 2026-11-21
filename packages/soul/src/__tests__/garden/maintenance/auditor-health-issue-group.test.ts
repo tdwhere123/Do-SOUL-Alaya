@@ -97,8 +97,8 @@ describe("Auditor HealthIssueGroup wiring", () => {
       },
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
-        renewGreenPassiveStable: vi.fn(() => undefined),
-        requestActiveVerification: vi.fn(() => undefined),
+        renewGreenPassiveStable: vi.fn(() => true),
+        requestActiveVerification: vi.fn(() => true),
         revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
@@ -144,8 +144,8 @@ describe("Auditor HealthIssueGroup wiring", () => {
       pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
-        renewGreenPassiveStable: vi.fn(() => undefined),
-        requestActiveVerification: vi.fn(() => undefined),
+        renewGreenPassiveStable: vi.fn(() => true),
+        requestActiveVerification: vi.fn(() => true),
         revokeGreen: vi.fn(() => ({ affected: 1 }))
       },
       bootstrappingPort: {
@@ -194,8 +194,8 @@ describe("Auditor HealthIssueGroup wiring", () => {
       },
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
-        renewGreenPassiveStable: vi.fn(() => undefined),
-        requestActiveVerification: vi.fn(() => undefined),
+        renewGreenPassiveStable: vi.fn(() => true),
+        requestActiveVerification: vi.fn(() => true),
         revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
@@ -294,8 +294,8 @@ function createOrphanAuditor(
     },
     greenMaintenancePort: {
       findExpiringGreenStatuses: vi.fn(async () => []),
-      renewGreenPassiveStable: vi.fn(() => undefined),
-      requestActiveVerification: vi.fn(() => undefined),
+      renewGreenPassiveStable: vi.fn(() => true),
+      requestActiveVerification: vi.fn(() => true),
       revokeGreen: vi.fn(() => ({ affected: 0 }))
     },
     bootstrappingPort: {

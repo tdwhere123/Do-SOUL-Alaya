@@ -97,13 +97,15 @@ export class ClaimService {
     newState: ClaimLifecycleStateType,
     reason: string,
     causedBy: TransitionCausedByType,
-    options: ClaimLifecycleTransitionOptions = {}
+    options: ClaimLifecycleTransitionOptions
   ): Promise<Readonly<ClaimForm>> {
     const transition = this.parseLifecycleTransition(objectId, newState, reason, causedBy);
     this.assertAdditionalAuditEventsAreAtomic(options);
 
     const existing = await this.requireExistingClaim(transition.objectId);
-    ensureAllowedLifecycleTransition(existing.claim_status, transition.newState);
+    if (existing.claim_status !== options.expectedFromStatus) {
+      throw new CoreError("CONFLICT", "Claim status changed after the transition was decided");
+    }
 
     const slotElectionRequired = shouldRunSlotElection(
       existing,
@@ -117,7 +119,6 @@ export class ClaimService {
       transition.newState,
       transition.reason,
       transition.causedBy,
-      options.deferredNotificationEvents,
       {
         additionalEventInputs: options.additionalEventInputs,
         additionalEventsSink: options.additionalEventsSink,
@@ -128,7 +129,7 @@ export class ClaimService {
 
     if (!slotElectionRequired) return updated;
     try {
-      return await this.resolveActivatedClaimElection(updated, options.deferredNotificationEvents);
+      return await this.resolveActivatedClaimElection(updated);
     } catch (cause) {
       throw new ClaimElectionAfterActivationError(updated, cause);
     }
@@ -138,7 +139,7 @@ export class ClaimService {
   public async resumeActivationElection(objectId: string, transactionGuard?: ElectionTransactionGuard): Promise<Readonly<ClaimForm>> {
     const current = await this.requireExistingClaim(parseObjectId(objectId));
     if (current.claim_status === ClaimLifecycleState.ACTIVE) {
-      return await this.resolveActivatedClaimElection(current, undefined, transactionGuard);
+      return await this.resolveActivatedClaimElection(current, transactionGuard);
     }
     if (current.claim_status === ClaimLifecycleState.CONTESTED) {
       const resume = this.requireSlotService().resumeContestedElection;
@@ -229,10 +230,8 @@ export class ClaimService {
     newState: ClaimLifecycleStateType,
     reason: string,
     causedBy: TransitionCausedByType,
-    deferredNotificationEvents?: EventLogEntry[],
     auditComposition: LifecycleAuditComposition = {}
   ): Promise<Readonly<ClaimForm>> {
-    this.assertAtomicLifecycleAvailable(deferredNotificationEvents);
     const prepared = this.prepareExistingLifecycleTransition(existing, newState, reason, causedBy);
     return await this.applyAtomicLifecycleTransition(prepared, auditComposition);
   }
@@ -254,7 +253,8 @@ export class ClaimService {
           existing.object_id,
           newState,
           occurredAt,
-          existing.claim_status
+          existing.claim_status,
+          existing.workspace_id
         );
         if (isPromiseLike(updated)) {
           throw new CoreError("CONFLICT", "Prepared claim status CAS must be synchronous");
@@ -335,7 +335,6 @@ export class ClaimService {
 
   private assertAdditionalAuditEventsAreAtomic(options: {
     readonly additionalEventInputs?: readonly EventPublisherInput[];
-    readonly deferredNotificationEvents?: EventLogEntry[];
     readonly effectDecisionReceipt?: ClaimLifecycleTransitionOptions["effectDecisionReceipt"];
   }): void {
     const additionalEventInputs = options.additionalEventInputs ?? [];
@@ -347,8 +346,7 @@ export class ClaimService {
       this.dependencies.eventPublisher !== undefined &&
       this.dependencies.claimFormRepo.updateStatusSync !== undefined &&
       (options.effectDecisionReceipt === undefined ||
-        this.dependencies.effectDecisionStore !== undefined) &&
-      options.deferredNotificationEvents === undefined;
+        this.dependencies.effectDecisionStore !== undefined);
     if (!atomicTransitionAvailable) {
       throw new CoreError(
         "CONFLICT",
@@ -373,7 +371,6 @@ export class ClaimService {
 
   private async resolveActivatedClaimElection(
     updated: Readonly<ClaimForm>,
-    deferredNotificationEvents?: EventLogEntry[],
     transactionGuard?: ElectionTransactionGuard
   ): Promise<Readonly<ClaimForm>> {
     const activeClaimGuard: ElectionTransactionGuard = connectionIdentity => {
@@ -385,7 +382,7 @@ export class ClaimService {
     };
     const election = await this.requireSlotService().onClaimActivated(
       updated,
-      deferredNotificationEvents,
+      undefined,
       transactionGuard,
       activeClaimGuard
     );
@@ -398,22 +395,13 @@ export class ClaimService {
       ClaimLifecycleState.CONTESTED,
       "slot_conflict_review_required",
       TransitionCausedBy.SYSTEM,
-      deferredNotificationEvents,
       { additionalEventInputs: [createClaimContestedEventInput(current, election.slot.winner_claim_id)], transactionGuard }
     );
   }
 
-  private assertAtomicLifecycleAvailable(
-    deferredNotificationEvents?: EventLogEntry[]
-  ): void {
+  private assertAtomicLifecycleAvailable(): void {
     this.requireEventPublisher();
     this.requireStatusUpdateSync();
-    if (deferredNotificationEvents !== undefined) {
-      throw new CoreError(
-        "CONFLICT",
-        "Deferred claim notification is incompatible with atomic EventLog-first transitions"
-      );
-    }
   }
 
   private requireStatusUpdateSync(): NonNullable<

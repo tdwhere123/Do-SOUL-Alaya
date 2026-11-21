@@ -29,6 +29,7 @@ import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../shared/
 export const DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS = 5 * 60 * 1000;
 
 type SurfaceDriftEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+const DRIFT_LEASE_RELEASE_NOOP = Symbol("drift lease release already applied");
 
 export interface DriftLeaseRepoPort {
   create(lease: Readonly<GovernanceDriftLease>): Readonly<GovernanceDriftLease>;
@@ -37,7 +38,7 @@ export interface DriftLeaseRepoPort {
     workspaceId: string,
     leaseId: string
   ): Promise<Readonly<GovernanceDriftLease> | null>;
-  delete(leaseId: string): void;
+  delete(leaseId: string, workspaceId: string, grantedTo: string): boolean;
   deleteExpired(beforeDate: string): number;
 }
 
@@ -230,10 +231,14 @@ export class SurfaceDriftService {
           }
         ],
         () => {
-          this.dependencies.leaseRepo.delete(parsedLeaseId);
+          if (!this.dependencies.leaseRepo.delete(parsedLeaseId, parsedWorkspaceId, parsedReleasedBy)) {
+            // A lost release race also rolls back the provisional EventLog row.
+            throw DRIFT_LEASE_RELEASE_NOOP;
+          }
         }
       );
     } catch (error) {
+      if (error === DRIFT_LEASE_RELEASE_NOOP) return;
       if (error instanceof EventPublisherPropagationError) {
         throw error;
       }

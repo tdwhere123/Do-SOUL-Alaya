@@ -1,10 +1,8 @@
-import { StorageError } from "../shared/errors.js";
-import { StorageDatabase, type SqliteConnection } from "./db.js";
-import { openSqliteConnection } from "./open-sqlite-connection.js";
-import { withSqliteBusyRetry } from "./sqlite-busy-retry.js";
+import { StorageDatabase } from "./db.js";
+import { openReadOnlySqliteConnection } from "./open-sqlite-connection.js";
 
-export const READ_ONLY_BUSY_TIMEOUT_MS = 5_000;
-export { withSqliteBusyRetry };
+export { READ_ONLY_BUSY_TIMEOUT_MS } from "./open-sqlite-connection.js";
+export { withSqliteBusyRetry } from "./sqlite-busy-retry.js";
 
 /**
  * Open an existing SQLite file with SQLITE_OPEN_READONLY. No mkdir, no
@@ -12,31 +10,9 @@ export { withSqliteBusyRetry };
  * read-only.
  */
 export function openReadOnlyDatabase(filename: string): StorageDatabase {
-  if (filename === ":memory:" || filename.trim().length === 0) {
-    throw new StorageError(
-      "DATABASE_OPEN_FAILED",
-      "Read-only SQLite open requires an existing on-disk database file."
-    );
-  }
-
-  let connection: SqliteConnection;
+  const connection = openReadOnlySqliteConnection(filename);
   try {
-    connection = openSqliteConnection(filename, { readonly: true, fileMustExist: true });
-  } catch (error) {
-    throw new StorageError(
-      "DATABASE_OPEN_FAILED",
-      `Failed to open read-only database: ${filename}`,
-      error
-    );
-  }
-
-  try {
-    withSqliteBusyRetry(() => {
-      // Timeout first: query_only can SQLITE_BUSY while a peer holds IMMEDIATE.
-      connection.pragma(`busy_timeout = ${READ_ONLY_BUSY_TIMEOUT_MS}`);
-      connection.pragma("query_only = ON");
-    });
-    return new StorageDatabase(filename, connection, "runtime");
+    return new StorageDatabase(filename, connection);
   } catch (error) {
     connection.close();
     throw error;

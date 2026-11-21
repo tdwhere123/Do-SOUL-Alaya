@@ -50,13 +50,15 @@ export interface ClaimServiceClaimFormRepoPort {
     objectId: string,
     status: ClaimLifecycleStateType,
     updatedAt: string,
-    expectedFromStatus: ClaimLifecycleStateType
+    expectedFromStatus: ClaimLifecycleStateType,
+    workspaceId: string
   ): Promise<Readonly<ClaimForm>>;
   updateStatusSync?(
     objectId: string,
     status: ClaimLifecycleStateType,
     updatedAt: string,
-    expectedFromStatus: ClaimLifecycleStateType
+    expectedFromStatus: ClaimLifecycleStateType,
+    workspaceId: string
   ): Readonly<ClaimForm>;
 }
 
@@ -72,8 +74,8 @@ export interface EffectDecisionStore {
 }
 
 export interface ClaimLifecycleTransitionOptions {
+  readonly expectedFromStatus: ClaimLifecycleStateType;
   readonly skipSlotElection?: boolean;
-  readonly deferredNotificationEvents?: EventLogEntry[];
   readonly additionalEventInputs?: readonly EventPublisherInput[];
   readonly additionalEventsSink?: EventLogEntry[];
   readonly effectDecisionReceipt?: EffectDecisionReceipt;

@@ -343,8 +343,8 @@ export function createGardenDataPorts(
     pointerHealthPort: { findBrokenPointers: vi.fn(async () => []) },
     greenMaintenancePort: {
       findExpiringGreenStatuses: vi.fn(async () => []),
-      renewGreenPassiveStable: vi.fn(async () => undefined),
-      requestActiveVerification: vi.fn(async () => undefined),
+      renewGreenPassiveStable: vi.fn(() => true),
+      requestActiveVerification: vi.fn(() => true),
       revokeGreen: vi.fn(() => ({ affected: 0 })),
       ...(overrides.greenMaintenancePort ?? {})
     },

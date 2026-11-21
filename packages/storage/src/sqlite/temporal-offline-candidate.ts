@@ -18,6 +18,8 @@ import { StorageError } from "../shared/errors.js";
 import { acquireTemporalMaintenanceLease, type TemporalMaintenanceLease } from "./temporal-maintenance-lease.js";
 import { publishNewTemporalFile, syncTemporalDirectory, TemporalFilePublicationError } from "./temporal-file-publication.js";
 import {
+  assertEmptySqliteWal,
+  readSealedSqliteDatabaseDigest,
   readSqliteDatabaseFileWitnessSet,
   type SqliteDatabaseFileWitness
 } from "./sqlite-database-file-witness.js";
@@ -88,7 +90,17 @@ async function prepareCandidateWithinLease(paths: NormalizedPaths): Promise<Temp
     assertUnchangedSource(paths.sourceFilename, sourceBefore);
 
     const candidate = initDatabase({ filename: copyStagingFilename, temporalMode: "candidate" });
-    candidate.close();
+    try {
+      candidate.optimize();
+      // A busy checkpoint reports failure as a row instead of throwing.
+      const [checkpoint] = candidate.connection.pragma("wal_checkpoint(TRUNCATE)") as readonly [{ busy: number }];
+      if (checkpoint.busy !== 0) {
+        throw new StorageError("CONFLICT", "Temporal candidate WAL could not be truncated.");
+      }
+      assertEmptySqliteWal(copyStagingFilename);
+    } finally {
+      candidate.close({ optimize: false });
+    }
     await copyDatabaseSnapshot(copyStagingFilename, sealedStagingFilename);
 
     const knownMaxVersion = currentKnownMigrationVersion();
@@ -114,7 +126,7 @@ async function prepareCandidateWithinLease(paths: NormalizedPaths): Promise<Temp
       candidate: Object.freeze({
         filename: paths.candidateFilename,
         schemaVersions: candidateSchemaVersions,
-        sha256: fileSha256(paths.candidateFilename)
+        sha256: readSealedSqliteDatabaseDigest(paths.candidateFilename)
       }),
       quarantine: Object.freeze({
         convertedCount: 0,
@@ -406,14 +418,6 @@ function writeReceiptAtomically(filename: string, receipt: Record<string, unknow
   }
 }
 
-function fileSha256(filename: string): string {
-  return fileBytesSha256(fs.readFileSync(filename));
-}
-
 function fileTextSha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function fileBytesSha256(value: Uint8Array): string {
-  return createHash("sha256").update(value).digest("hex");
 }

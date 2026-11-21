@@ -279,7 +279,7 @@ export class ArbitrationService {
           ClaimLifecycleState.CONTESTED,
           "arbitration_contested",
           TransitionCausedBy.SYSTEM,
-          { skipSlotElection: true, transactionGuard, additionalEventInputs: [createClaimContestedEventInput(
+          { expectedFromStatus: claim.claim_status, skipSlotElection: true, transactionGuard, additionalEventInputs: [createClaimContestedEventInput(
             claim, slot.winner_claim_id === claim.object_id ? null : slot.winner_claim_id
           )] }
         );

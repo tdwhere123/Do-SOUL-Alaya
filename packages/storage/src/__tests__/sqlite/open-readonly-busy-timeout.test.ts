@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it } from "vitest";
 import { StorageError } from "../../shared/errors.js";
 import { initDatabase } from "../../sqlite/db.js";
+import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import {
   READ_ONLY_BUSY_TIMEOUT_MS,
   openReadOnlyDatabase,
@@ -112,6 +113,31 @@ describe("openReadOnlyDatabase busy timeout", () => {
 });
 
 describe("openReadOnlyDatabase open retry", () => {
+  it("keeps statement refreshes read-only and out of the writable cache", () => {
+    const filename = createFilename();
+    const writable = initDatabase({ filename });
+    databases.push(writable);
+    writable.connection.exec("CREATE TABLE reopen_probe (value TEXT)");
+    const reader = openReadOnlyDatabase(filename);
+    databases.push(reader);
+    const holder = new RefreshableStatementHolder(reader, (db) =>
+      db.connection.prepare("SELECT value FROM reopen_probe")
+    );
+    expect(holder.active().all()).toEqual([]);
+    reader.close();
+
+    writable.connection.exec("INSERT INTO reopen_probe VALUES ('updated')");
+    expect(holder.active().all()).toEqual([{ value: "updated" }]);
+    expect(reader.accessMode).toBe("readonly");
+    expect(reader.connection.pragma("query_only", { simple: true })).toBe(1);
+    expect(() => reader.connection.exec("INSERT INTO reopen_probe VALUES ('forbidden')"))
+      .toThrow(/readonly database/i);
+    reader.connection.pragma("query_only = OFF");
+    expect(() => reader.connection.exec("CREATE TABLE forbidden (value TEXT)"))
+      .toThrow(/readonly database/i);
+    expect(initDatabase({ filename })).toBe(writable);
+  });
+
   it("opens an existing migrated file", () => {
     const filename = createFilename();
     const writable = initDatabase({ filename });

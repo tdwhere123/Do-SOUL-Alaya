@@ -63,6 +63,40 @@ describe("Green status SQLite boundary", () => {
     expect(harness.notifyEntry.mock.calls.map(([event]) => event.event_id)).toEqual(events.map((event) => event.event_id));
     expect(harness.notificationCommitChecks).toEqual([true, true]);
   });
+
+  it("starts a fresh verification streak after a new grant commits", async () => {
+    const { service, eventLogRepo, statusRepo } = await createHarness();
+    const grant = grantInput();
+    const noGo = { ...grant, verdict: "no_go", microCorrectionHint: null, necessaryPatch: null } as const;
+    await service.grant(grant);
+    for (let attempt = 0; attempt < GreenService.VERIFICATION_MAX_CONSECUTIVE_NO_GO; attempt += 1) {
+      await service.runVerification(noGo);
+    }
+    await expect(service.runVerification(noGo)).resolves.toMatchObject({ micro_correction_hint: "max retries reached" });
+
+    const granted = await service.grant(grant);
+    await service.runVerification(noGo);
+    expect(statusRepo.findByTargetObjectIdSync(TARGET)).toMatchObject({
+      green_state: "revoked",
+      revoke_reason: "verification_fail"
+    });
+    const events = await eventLogRepo.queryByEntityAll("green_status", granted.object_id);
+    expect(events.at(-1)?.event_type).toBe(GreenGovernanceEventType.SOUL_GREEN_PIERCED);
+  });
+
+  it("does not enter grace when revocation commits before its write transaction", async () => {
+    const { service, eventLogRepo, statusRepo } = await createHarness();
+    const grant = grantInput();
+    const granted = await service.grant(grant);
+    const transactional = eventLogRepo.transactional.bind(eventLogRepo);
+    vi.spyOn(eventLogRepo, "transactional").mockImplementationOnce((mutation) => {
+      statusRepo.upsert({ ...granted, green_state: "revoked", revoke_reason: "verification_fail" });
+      return transactional(mutation);
+    });
+    await expect(service.setGrace({ ...grant, until: "2026-06-02T00:00:00.000Z" })).resolves.toBeNull();
+    expect(statusRepo.findByTargetObjectIdSync(TARGET)?.green_state).toBe("revoked");
+    expect((await eventLogRepo.queryByType(GreenGovernanceEventType.SOUL_GREEN_GRACE_ENTERED)).events).toEqual([]);
+  });
 });
 
 function grantInput() {

@@ -43,6 +43,7 @@ export const ManifestationBudgetRemainingSchema = z
 export const ManifestationBudgetConfigSchema = z
   .object({
     workspace_id: BoundedIdSchema,
+    config_version: NonNegativeIntSchema.default(0),
     stance_bias_cap: NonNegativeIntSchema,
     dialogue_nudge_cap: NonNegativeIntSchema,
     lens_entry_cap: NonNegativeIntSchema,

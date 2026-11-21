@@ -36,13 +36,11 @@ export class GreenGrantGuard {
   public constructor(private readonly deps: GreenGrantGuardDependencies) {}
 
   public async getMemoryOrThrow(targetObjectId: string, workspaceId: string): Promise<Readonly<MemoryEntry>> {
-    const memory = await this.deps.memoryRepo.findById(targetObjectId);
+    return requireScopedMemory(await this.deps.memoryRepo.findById(targetObjectId), workspaceId);
+  }
 
-    if (memory === null || memory.workspace_id !== workspaceId) {
-      throw new CoreError("NOT_FOUND", "Memory entry not found");
-    }
-
-    return memory;
+  public getMemoryOrThrowSync(targetObjectId: string, workspaceId: string): Readonly<MemoryEntry> {
+    return requireScopedMemory(this.deps.memoryRepo.findByIdSync(targetObjectId), workspaceId);
   }
 
   public async assertGrantPreconditions(params: {
@@ -162,4 +160,11 @@ export class GreenGrantGuard {
       targetObjectId
     });
   }
+}
+
+function requireScopedMemory(memory: Readonly<MemoryEntry> | null, workspaceId: string): Readonly<MemoryEntry> {
+  if (memory === null || memory.workspace_id !== workspaceId) {
+    throw new CoreError("NOT_FOUND", "Memory entry not found");
+  }
+  return memory;
 }

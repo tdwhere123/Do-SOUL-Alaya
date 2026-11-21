@@ -151,6 +151,7 @@ describe("ResolutionService confirm atomicity (real SQLite)", () => {
         "soul_resolve_confirm",
         "user",
         {
+          expectedFromStatus: ClaimLifecycleState.DRAFT,
           skipSlotElection: true,
           additionalEventInputs: [
             {

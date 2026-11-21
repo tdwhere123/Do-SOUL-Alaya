@@ -11,6 +11,8 @@ import {
   SoulGreenRenewedPayloadSchema,
   SoulGreenRevokedPayloadSchema,
   type AuditorPointerHealPort,
+  type EventLogEntry,
+  type ExpiringGreenStatus,
   type GardenTaskDescriptor,
   type GardenTaskResult,
   type StaleMemoryEntry
@@ -21,6 +23,8 @@ import {
 } from "./auditor-core.js";
 import { AuditorOrphanOperations } from "./auditor-orphan-operations.js";
 import { AUDITOR_CONSTANTS } from "./auditor-types.js";
+
+const GREEN_MAINTENANCE_NOOP = Symbol("expiring Green status changed");
 
 export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperations {
   protected async executeEvidenceCheck(
@@ -190,50 +194,16 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
       AUDITOR_CONSTANTS.EXPIRY_LOOKAHEAD_MS
     );
     const batch = expiringStatuses.slice(0, AUDITOR_CONSTANTS.BATCH_SIZE);
-    let affected: readonly string[] = [];
+    const affected: string[] = [];
 
     for (const status of batch) {
+      let updated = false;
       if (isPassiveStableDimension(status.dimension)) {
-        const renewedAt = this.now();
-        const renewedPayload = SoulGreenRenewedPayloadSchema.parse({
-          object_id: status.green_status_id,
-          target_object_id: status.memory_entry_id,
-          workspace_id: task.workspace_id,
-          verification_basis: "passive_stable",
-          task_id: task.task_id,
-          occurred_at: renewedAt
-        });
-        await this.appendEventLogAndMutate(
-          {
-            event_type: GreenGovernanceEventType.SOUL_GREEN_RENEWED,
-            entity_type: "green_status",
-            entity_id: status.green_status_id,
-            workspace_id: task.workspace_id,
-            run_id: task.run_id,
-            caused_by: this.role,
-            payload_json: renewedPayload
-          },
-          () => {
-            this.dependencies.greenMaintenancePort.renewGreenPassiveStable(
-              status.green_status_id,
-              task.task_id
-            );
-          }
-        );
-        affected = [...affected, status.green_status_id];
-        continue;
+        updated = await this.renewGreen(task, status);
+      } else if (requiresActiveVerification(status.dimension)) {
+        updated = await this.requestActiveVerification(task, status);
       }
-
-      if (status.dimension === MemoryDimension.HAZARD) {
-        continue;
-      }
-
-      if (requiresActiveVerification(status.dimension)) {
-        affected = [
-          ...affected,
-          await this.requestActiveVerification(task, status.green_status_id, status.memory_entry_id)
-        ];
-      }
+      if (updated) affected.push(status.green_status_id);
     }
 
     const result = this.createSuccessResult(task, completedAt, affected, [
@@ -241,6 +211,25 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
     ]);
     await this.dependencies.scheduler.reportCompletion(result);
     return result;
+  }
+
+  private async renewGreen(task: GardenTaskDescriptor, status: ExpiringGreenStatus): Promise<boolean> {
+    return await this.applyGreenMaintenance({
+      event_type: GreenGovernanceEventType.SOUL_GREEN_RENEWED,
+      entity_type: "green_status",
+      entity_id: status.green_status_id,
+      workspace_id: task.workspace_id,
+      run_id: task.run_id,
+      caused_by: this.role,
+      payload_json: SoulGreenRenewedPayloadSchema.parse({
+        object_id: status.green_status_id,
+        target_object_id: status.memory_entry_id,
+        workspace_id: task.workspace_id,
+        verification_basis: "passive_stable",
+        task_id: task.task_id,
+        occurred_at: this.now()
+      })
+    }, () => this.dependencies.greenMaintenancePort.renewGreenPassiveStable(status, task.workspace_id));
   }
 
   protected async executeBootstrappingScan(
@@ -386,9 +375,9 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
 
   private async requestActiveVerification(
     task: GardenTaskDescriptor,
-    greenStatusId: string,
-    memoryEntryId: string
-  ): Promise<string> {
+    status: ExpiringGreenStatus
+  ): Promise<boolean> {
+    const { green_status_id: greenStatusId, memory_entry_id: memoryEntryId } = status;
     const requestedAt = this.now();
     const graceUntil = addMillisecondsIso(requestedAt, AUDITOR_CONSTANTS.ACTIVE_VERIFICATION_GRACE_MS);
     const requestedPayload = SoulGreenGraceRequestedPayloadSchema.parse({
@@ -399,7 +388,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
       task_id: task.task_id,
       occurred_at: requestedAt
     });
-    await this.appendEventLogAndMutate(
+    return await this.applyGreenMaintenance(
       {
         event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_REQUESTED,
         entity_type: "green_status",
@@ -409,11 +398,24 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
         caused_by: this.role,
         payload_json: requestedPayload
       },
-      () => {
-        this.dependencies.greenMaintenancePort.requestActiveVerification(greenStatusId, task.task_id);
-      }
+      () => this.dependencies.greenMaintenancePort.requestActiveVerification(status, task.workspace_id)
     );
-    return greenStatusId;
+  }
+
+  private async applyGreenMaintenance(
+    event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
+    update: () => boolean
+  ): Promise<boolean> {
+    try {
+      await this.appendEventLogAndMutate(event, () => {
+        // The stale snapshot must not leave a successful transition audit.
+        if (!update()) throw GREEN_MAINTENANCE_NOOP;
+      });
+      return true;
+    } catch (error) {
+      if (error === GREEN_MAINTENANCE_NOOP) return false;
+      throw error;
+    }
   }
 }
 

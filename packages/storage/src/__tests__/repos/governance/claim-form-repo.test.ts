@@ -178,7 +178,8 @@ describe("SqliteClaimFormRepo", () => {
       claim.object_id,
       ClaimLifecycleState.ACTIVE,
       "2026-03-21T01:00:00.000Z",
-      claim.claim_status
+      claim.claim_status,
+      claim.workspace_id
     );
 
     expect(updated.claim_status).toBe(ClaimLifecycleState.ACTIVE);
@@ -194,7 +195,8 @@ describe("SqliteClaimFormRepo", () => {
       claim.object_id,
       ClaimLifecycleState.ACTIVE,
       "2026-03-21T01:00:00.000Z",
-      claim.claim_status
+      claim.claim_status,
+      claim.workspace_id
     );
 
     expect(updated.claim_status).toBe(ClaimLifecycleState.ACTIVE);
@@ -209,18 +211,14 @@ describe("SqliteClaimFormRepo", () => {
         "missing-claim",
         ClaimLifecycleState.ACTIVE,
         "2026-03-21T01:00:00.000Z",
-        ClaimLifecycleState.DRAFT
+        ClaimLifecycleState.DRAFT,
+        "workspace-1"
       )
     ).rejects.toMatchObject({
       code: "NOT_FOUND"
     });
   });
 
-  // invariant: optimistic-concurrency guard. Two concurrent transitions
-  // racing from the same starting state cannot both win. The first
-  // writer flips the status, the second writer's UPDATE finds zero
-  // matching rows and the storage layer raises QUERY_FAILED rather
-  // than silently overwriting.
   it("raises conflict when expectedFromStatus does not match the current claim_status", async () => {
     const { repo } = await createRepo();
     const claim = createClaimForm();
@@ -229,7 +227,8 @@ describe("SqliteClaimFormRepo", () => {
       claim.object_id,
       ClaimLifecycleState.ACTIVE,
       "2026-03-21T01:00:00.000Z",
-      claim.claim_status
+      claim.claim_status,
+      claim.workspace_id
     );
 
     await expect(
@@ -237,10 +236,11 @@ describe("SqliteClaimFormRepo", () => {
         claim.object_id,
         ClaimLifecycleState.ARCHIVED,
         "2026-03-21T02:00:00.000Z",
-        ClaimLifecycleState.DRAFT
+        ClaimLifecycleState.DRAFT,
+        claim.workspace_id
       )
     ).rejects.toMatchObject({
-      code: "QUERY_FAILED"
+      code: "CONFLICT"
     });
   });
 
