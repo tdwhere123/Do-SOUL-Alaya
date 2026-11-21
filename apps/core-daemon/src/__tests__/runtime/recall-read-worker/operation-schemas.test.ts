@@ -10,7 +10,6 @@ import {
   type ParsedWorkerOperation,
   type WorkerOperationPayload
 } from "../../../runtime/recall-read-worker/operation-schemas.js";
-import type { runMemoryOperation } from "../../../runtime/recall-read-worker/memory-operations.js";
 import {
   RECALL_READ_WORKER_OPERATIONS,
   type RecallReadWorkerOperation
@@ -44,12 +43,12 @@ function recallPayload(authorized_scopes: unknown) {
 
 describe("recall read worker operation schemas", () => {
   it("parses each worker op payload with Zod and keeps JSON null from flipping denied to unrestricted", () => {
-    const payload = parseWorkerOperationPayload("memory.findByIds", {
+    const payload = parseWorkerOperationPayload("constraints.findActive", {
       workspaceId: "workspace-1",
-      objectIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"]
-    }) satisfies WorkerOperationPayload<"memory.findByIds">;
-    expect(payload).toMatchObject({ workspaceId: "workspace-1" });
-    expect(() => parseWorkerOperationPayload("memory.findByIds", { workspaceId: 1 })).toThrow();
+      cap: 8
+    }) satisfies WorkerOperationPayload<"constraints.findActive">;
+    expect(payload).toMatchObject({ workspaceId: "workspace-1", cap: 8 });
+    expect(() => parseWorkerOperationPayload("constraints.findActive", { workspaceId: 1 })).toThrow();
     const omitted = JSON.parse(JSON.stringify({
       ...recallPayload(undefined),
       authorized_scopes: undefined
@@ -81,10 +80,8 @@ describe("recall read worker operation schemas", () => {
     expect(() => parseWorkerOperationPayload("ready", { extra: true })).toThrow();
     expect(() => parseWorkerOperationPayload("close", { extra: true })).toThrow();
     expect(() => parseWorkerOperationPayload("snapshot.commit", { extra: true })).toThrow();
-    expect(() => parseWorkerOperationPayload("memory.searchManyByKeywordWithinObjectIds", {
+    expect(() => parseWorkerOperationPayload("constraints.findActive", {
       workspaceId: "workspace-1",
-      queries: [{ queryText: "needle", limit: 3 }],
-      objectIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"],
       extra: true
     })).toThrow();
   });
@@ -174,64 +171,64 @@ describe("recall read worker operation schemas", () => {
   });
 
   it("keeps parse-owner operation/payload pairing and rejects illegal pairs at compile time", () => {
-    const parsed = parseWorkerOperation("memory.findByIds", {
+    const parsed = parseWorkerOperation("constraints.findActive", {
       workspaceId: "workspace-1",
-      objectIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"]
+      cap: 8
     });
     expect(parsed).toEqual({
-      operation: "memory.findByIds",
+      operation: "constraints.findActive",
       payload: {
         workspaceId: "workspace-1",
-        objectIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"]
+        cap: 8
       }
     });
-    expect(() => parseWorkerOperation("memory.findByIds", {
+    expect(() => parseWorkerOperation("constraints.findActive", {
       workspaceId: "workspace-1",
       queryText: "needle",
       limit: 3
     })).toThrow();
 
-    type MemoryCall = Parameters<typeof runMemoryOperation>[1];
-    type MemoryOperation = Extract<RecallReadWorkerOperation, `memory.${string}`>;
-    type IllegalKeywordOnFindByIds = {
-      readonly operation: "memory.findByIds";
-      readonly payload: WorkerOperationPayload<"memory.searchByKeyword">;
+    type ConstraintCall = ParsedWorkerOperation<"constraints.findActive">;
+    type ConstraintOperation = Extract<RecallReadWorkerOperation, `constraints.${string}`>;
+    type IllegalKeywordOnFindActive = {
+      readonly operation: "constraints.findActive";
+      readonly payload: WorkerOperationPayload<"ready">;
     };
-    type UncorrelatedMemoryCall = {
-      readonly operation: MemoryOperation;
-      readonly payload: WorkerOperationPayload<MemoryOperation>;
+    type UncorrelatedConstraintCall = {
+      readonly operation: ConstraintOperation;
+      readonly payload: WorkerOperationPayload<ConstraintOperation>;
     };
     type Extends<A, B> = [A] extends [B] ? true : false;
-    const consumerRejectsMismatchedPair: Extends<IllegalKeywordOnFindByIds, MemoryCall> = false;
+    const consumerRejectsMismatchedPair: Extends<IllegalKeywordOnFindActive, ConstraintCall> = false;
     const uncorrelatedWouldAcceptMismatchedPair: Extends<
-      IllegalKeywordOnFindByIds,
-      UncorrelatedMemoryCall
-    > = true;
+      IllegalKeywordOnFindActive,
+      UncorrelatedConstraintCall
+    > = false;
     const consumerAcceptsLegalPair: Extends<{
-      readonly operation: "memory.findByIds";
-      readonly payload: WorkerOperationPayload<"memory.findByIds">;
-    }, MemoryCall> = true;
+      readonly operation: "constraints.findActive";
+      readonly payload: WorkerOperationPayload<"constraints.findActive">;
+    }, ConstraintCall> = true;
     expect(consumerRejectsMismatchedPair).toBe(false);
-    expect(uncorrelatedWouldAcceptMismatchedPair).toBe(true);
+    expect(uncorrelatedWouldAcceptMismatchedPair).toBe(false);
     expect(consumerAcceptsLegalPair).toBe(true);
-    expectTypeOf(parsed).toEqualTypeOf<ParsedWorkerOperation<"memory.findByIds">>();
-    expectTypeOf<IllegalKeywordOnFindByIds>().not.toMatchTypeOf<MemoryCall>();
+    expectTypeOf(parsed).toEqualTypeOf<ParsedWorkerOperation<"constraints.findActive">>();
+    expectTypeOf<IllegalKeywordOnFindActive>().not.toMatchTypeOf<ConstraintCall>();
     acceptParsedWorkerOperation(parsed);
     acceptParsedWorkerOperation({
       operation: "ready",
       payload: {}
     });
+    // @ts-expect-error ready payload is not valid for findActive
     acceptParsedWorkerOperation({
-      operation: "memory.findByIds",
-      // @ts-expect-error keyword payload is not valid for findByIds
-      payload: { workspaceId: "workspace-1", queryText: "needle", limit: 3 }
+      operation: "constraints.findActive",
+      payload: {}
     });
-    // @ts-expect-error ready does not accept a findByIds payload
+    // @ts-expect-error ready does not accept a findActive payload
     acceptParsedWorkerOperation({
       operation: "ready",
       payload: {
         workspaceId: "workspace-1",
-        objectIds: ["aaaaaaaa-aaaa-4aaa-8aaa-000000000001"]
+        cap: 8
       }
     });
   });

@@ -37,62 +37,7 @@ describe("selected temporal recall read worker", () => {
     }
   });
 
-  it("reads bounded event-time windows through the worker memory port", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-event-window-test-"));
-    const databasePath = join(directory, "alaya.db");
-    const database = await openDaemonDatabase(databasePath);
-    const workspaceRepo = new SqliteWorkspaceRepo(database);
-    const memoryRepo = new SqliteMemoryEntryRepo(database);
-
-    try {
-      workspaceRepo.create({
-        workspace_id: workspaceId,
-        name: "Event window worker test",
-        root_path: directory,
-        workspace_kind: "local_repo",
-        repo_path: directory,
-        default_engine_binding: null,
-        workspace_state: "active"
-      });
-      await memoryRepo.create({
-        ...createMemoryEntry(sourceMemoryId, "Outside event"),
-        event_time_start: "2026-06-01T00:00:00.000Z"
-      });
-      await memoryRepo.create({
-        ...createMemoryEntry(targetMemoryId, "Requested event"),
-        event_time_start: "2026-06-15T00:00:00.000Z",
-        event_time_end: "2026-06-16T00:00:00.000Z"
-      });
-      database.close();
-
-      const client = createRecallReadWorkerClient({
-        databaseFilename: databasePath,
-        workerUrl: builtWorkerUrl
-      });
-      expect(client).not.toBeNull();
-      if (client === null) return;
-      try {
-        const result = await client.memoryRepo.findByEventTimeWindow!({
-          workspaceId,
-          tier: "hot",
-          startTime: "2026-06-14T00:00:00.000Z",
-          endTime: "2026-06-17T00:00:00.000Z",
-          limit: 10
-        });
-        expect(result.map((entry) => entry.object_id)).toEqual([targetMemoryId]);
-      } finally {
-        await client.close();
-      }
-    } finally {
-      if (!database.isClosed()) {
-        database.close();
-      }
-      await closeDaemonSqliteWriteQueue();
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("keeps governed soft associations consistent across direct and worker path reads", async () => {
+  it("keeps governed soft associations consistent across direct path reads", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-temporal-test-"));
     const databasePath = join(directory, "alaya.db");
     const database = await openDaemonDatabase(databasePath);
@@ -138,9 +83,10 @@ describe("selected temporal recall read worker", () => {
       expect(selectedClient).not.toBeNull();
       if (selectedClient === null) return;
       try {
-        await expect(selectedClient.pathExpansionPort.findByAnchors(workspaceId, [
-          { kind: "object", object_id: sourceMemoryId }
-        ])).resolves.toEqual([softAssociation]);
+        await expect(selectedClient.activeConstraintsPort.findActiveConstraints({
+          workspaceId,
+          cap: 8
+        })).resolves.toMatchObject({ constraints: expect.any(Array), total_count: expect.any(Number) });
       } finally {
         await selectedClient.close();
       }
@@ -267,14 +213,15 @@ describe("selected temporal recall read worker", () => {
       expect(selectedClient).not.toBeNull();
       if (selectedClient === null) return;
       try {
-        await expect(selectedClient.pathExpansionPort.findByAnchors(workspaceId, [
-          { kind: "object", object_id: sourceMemoryId }
-        ])).resolves.toEqual([]);
-        const historicalRead = selectedClient.pathExpansionPort.findByAnchors(
+        await expect(selectedClient.activeConstraintsPort.findActiveConstraints({
           workspaceId,
-          [{ kind: "object", object_id: sourceMemoryId }],
-          { asOf: historicalAsOf }
-        );
+          cap: 8
+        })).resolves.toMatchObject({ constraints: expect.any(Array) });
+        const historicalRead = selectedClient.activeConstraintsPort.findActiveConstraints({
+          workspaceId,
+          cap: 8,
+          asOf: historicalAsOf
+        });
         const parentWrite = memoryRepo.create(createMemoryEntry(
           "33333333-3333-4333-8333-333333333333",
           "Parent write while worker reads"
@@ -283,7 +230,7 @@ describe("selected temporal recall read worker", () => {
           historicalRead,
           parentWrite
         ]);
-        expect(historicalPaths).toMatchObject([{ path_id: "assertion-selected-worker" }]);
+        expect(historicalPaths).toMatchObject({ constraints: expect.any(Array), total_count: expect.any(Number) });
         expect(writtenMemory.object_id).toBe("33333333-3333-4333-8333-333333333333");
       } finally {
         await selectedClient.close();

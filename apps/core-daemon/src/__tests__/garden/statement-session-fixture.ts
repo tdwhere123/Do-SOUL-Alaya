@@ -16,7 +16,6 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createStatementSessionTaskProcessor } from "../../garden/host-worker/statement-session-task-processor.js";
-import { createPostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
 import { createHostSessionCapture, createHostSessionSourceAudit, MCP_HOST_SESSION_ISSUER } from "../../garden/host-session/host-session-capture.js";
 import { createHostSessionCaptureHandler } from "../../mcp-memory/tool/host-session-handler.js";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
@@ -84,7 +83,7 @@ export async function createStatementSessionEnvironment() {
     sourceGroundingDeferTransitions: createSourceGroundingDeferTransitions({ eventLogRepo, signalRepo, queueRepo }),
     postTriageMaterializer: { materialize: async (signal, context) => await router.materializeSignal(signal, context) } });
   const gardenTaskRepo = new SqliteGardenTaskRepo(database.connection, eventPublisher);
-  const signalReceiver = createPostTurnSignalReceiver(signalService);
+  const signalReceiver = signalService;
   const requests: SourceStatementRequest[] = [];
   const warnings: { message: string; meta: Record<string, unknown> }[] = [];
   const warn = (message: string, meta: Record<string, unknown>) => { warnings.push({ message, meta }); };

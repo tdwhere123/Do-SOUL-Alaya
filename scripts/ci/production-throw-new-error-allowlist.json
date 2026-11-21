@@ -1567,18 +1567,6 @@
     "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/core-daemon/src/runtime/recall-read-worker/evidence-search-matches.ts": {
-    "max": 6,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/core-daemon/src/runtime/recall-read-worker/field-operations.ts": {
-    "max": 4,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/core-daemon/src/runtime/recall-read-worker/memory-window.ts": {
-    "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/core-daemon/src/runtime/recall-read-worker/observer-operations.ts": {
     "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -1589,14 +1577,6 @@
   },
   "apps/core-daemon/src/runtime/recall-read-worker/prepared-delivery.ts": {
     "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/core-daemon/src/runtime/recall-read-worker/tier-window-client.ts": {
-    "max": 4,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/core-daemon/src/runtime/recall-read-worker/worker-readers.ts": {
-    "max": 4,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/recall/recall-path-readers.ts": {

@@ -454,8 +454,6 @@ function buildFinalizeOperationsRuntimeInput(
     projectMappingService: foundation.projectMappingService,
     globalMemoryService: runtimeWiring.recallWiring.globalMemoryService,
     gardenRuntime: gardenWiring.gardenRuntime,
-    globalMemoryRecallInvalidationSubscription:
-      runtimeWiring.recallWiring.globalMemoryRecallInvalidationSubscription,
     database: bootstrap.database,
     temporalRuntimeLease: bootstrap.temporalRuntimeLease,
     recallReadWorkerClient: runtimeWiring.recallWiring.recallReadWorkerClient,

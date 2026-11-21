@@ -38,7 +38,7 @@ it.each([false, true])("selects v2 through the CLI and persists the bounded lexi
       setBacklogTelemetryObserver: vi.fn(), runBackgroundPass: vi.fn(async () => undefined),
       runBulkEnrichPass: vi.fn(async () => undefined), runEmbeddingBackfillPass: vi.fn(async () => undefined) },
     securityStatusService: { close: vi.fn() }, daemonMcpRuntimeRegistry: { close: vi.fn(async () => undefined) },
-    globalMemoryRecallInvalidationSubscription: null, database: environment.database,
+    database: environment.database,
     requestProtection: { requestToken: "fixture-token", tokenSource: "env", allowedOrigin: "http://localhost" }
   });
   try {

@@ -100,7 +100,6 @@ function createControls(
     },
     securityStatusService: { close: vi.fn() },
     daemonMcpRuntimeRegistry: { close: vi.fn(async () => undefined) },
-    globalMemoryRecallInvalidationSubscription: null,
     recallReadWorkerClient: overrides.recallReadWorkerClient,
     closeEmbeddingProvider: overrides.closeEmbeddingProvider,
     sourceIndexProducer: overrides.sourceIndexProducer,

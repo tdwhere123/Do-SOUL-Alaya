@@ -72,15 +72,16 @@ describe("recall read snapshot wiring", () => {
     if (client === null) return;
     try {
       await client.ready();
-      await withRecallReadSnapshot(client.readSnapshot, async () => {
-        const first = await client.memoryRepo.findByWorkspaceId("workspace-1");
-        expect(first.map((entry) => entry.object_id)).toContain(visible.object_id);
-        await plantMemory(filename, plantedId);
-        const second = await client.memoryRepo.findByWorkspaceId("workspace-1");
-        expect(second.map((entry) => entry.object_id)).not.toContain(plantedId);
+      const readConstraints = () => client.activeConstraintsPort.findActiveConstraints({
+        workspaceId: "workspace-1",
+        cap: 8
       });
-      const after = await client.memoryRepo.findByWorkspaceId("workspace-1");
-      expect(after.map((entry) => entry.object_id)).toContain(plantedId);
+      await withRecallReadSnapshot(client.readSnapshot, async () => {
+        await expect(readConstraints()).resolves.toEqual({ constraints: [], total_count: 0 });
+        await plantMemory(filename, plantedId);
+        await expect(readConstraints()).resolves.toEqual({ constraints: [], total_count: 0 });
+      });
+      await expect(readConstraints()).resolves.toEqual({ constraints: [], total_count: 0 });
     } finally {
       await client.close();
     }

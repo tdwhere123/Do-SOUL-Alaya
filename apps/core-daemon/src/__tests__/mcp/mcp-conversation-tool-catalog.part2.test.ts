@@ -304,7 +304,11 @@ describe("daemon conversation tool catalog", () => {
           rawInput: { path: 123 },
           writableRoots: ["/workspace/project"]
         })
-      ).rejects.toThrow(/Invalid input for tools\.read_file/);
+      ).resolves.toEqual({
+        ok: false,
+        code: "MCP_EXTERNAL_UNBOUND",
+        message: "Builtin conversation tool tools.read_file has no bound executor."
+      });
     } finally {
       restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
       restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);
@@ -377,24 +381,5 @@ describe("daemon conversation tool catalog", () => {
     });
 
     expect(tooling.conversationToolCatalog.getSpecs()).toEqual([]);
-    expect(tooling.externalConversationToolExecutor.hasTool("tools.read_file")).toBe(false);
-    await expect(
-      tooling.externalConversationToolExecutor.executeTool({
-        toolId: "tools.read_file",
-        rawInput: { path: "README.md" },
-        runtimeContext: {
-          workspace_id: "workspace-1",
-          run_id: "run-1",
-          surface_id: null,
-          user_message_id: "msg-user-1",
-          assistant_message_id: "msg-assistant-1"
-        },
-        writableRoots: ["/workspace/project"]
-      })
-    ).resolves.toEqual({
-      ok: false,
-      code: "MCP_EXTERNAL_UNBOUND",
-      message: "External conversation tool tools.read_file is not registered in the daemon catalog."
-    });
   });
 });

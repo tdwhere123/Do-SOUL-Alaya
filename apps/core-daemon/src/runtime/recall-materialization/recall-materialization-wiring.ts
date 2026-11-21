@@ -5,7 +5,6 @@ import {
   ResolutionService,
   fieldContractSha256,
   type EventPublisher,
-  type GlobalMemoryRecallSubscription,
   type ManifestationResolverEventLogWriterPort
 } from "@do-soul/alaya-core";
 import {
@@ -29,7 +28,6 @@ import {
 } from "../recall/recall-path-readers.js";
 import { resolveRecallPathReadBind } from "../recall/recall-path-read-bind.js";
 import {
-  createGlobalMemoryRecallPort,
   createGlobalMemoryRouteService
 } from "../daemon/lifecycle/daemon-runtime-support.js";
 import { warnOnRejectedBackgroundTask } from "../daemon/lifecycle/daemon-runtime-helpers.js";
@@ -146,19 +144,7 @@ function createGlobalMemoryRuntime(input: CreateRecallMaterializationWiringInput
           globalMemoryRepo: input.globalMemoryRepo,
           projectMappingService: input.projectMappingService
         });
-  const globalMemoryRecallService =
-    input.globalMemoryRepo === null
-      ? undefined
-      : createGlobalMemoryRecallPort({
-          globalMemoryRepo: input.globalMemoryRepo
-        });
-  const globalMemoryRecallInvalidationSubscription: GlobalMemoryRecallSubscription | null =
-    globalMemoryRecallService?.subscribeToInvalidations(input.runtimeNotifier) ?? null;
-  return {
-    globalMemoryService,
-    globalMemoryRecallService,
-    globalMemoryRecallInvalidationSubscription
-  };
+  return { globalMemoryService };
 }
 
 function recallReadSnapshotOrThrow(
@@ -272,9 +258,6 @@ function buildRecallMaterializationWiringResult(
 ) {
   return {
     globalMemoryService: globalMemoryRuntime.globalMemoryService,
-    globalMemoryRecallService: globalMemoryRuntime.globalMemoryRecallService,
-    globalMemoryRecallInvalidationSubscription:
-      globalMemoryRuntime.globalMemoryRecallInvalidationSubscription,
     embeddingStatusService: recallReadRuntime.embeddingRuntime.embeddingStatusService,
     embeddingProviderWarmup: recallReadRuntime.embeddingRuntime.providerWarmup,
     getEmbeddingProviderDimensions: recallReadRuntime.embeddingRuntime.getProviderDimensions,

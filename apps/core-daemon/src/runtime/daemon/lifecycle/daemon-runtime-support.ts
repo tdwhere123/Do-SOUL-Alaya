@@ -15,9 +15,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   CoreError,
-  ProjectMappingService,
-  createGlobalMemoryRecallPort as createCoreGlobalMemoryRecallPort,
-  type GlobalMemoryRecallServicePort
+  ProjectMappingService
 } from "@do-soul/alaya-core";
 import * as StorageModule from "@do-soul/alaya-storage";
 import {
@@ -317,25 +315,6 @@ export function createGlobalMemoryRouteService(params: {
       input: { readonly workspace_id: string; readonly accepted_by?: AcceptedBy }
     ) => await adoptGlobalMemoryEntry(params.globalMemoryRepo, params.projectMappingService, globalObjectId, input)
   };
-}
-
-export function createGlobalMemoryRecallPort(params: {
-  readonly globalMemoryRepo: GlobalMemoryRepo;
-}): GlobalMemoryRecallServicePort {
-  return createCoreGlobalMemoryRecallPort({
-    globalMemorySource: {
-      list: async () => await params.globalMemoryRepo.list(),
-      ...(params.globalMemoryRepo.listAll === undefined
-        ? {}
-        : { listAll: async () => await params.globalMemoryRepo.listAll!() }),
-      ...(params.globalMemoryRepo.listPage === undefined
-        ? {}
-        : {
-            listPage: async (page: { readonly limit: number; readonly offset: number }) =>
-              await params.globalMemoryRepo.listPage!(undefined, page)
-          })
-    }
-  });
 }
 
 export function createEngineBindingTester(): EngineBindingTestPort {

@@ -54,9 +54,3 @@ export function isWritePathMaterializationDeferral(result: PostTurnSignalReceive
     && result.materialization?.target_kind === "deferred"
     && result.materialization.defer_class === "write_path";
 }
-
-export function createPostTurnSignalReceiver(
-  receiver: Pick<PostTurnSignalReceiver, "receiveSignal">
-): PostTurnSignalReceiver {
-  return { receiveSignal: (signal) => receiver.receiveSignal(signal) };
-}

@@ -1,14 +1,8 @@
 import {
-  type ConversationRuntimeContext,
-  type ConversationToolCatalog,
   type McpServerInfo,
   type ToolProviderToolSpec,
   type ToolSpec
 } from "@do-soul/alaya-protocol";
-import { resolveMcpToolTimeoutMs, withTimeout } from "@do-soul/alaya-engine-gateway";
-import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
-import { executeConversationToolOrThrow } from "../tool-runtime/tool-runtime.js";
-import { isBuiltinConversationToolId } from "../server/builtin-conversation-tool-specs.js";
 import {
   classifyDaemonMcpListFailure,
   MCP_EXTERNAL_ERROR_MESSAGES,
@@ -21,53 +15,11 @@ import type {
   DaemonMcpCatalogToolEntry,
   WarnLogger
 } from "./mcp-catalog-parsing.js";
-import type { DaemonMcpCatalog } from "./mcp-catalog.js";
-
 type DaemonMcpToolRuntimeExecutor = (input: {
   readonly rawInput: unknown;
   readonly writableRoots: readonly string[];
   readonly abortSignal?: AbortSignal;
 }) => Promise< unknown>;
-
-export type DaemonConversationToolRuntimeCatalog = Readonly<{
-  hasTool(toolId: string): boolean;
-  executeTool(input: {
-    readonly toolId: string;
-    readonly rawInput: unknown;
-    readonly runtimeContext: Readonly<ConversationRuntimeContext>;
-    readonly writableRoots: readonly string[];
-    readonly abortSignal?: AbortSignal;
-  }): Promise< unknown>;
-}>;
-
-export function createDaemonConversationToolRuntimeCatalog(input: {
-  readonly conversationToolCatalog: Pick<ConversationToolCatalog, "hasToolName">;
-  readonly daemonMcpCatalog: Pick<DaemonMcpCatalog, "executeTool">;
-}): DaemonConversationToolRuntimeCatalog {
-  return Object.freeze({
-    hasTool: (toolId: string) => input.conversationToolCatalog.hasToolName(toolId),
-    executeTool: async (executionInput) => {
-      if (!input.conversationToolCatalog.hasToolName(executionInput.toolId)) {
-        return {
-          ok: false,
-          code: "MCP_EXTERNAL_UNBOUND",
-          message: `External conversation tool ${executionInput.toolId} is not registered in the daemon catalog.`
-        };
-      }
-
-      if (isBuiltinConversationToolId(executionInput.toolId)) {
-        return await executeCatalogBuiltinConversationTool(
-          executionInput.toolId,
-          executionInput.rawInput,
-          executionInput.writableRoots,
-          executionInput.abortSignal
-        );
-      }
-
-      return await input.daemonMcpCatalog.executeTool(executionInput);
-    }
-  });
-}
 
 export function buildDaemonMcpCatalogState(input: {
   readonly isServerAllowed: (serverName: string) => boolean;
@@ -218,7 +170,7 @@ function createDaemonMcpToolRuntimeExecutor(input: {
       return null;
     }
     const binding = input.tool.runtimeBinding;
-    return async ({ rawInput, writableRoots, abortSignal }) => {
+    return async () => {
       const listed = await listBoundServerTools(input.runtimeRegistry, input.serverName, input.tool.spec.tool_id);
       if (!listed.ok) {
         return listed;
@@ -232,12 +184,11 @@ function createDaemonMcpToolRuntimeExecutor(input: {
         };
       }
 
-      return await executeCatalogBuiltinConversationTool(
-        binding.builtinToolId,
-        rawInput,
-        writableRoots,
-        abortSignal
-      );
+      return {
+        ok: false,
+        code: "MCP_EXTERNAL_UNBOUND",
+        message: `Builtin conversation tool ${binding.builtinToolId} has no bound executor.`
+      };
     };
   }
 
@@ -289,25 +240,6 @@ export async function executeExternalMcpTool(input: {
     writableRoots: input.writableRoots,
     abortSignal: input.abortSignal
   });
-}
-
-async function executeCatalogBuiltinConversationTool(
-  toolId: string,
-  rawInput: unknown,
-  writableRoots: readonly string[],
-  abortSignal?: AbortSignal
-): Promise<unknown> {
-  const execute = async (signal: AbortSignal) =>
-    await executeConversationToolOrThrow(toolId, rawInput, writableRoots, {
-      abortSignal: signal
-    });
-  if (abortSignal !== undefined) {
-    return await execute(abortSignal);
-  }
-  return await withTimeout(
-    (signal) => execute(signal),
-    resolveMcpToolTimeoutMs(processEnvLookup().ALAYA_MCP_TOOL_TIMEOUT_MS)
-  );
 }
 
 export function readCatalogToolLastError(

@@ -13,7 +13,6 @@ import {
   HqAnswerOverlapPairSource
 } from "@do-soul/alaya-core";
 import type { FinalizeDaemonRuntimeWiringInput } from "../../../index.js";
-import { createPostTurnSignalReceiver } from "../../../garden/post-turn-extract/signal-receiver.js";
 import { createDaemonHostSessionCapture, type HostSessionCapture } from "../../../garden/host-session/host-session-capture.js";
 import { admitStatementSessionStructuralRelations } from "../../garden-wiring/session-structural-relations.js";
 import { createStatementSessionExtractionReceipts } from "../../../garden/statement-session/statement-session-extraction-receipts.js";
@@ -86,7 +85,7 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     synthesisEvidenceReader: createSynthesisEvidenceReader(input),
     synthesisMemberResolver: createSynthesisMemberResolver(input),
     signalService: input.signalService,
-    postTurnSignalReceiver: createPostTurnSignalReceiver(input.signalService),
+    postTurnSignalReceiver: input.signalService,
     statementSessionCompletion: {
       receipts: createStatementSessionExtractionReceipts(input.eventLogRepo, input.eventPublisher),
       admitRelations: (evt: Readonly<{ workspaceId: string; runId: string }>) => admitStatementSessionStructuralRelations({
@@ -250,7 +249,6 @@ function createLifecycleControlsInput(input: FinalizeDaemonRuntimeWiringInput) {
     gardenBacklogTelemetryService: input.gardenBacklogTelemetryService,
     gardenRuntime: input.gardenRuntime,
     securityStatusService: input.securityStatusService,
-    globalMemoryRecallInvalidationSubscription: input.globalMemoryRecallInvalidationSubscription,
     requestProtection: input.requestProtection,
     database: input.database,
     temporalRuntimeLease: input.temporalRuntimeLease,

@@ -46,7 +46,8 @@ it("cancels a deferred ACK in the real Worker queue without dispatching it or re
     expect(posts).not.toHaveBeenCalled();
     await page.discard_delivery!();
     expect(posts.mock.calls.map(([message]) => message.operation)).toEqual(["conditionalField.discard"]);
-    await expect(h.client.memoryRepo.findByWorkspaceId(WS)).resolves.toEqual([]);
+    await expect(h.client.activeConstraintsPort.findActiveConstraints({ workspaceId: WS, cap: 8 }))
+      .resolves.toEqual({ constraints: [], total_count: 0 });
   } finally { release.resolve(); await holder; await h.cleanup(); }
 });
 
@@ -115,7 +116,8 @@ it("cancels non-deferred ACK queueing and completes discard outside the cancelle
     expect(posts).not.toHaveBeenCalled();
     release.resolve(); await holder; await discarded.promise;
     expect(posts.mock.calls.map(([message]) => message.operation)).toEqual(["conditionalField.discard"]);
-    await expect(h.client.memoryRepo.findByWorkspaceId(WS)).resolves.toEqual([]);
+    await expect(h.client.activeConstraintsPort.findActiveConstraints({ workspaceId: WS, cap: 8 }))
+      .resolves.toEqual({ constraints: [], total_count: 0 });
   } finally { start.resolve(); release.resolve(); await holder; await h.cleanup(); }
 });
 
@@ -176,8 +178,9 @@ it("retains dispatched ACK occupancy under real native SQLite until Worker exit,
     posts.mockClear();
     await page.discard_delivery!();
     let settled = false;
-    const next = client.memoryRepo.findByWorkspaceId(WS).finally(() => { settled = true; });
-    const result = expect(next).resolves.toEqual([]);
+    const next = client.activeConstraintsPort.findActiveConstraints({ workspaceId: WS, cap: 8 })
+      .finally(() => { settled = true; });
+    const result = expect(next).resolves.toEqual({ constraints: [], total_count: 0 });
     await turn();
     expect(settled).toBe(false); expect(posts).not.toHaveBeenCalled();
     gate.exec("ROLLBACK"); await Promise.all([exited, result]);

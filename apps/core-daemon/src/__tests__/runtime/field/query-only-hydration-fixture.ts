@@ -11,20 +11,14 @@ import {
   SqliteEvidenceCapsuleRepo,
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
-  SqliteSynthesisCapsuleRepo,
   SqliteSourceIndexRepository,
   prepareIndexedRecallProjection,
   StorageDatabase
 } from "@do-soul/alaya-storage";
 import { applySqliteWritePragmas } from
   "../../../../../../packages/storage/src/sqlite/apply-sqlite-write-pragmas.js";
-import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
 import { createBoundRecallPathReadPorts } from
   "../../../runtime/recall/recall-path-read-bind.js";
-import {
-  createWorkerMemoryRepo,
-  type WorkerTierWindowResult
-} from "../../../runtime/recall-read-worker/memory-client.js";
 import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
 import { encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
 import {
@@ -36,14 +30,12 @@ import type { RecallReadWorkerRuntime } from
 import {
   CLOCK,
   EVIDENCE_ID,
-  MEMORY_ID,
   WORKSPACE_ID,
   composeField,
   createPlantedHarness,
   memoryEntry,
   persistMemory,
-  produceAdaSource,
-  realMemoryRepo
+  produceAdaSource
 } from "./source-field-harness.js";
 
 import {
@@ -163,9 +155,7 @@ async function openHydrationFixture(
     writer,
     queryOnly,
     field,
-    directRepo: realMemoryRepo(writer),
-    queryOnlyRuntime,
-    dispatchedMemoryPort: createDispatchedMemoryPort(queryOnlyRuntime)
+    queryOnlyRuntime
   };
 }
 
@@ -194,11 +184,6 @@ export function createQueryOnlyRuntime(database: StorageDatabase): RecallReadWor
   return {
     database,
     memoryEntryRepo: new SqliteMemoryEntryRepo(database),
-    evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(
-      database,
-      verifyOfficialApiSourceLocatorBinding
-    ),
-    synthesisCapsuleRepo: new SqliteSynthesisCapsuleRepo(database),
     claimFormRepo: new SqliteClaimFormRepo(database),
     recallPathReadPorts: createBoundRecallPathReadPorts({ database }),
     closed: false
@@ -235,15 +220,6 @@ export async function dispatchQueryOnly(
     payload: operation === "conditionalField.recall" ? encodeWorkerRecallPayload(payload) : payload
   });
   return structuredClone(await runOperation(runtime, request));
-}
-
-function createDispatchedMemoryPort(runtime: RecallReadWorkerRuntime) {
-  return createWorkerMemoryRepo({
-    request: async <Result>(operation: string, payload: unknown): Promise<Result> =>
-      await dispatchQueryOnly(runtime, operation as never, payload) as Result,
-    readTierWindow: async (query) =>
-      await dispatchQueryOnly(runtime, "memory.findRecallTierWindow", query) as WorkerTierWindowResult
-  });
 }
 
 async function persistHydrationMemories(database: StorageDatabase): Promise<void> {

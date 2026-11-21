@@ -29,7 +29,7 @@ export function normalizeWorkerCount(value: number | undefined): number {
 }
 
 export function isPathAffinityOperation(operation: RecallReadWorkerOperation): boolean {
-  return operation.startsWith("path") || operation === "constraints.findActive";
+  return operation === "constraints.findActive";
 }
 
 export function resolveDefaultWorkerUrl(): URL | null {

@@ -12,12 +12,6 @@ import {
 import { enqueueRecallReadRequest } from "../recall-read-worker/request-queue.js";
 import { attachRecallReadRequestListener } from "../recall-read-worker/unexpected-queue-failure.js";
 import { asPayload, readString } from "../recall-read-worker/payload-readers.js";
-import {
-  parseWorkerOperationPayload,
-  type WorkerOperationPayload
-} from "../recall-read-worker/operation-schemas.js";
-import { readRecallTierWindowQuery } from "../recall-read-worker/memory-window.js";
-import { postRecallTierWindowChunks } from "../recall-read-worker/tier-window-stream.js";
 import { runOperation } from "../recall-read-worker/dispatch.js";
 import { createRecallReadWorkerRuntime } from "../recall-read-worker/runtime.js";
 import { SourceSemanticObserver, SourceSemanticObservationRequestSchema } from "../recall-read-worker/source-semantic-observation.js";
@@ -72,15 +66,6 @@ async function handleRequest(message: unknown): Promise<void> {
           `SELECT 1 FROM source_index_lexical_selections WHERE representation IN ('segmented-unicode61.v1','segmented-unicode61.v2')
             AND active_generation_id IS NOT NULL LIMIT 1`).get() !== undefined) {
       await warmCjkSegmentation();
-    }
-    if (message.operation === "memory.findRecallTierWindow") {
-      const payload: WorkerOperationPayload<"memory.findRecallTierWindow"> =
-        parseWorkerOperationPayload(message.operation, message.payload);
-      const result = await active.memoryEntryRepo.findRecallTierWindow(
-        readRecallTierWindowQuery(payload)
-      );
-      await postRecallTierWindowChunks(message.id, result, postResponse);
-      return;
     }
     const result = await runOperation(active, message, observer);
     postResponse({ id: message.id, ok: true, result, ...(observer === undefined ? {} : { observation: observer.finish("success") }) });

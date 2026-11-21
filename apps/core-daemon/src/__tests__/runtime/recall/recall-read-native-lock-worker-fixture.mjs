@@ -34,6 +34,9 @@ parentPort.on("message", async ({ id, operation, payload }) => {
       record({ kind: "response-held", id });
     });
   }
-  parentPort.postMessage({ id, ok: true, result: operation.startsWith("memory.") ? [] : null });
+  parentPort.postMessage({
+    id, ok: true,
+    result: operation === "constraints.findActive" ? { constraints: [], total_count: 0 } : null
+  });
   record({ kind: "response", id });
 });

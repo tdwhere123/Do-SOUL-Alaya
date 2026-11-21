@@ -61,7 +61,6 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   gardenRuntime: GardenRuntimeLifecycle;
   securityStatusService: Readonly<{ close(): void }>;
   daemonMcpRuntimeRegistry: Readonly<{ close(): Promise<void> }>;
-  globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
   closeEmbeddingProvider?: () => Promise<void>;
   closeSignalService?: () => Promise<void>;
@@ -567,9 +566,6 @@ async function closeRuntimeResources(
   });
   await closeRuntimeResourceStepAsync(input, "daemon MCP runtime registry shutdown failed", async () => {
     await input.daemonMcpRuntimeRegistry.close();
-  });
-  closeRuntimeResourceStep(input, "global memory invalidation subscription dispose failed", () => {
-    input.globalMemoryRecallInvalidationSubscription?.dispose();
   });
   clearLifecycleIntervals(input.intervalsToClear);
   await closeHttpServers(input, state);

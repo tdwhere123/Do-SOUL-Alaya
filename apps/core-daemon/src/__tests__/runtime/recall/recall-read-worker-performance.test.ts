@@ -50,10 +50,14 @@ describe("RecallReadWorkerClient performance seams", () => {
           : readFileSync(`${filename}.events`, "utf8").trim().split("\n").filter(Boolean)
             .map((line) => JSON.parse(line) as { kind: string; payload?: { workspaceId?: string } });
       database.exec("BEGIN EXCLUSIVE");
-      const blocked = client.memoryRepo.findByWorkspaceId("native-lock");
+      const blocked = client.activeConstraintsPort.findActiveConstraints({
+        workspaceId: "native-lock", cap: 8
+      });
       const blockedResult = expect(blocked).rejects.toThrow(/closed/);
       await expect.poll(() => events().some((event) => event.kind === "sql-enter")).toBe(true);
-      const queued = client.memoryRepo.findByWorkspaceId("never-on-close");
+      const queued = client.activeConstraintsPort.findActiveConstraints({
+        workspaceId: "never-on-close", cap: 8
+      });
       const queuedResult = expect(queued).rejects.toThrow(/closed/);
       let firstClosed = false;
       let secondClosed = false;
@@ -73,7 +77,7 @@ describe("RecallReadWorkerClient performance seams", () => {
       expect(secondClosed).toBe(true);
       expect(exited).toBe(true);
       expect(worker.threadId).toBe(-1);
-      await expect(client.memoryRepo.findByWorkspaceId("after-close")).rejects.toThrow(/closed/);
+      await expect(client.ready()).rejects.toThrow(/closed/);
     } finally {
       if (database.inTransaction) database.exec("ROLLBACK");
       await client?.close();
@@ -87,17 +91,13 @@ describe("RecallReadWorkerClient performance seams", () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-pool-test-"));
     const workerPath = join(directory, "delayed-worker.mjs");
     writeFileSync(workerPath, [
-      'import { appendFileSync, readFileSync } from "node:fs";',
-      'import { parentPort, workerData } from "node:worker_threads";',
+      'import { appendFileSync } from "node:fs";',
+      'import { parentPort, threadId, workerData } from "node:worker_threads";',
       'const marker = `${workerData.databaseFilename}.requests`;',
       'parentPort?.on("message", ({ id, operation }) => {',
       '  if (operation === "close") return parentPort?.postMessage({ id, ok: true, result: null });',
-      '  appendFileSync(marker, "request\\n", "utf8");',
-      '  const interval = setInterval(() => {',
-      '    if (readFileSync(marker, "utf8").trim().split("\\n").length < 2) return;',
-      '    clearInterval(interval);',
-      '    parentPort?.postMessage({ id, ok: true, result: [] });',
-      '  }, 5);',
+      '  appendFileSync(marker, `${threadId}\\n`, "utf8");',
+      '  parentPort?.postMessage({ id, ok: true, result: { constraints: [], total_count: 0 } });',
       '});',
       ''
     ].join("\n"));
@@ -111,9 +111,14 @@ describe("RecallReadWorkerClient performance seams", () => {
       expect(client).not.toBeNull();
       if (client === null) return;
       await expect(Promise.all([
-        client.memoryRepo.findByWorkspaceId("workspace-1"),
-        client.memoryRepo.findByWorkspaceId("workspace-2")
-      ])).resolves.toEqual([[], []]);
+        client.activeConstraintsPort.findActiveConstraints({ workspaceId: "workspace-1", cap: 8 }),
+        client.activeConstraintsPort.findActiveConstraints({ workspaceId: "workspace-2", cap: 8 })
+      ])).resolves.toEqual([
+        { constraints: [], total_count: 0 },
+        { constraints: [], total_count: 0 }
+      ]);
+      expect(readFileSync(`${join(directory, "alaya.db")}.requests`, "utf8").trim().split("\n"))
+        .toHaveLength(2);
     } finally {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
@@ -142,43 +147,4 @@ describe("RecallReadWorkerClient performance seams", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   }, 30_000);
-
-  it("sends tier-scoped recall reads without an object-id payload", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-tier-payload-"));
-    const workerPath = join(directory, "capture-worker.mjs");
-    writeFileSync(workerPath, [
-      'import { appendFileSync } from "node:fs";',
-      'import { parentPort, workerData } from "node:worker_threads";',
-      'parentPort?.on("message", ({ id, operation, payload }) => {',
-      '  appendFileSync(`${workerData.databaseFilename}.payloads`, `${JSON.stringify({ operation, payload })}\\n`, "utf8");',
-      '  const result = operation === "memory.findRecallTierWindow"',
-      '    ? { kind: "recall-tier-window-chunk", memories: [], next_cursor: null, truncated: false, done: true }',
-      '    : operation === "close" ? null : [];',
-      '  parentPort?.postMessage({ id, ok: true, result });',
-      '});',
-      ''
-    ].join("\n"));
-    const databasePath = join(directory, "alaya.db");
-    const client = createRecallReadWorkerClient({
-      databaseFilename: databasePath,
-      workerUrl: pathToFileURL(workerPath),
-      workerCount: 1
-    });
-    try {
-      expect(client).not.toBeNull();
-      if (client === null) return;
-      await client.memoryRepo.findRecallTierWindow!({ workspaceId: "workspace-1", tier: "hot", limit: 500 });
-      await client.memoryRepo.searchByKeywordWithinTier!("workspace-1", "needle", 5, "hot");
-      const messages = readFileSync(`${databasePath}.payloads`, "utf8").trim().split("\n")
-        .map((line) => JSON.parse(line) as { operation: string; payload: Record<string, unknown> });
-      expect(messages.map((message) => message.operation)).toEqual([
-        "memory.findRecallTierWindow",
-        "memory.searchByKeywordWithinTier"
-      ]);
-      expect(messages.every((message) => !("objectIds" in message.payload))).toBe(true);
-    } finally {
-      await client?.close();
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
 });
