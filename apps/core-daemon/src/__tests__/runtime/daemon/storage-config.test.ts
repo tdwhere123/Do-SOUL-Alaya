@@ -73,7 +73,7 @@ db_path = "folder\tname.db"`)).toBe(String.raw`folder\tname.db`);
     }
   });
 
-  it("stops [storage] parsing at [[array.of.tables]] headers and matches daemon .env DATA_DIR precedence", async () => {
+  it("stops [storage] parsing at [[array.of.tables]] headers and ignores .env DATA_DIR per allowlist contract", async () => {
     expect(
       parseStorageDbPathFromToml("[storage]\n[[backup.targets]]\ndb_path = \"ignored/backup.db\"\n")
     ).toBeNull();
@@ -91,20 +91,20 @@ db_path = "folder\tname.db"`)).toBe(String.raw`folder\tname.db`);
 
     const envWithoutDataDir: NodeJS.ProcessEnv = { ...process.env, ALAYA_CONFIG_DIR: configDir };
     delete envWithoutDataDir.DATA_DIR;
-    const expectedFromDotenv = path.join(launchCwd, "dotenv-data", "alaya.db");
+    const fallbackDb = path.join(configDir, "alaya.db");
     expect(
       await resolveConfiguredDatabasePath(resolveAlayaConfigPaths(configDir), {
         env: envWithoutDataDir,
         launchCwd,
-        fallbackPath: path.join(configDir, "alaya.db")
+        fallbackPath: fallbackDb
       })
-    ).toBe(expectedFromDotenv);
+    ).toBe(fallbackDb);
     const locatorFromDotenv = execFileSync(process.execPath, [locator], {
       cwd: launchCwd,
       env: envWithoutDataDir,
       encoding: "utf8"
     });
-    expect(locatorFromDotenv.trim().split("\t")).toEqual([configDir, expectedFromDotenv]);
+    expect(locatorFromDotenv.trim().split("\t")).toEqual([configDir, fallbackDb]);
 
     const envWithProcessDataDir = { ...envWithoutDataDir, DATA_DIR: "process-data" };
     const expectedFromProcess = path.join(launchCwd, "process-data", "alaya.db");

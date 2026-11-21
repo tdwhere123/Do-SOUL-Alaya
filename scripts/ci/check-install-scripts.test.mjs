@@ -574,7 +574,7 @@ test("configured-paths parses comments and single-quoted TOML db_path and reject
   );
 });
 
-test("live db locator reads DATA_DIR from config-dir .env when process.env.DATA_DIR is unset", () => {
+test("live db locator ignores unallowlisted .env DATA_DIR and honors process.env.DATA_DIR", () => {
   const work = mkdtempSync(path.join(tmpdir(), "alaya-locator-dotenv-"));
   try {
     const configDir = path.join(work, "config");
@@ -582,7 +582,7 @@ test("live db locator reads DATA_DIR from config-dir .env when process.env.DATA_
     writeFileSync(path.join(configDir, ".env"), "DATA_DIR=dotenv-data\n");
 
     const fromDotenv = locateLiveDb({ ALAYA_CONFIG_DIR: configDir }, work);
-    assert.equal(fromDotenv.dbPath, path.join(work, "dotenv-data", "alaya.db"));
+    assert.equal(fromDotenv.dbPath, path.join(configDir, "alaya.db"));
 
     const overriddenByEnv = locateLiveDb({ ALAYA_CONFIG_DIR: configDir, DATA_DIR: "env-data" }, work);
     assert.equal(overriddenByEnv.dbPath, path.join(work, "env-data", "alaya.db"));

@@ -154,7 +154,7 @@ async function createRuntimeBootstrapContext() {
   warnLogger.info("effective recall runtime", {
     projections_enabled: getCoreConfig().recall.projectionsEnabled
   });
-  const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"), effectiveEnv as NodeJS.ProcessEnv);
+  const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"), process.env);
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const { database, temporalRuntimeLease } = await openRuntimeDatabase(dbPath, runtimeNotifier, warnLogger.warn);
   recordStartupStep(startupSteps, "database");

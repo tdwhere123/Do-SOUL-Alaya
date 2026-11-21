@@ -15,5 +15,5 @@ export async function resolveConfiguredDatabasePath(
   configPaths: AlayaConfigPaths,
   options: ResolveConfiguredDatabasePathOptions
 ): Promise<string> {
-  return resolvePath(configPaths.tomlPath, options.env ?? {}, options.fallbackPath, options.launchCwd, configPaths.envPath);
+  return resolvePath(configPaths.tomlPath, options.env ?? {}, options.fallbackPath, options.launchCwd);
 }

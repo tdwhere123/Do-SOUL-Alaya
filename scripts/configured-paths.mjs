@@ -25,20 +25,10 @@ export function resolveAlayaConfigDir(environment, platform = process.platform, 
   return path.resolve(resolveHomeDirectory(environment, homeDir), ".config", "alaya");
 }
 
-export function resolveConfiguredDatabasePath(
-  tomlPath,
-  environment,
-  fallbackPath,
-  launchCwd = process.cwd(),
-  envPath = path.join(path.dirname(tomlPath), ".env")
-) {
-  const effectiveEnvironment =
-    environment.DATA_DIR !== undefined
-      ? environment
-      : { ...environment, DATA_DIR: readConfigEnvDataDir(envPath) };
+export function resolveConfiguredDatabasePath(tomlPath, environment, fallbackPath, launchCwd = process.cwd()) {
   return resolveConfiguredDatabasePathFromToml(
     readOptionalFile(tomlPath),
-    effectiveEnvironment,
+    environment,
     fallbackPath,
     launchCwd
   );
@@ -68,36 +58,6 @@ function readOptionalFile(filePath) {
     }
     throw error;
   }
-}
-
-function readConfigEnvDataDir(envPath) {
-  const content = readOptionalFile(envPath);
-  if (content === null) {
-    return undefined;
-  }
-  let found;
-  for (const rawLine of content.split(/\r?\n/u)) {
-    const line = rawLine.trim();
-    if (line.length === 0 || line.startsWith("#")) {
-      continue;
-    }
-    const separator = line.indexOf("=");
-    if (separator <= 0 || line.slice(0, separator).trim() !== "DATA_DIR") {
-      continue;
-    }
-    found = parseDotEnvValue(line.slice(separator + 1).trim());
-  }
-  return found;
-}
-
-function parseDotEnvValue(rawValue) {
-  if (rawValue.startsWith("\"")) {
-    if (!rawValue.endsWith("\"") || rawValue.length === 1) {
-      throw new Error("Invalid quoted .env value for DATA_DIR.");
-    }
-    return rawValue.slice(1, -1).replace(/\\(["\\])/gu, "$1");
-  }
-  return rawValue;
 }
 
 export function parseStorageDbPathFromToml(tomlContent) {

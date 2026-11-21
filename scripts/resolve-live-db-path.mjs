@@ -12,8 +12,7 @@ if (process.argv.includes("--config-dir")) {
     path.join(configDir, "alaya.toml"),
     process.env,
     path.join(configDir, "alaya.db"),
-    process.cwd(),
-    path.join(configDir, ".env")
+    process.cwd()
   );
   process.stdout.write(`${configDir}\t${dbPath}\n`);
 }
