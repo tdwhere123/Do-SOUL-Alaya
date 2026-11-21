@@ -1,272 +1,113 @@
 import { z } from "zod";
 import * as Payloads from "./payloads.js";
+import { RuntimeGovernanceEventType, runtimeGovernancePayloadSchemas } from "./payloads.js";
 
-function createRuntimeGovernanceEventObjectSchema<T extends keyof typeof Payloads.runtimeGovernancePayloadSchemas>(
-  type: T,
-  payloadSchema: (typeof Payloads.runtimeGovernancePayloadSchemas)[T]
-) {
+type PayloadSchemas = typeof runtimeGovernancePayloadSchemas;
+type EventType = keyof PayloadSchemas;
+
+function createEventObjectSchema<T extends EventType>(type: T) {
   return z.object({
     type: z.literal(type),
-    payload: payloadSchema
+    payload: runtimeGovernancePayloadSchemas[type]
   });
 }
 
-const CanonicalizationAppliedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.CANONICALIZATION_APPLIED,
-  Payloads.CanonicalizationAppliedPayloadSchema
-);
-const CanonicalizationAliasResolvedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.CANONICALIZATION_ALIAS_RESOLVED,
-  Payloads.CanonicalizationAliasResolvedPayloadSchema
-);
-const StancePolicyEvaluatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.STANCE_POLICY_EVALUATED,
-  Payloads.StancePolicyEvaluatedPayloadSchema
-);
-const StanceResolutionChangedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.STANCE_RESOLUTION_CHANGED,
-  Payloads.StanceResolutionChangedPayloadSchema
-);
-const ComputeProviderRoutedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.COMPUTE_PROVIDER_ROUTED,
-  Payloads.ComputeProviderRoutedPayloadSchema
-);
-const BootstrappingPathsPlantedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.BOOTSTRAPPING_PATHS_PLANTED,
-  Payloads.BootstrappingPathsPlantedPayloadSchema
-);
-const PathRelationCreatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_CREATED,
-  Payloads.PathRelationCreatedPayloadSchema
-);
-const PathRelationRejectedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_REJECTED,
-  Payloads.PathRelationRejectedPayloadSchema
-);
-const PathRelationLegitimacyUpdatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED,
-  Payloads.PathRelationLegitimacyUpdatedPayloadSchema
-);
-const PathRelationReinforcedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_REINFORCED,
-  Payloads.PathRelationReinforcedPayloadSchema
-);
-const PathRelationWeakenedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_WEAKENED,
-  Payloads.PathRelationWeakenedPayloadSchema
-);
-const PathRelationRedirectedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED,
-  Payloads.PathRelationRedirectedPayloadSchema
-);
-const PathRelationRetiredEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_RETIRED,
-  Payloads.PathRelationRetiredPayloadSchema
-);
-const PathRelationDormantEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_DORMANT,
-  Payloads.PathRelationDormantPayloadSchema
-);
-const PathRelationRevivedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_REVIVED,
-  Payloads.PathRelationRevivedPayloadSchema
-);
-const PathRelationMergedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_RELATION_MERGED,
-  Payloads.PathRelationMergedPayloadSchema
-);
-const SurfaceDriftDetectedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED,
-  Payloads.SurfaceDriftDetectedPayloadSchema
-);
-const SurfaceDriftLeaseAcquiredEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_ACQUIRED,
-  Payloads.SurfaceDriftLeaseAcquiredPayloadSchema
-);
-const SurfaceDriftLeaseReleasedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASED,
-  Payloads.SurfaceDriftLeaseReleasedPayloadSchema
-);
-const SurfaceDriftLeaseReleaseFailedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASE_FAILED,
-  Payloads.SurfaceDriftLeaseReleaseFailedPayloadSchema
-);
-const SurfaceDriftAlertEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.SURFACE_DRIFT_ALERT,
-  Payloads.SurfaceDriftAlertPayloadSchema
-);
-const PathGraphSnapshotCreatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED,
-  Payloads.PathGraphSnapshotCreatedPayloadSchema
-);
-const PathConsolidationCompletedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_CONSOLIDATION_COMPLETED,
-  Payloads.PathConsolidationCompletedPayloadSchema
-);
-const PathConsolidationFusedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.PATH_CONSOLIDATION_FUSED,
-  Payloads.PathConsolidationFusedPayloadSchema
-);
-const OutputShapingAppliedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.OUTPUT_SHAPING_APPLIED,
-  Payloads.OutputShapingAppliedPayloadSchema
-);
-const OutputCommandCompressedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.OUTPUT_COMMAND_COMPRESSED,
-  Payloads.OutputCommandCompressedPayloadSchema
-);
-const ManifestationBudgetEvaluatedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED,
-  Payloads.ManifestationBudgetEvaluatedPayloadSchema
-);
-const ManifestationEscalationDecidedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED,
-  Payloads.ManifestationEscalationDecidedPayloadSchema
-);
-const SecurityPassthroughStatusChangedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED,
-  Payloads.SecurityPassthroughStatusChangedPayloadSchema
-);
-const SecurityPassthroughInitializationFailedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_INITIALIZATION_FAILED,
-  Payloads.SecurityPassthroughInitializationFailedPayloadSchema
-);
-const ExtensionDescriptorRegisteredEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTERED,
-  Payloads.ExtensionDescriptorRegisteredPayloadSchema
-);
-const ExtensionDescriptorRegistrationRevertedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_REVERTED,
-  Payloads.ExtensionDescriptorRegistrationRevertedPayloadSchema
-);
-const ExtensionDescriptorRegistrationCompensationFailedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_COMPENSATION_FAILED,
-  Payloads.ExtensionDescriptorRegistrationCompensationFailedPayloadSchema
-);
-const ExtensionToolDiscoveredEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.EXTENSION_TOOL_DISCOVERED,
-  Payloads.ExtensionToolDiscoveredPayloadSchema
-);
-const ExtensionGovernanceCheckedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.EXTENSION_GOVERNANCE_CHECKED,
-  Payloads.ExtensionGovernanceCheckedPayloadSchema
-);
-const RuntimeSideEffectFailedEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED,
-  Payloads.RuntimeSideEffectFailedPayloadSchema
-);
-const ConstitutionalFragmentRegisteredEventObjectSchema = createRuntimeGovernanceEventObjectSchema(
-  Payloads.RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
-  Payloads.ConstitutionalFragmentRegisteredPayloadSchema
-);
+type EventObjectSchemas = { [T in EventType]: ReturnType<typeof createEventObjectSchema<T>> };
 
-export const CanonicalizationAppliedEventSchema = CanonicalizationAppliedEventObjectSchema.readonly();
+// Object.keys and fromEntries erase the key/schema association.
+const eventObjects = Object.fromEntries(
+  (Object.keys(runtimeGovernancePayloadSchemas) as EventType[]).map((type) => [type, createEventObjectSchema(type)])
+) as EventObjectSchemas;
+
+export const CanonicalizationAppliedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.CANONICALIZATION_APPLIED].readonly();
 export const CanonicalizationAliasResolvedEventSchema =
-  CanonicalizationAliasResolvedEventObjectSchema.readonly();
-export const StancePolicyEvaluatedEventSchema = StancePolicyEvaluatedEventObjectSchema.readonly();
-export const StanceResolutionChangedEventSchema = StanceResolutionChangedEventObjectSchema.readonly();
-export const ComputeProviderRoutedEventSchema = ComputeProviderRoutedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.CANONICALIZATION_ALIAS_RESOLVED].readonly();
+export const StancePolicyEvaluatedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.STANCE_POLICY_EVALUATED].readonly();
+export const StanceResolutionChangedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.STANCE_RESOLUTION_CHANGED].readonly();
+export const ComputeProviderRoutedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.COMPUTE_PROVIDER_ROUTED].readonly();
 export const BootstrappingPathsPlantedEventSchema =
-  BootstrappingPathsPlantedEventObjectSchema.readonly();
-export const PathRelationCreatedEventSchema = PathRelationCreatedEventObjectSchema.readonly();
-export const PathRelationRejectedEventSchema = PathRelationRejectedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.BOOTSTRAPPING_PATHS_PLANTED].readonly();
+export const PathRelationCreatedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_CREATED].readonly();
+export const PathRelationRejectedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_REJECTED].readonly();
 export const PathRelationLegitimacyUpdatedEventSchema =
-  PathRelationLegitimacyUpdatedEventObjectSchema.readonly();
-export const PathRelationReinforcedEventSchema = PathRelationReinforcedEventObjectSchema.readonly();
-export const PathRelationWeakenedEventSchema = PathRelationWeakenedEventObjectSchema.readonly();
-export const PathRelationRedirectedEventSchema = PathRelationRedirectedEventObjectSchema.readonly();
-export const PathRelationRetiredEventSchema = PathRelationRetiredEventObjectSchema.readonly();
-export const PathRelationDormantEventSchema = PathRelationDormantEventObjectSchema.readonly();
-export const PathRelationRevivedEventSchema = PathRelationRevivedEventObjectSchema.readonly();
-export const PathRelationMergedEventSchema = PathRelationMergedEventObjectSchema.readonly();
-export const SurfaceDriftDetectedEventSchema = SurfaceDriftDetectedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_LEGITIMACY_UPDATED].readonly();
+export const PathRelationReinforcedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_REINFORCED].readonly();
+export const PathRelationWeakenedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_WEAKENED].readonly();
+export const PathRelationRedirectedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_REDIRECTED].readonly();
+export const PathRelationRetiredEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_RETIRED].readonly();
+export const PathRelationDormantEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_DORMANT].readonly();
+export const PathRelationRevivedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_REVIVED].readonly();
+export const PathRelationMergedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_RELATION_MERGED].readonly();
+export const SurfaceDriftDetectedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.SURFACE_DRIFT_DETECTED].readonly();
 export const SurfaceDriftLeaseAcquiredEventSchema =
-  SurfaceDriftLeaseAcquiredEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_ACQUIRED].readonly();
 export const SurfaceDriftLeaseReleasedEventSchema =
-  SurfaceDriftLeaseReleasedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASED].readonly();
 export const SurfaceDriftLeaseReleaseFailedEventSchema =
-  SurfaceDriftLeaseReleaseFailedEventObjectSchema.readonly();
-export const SurfaceDriftAlertEventSchema = SurfaceDriftAlertEventObjectSchema.readonly();
-export const PathGraphSnapshotCreatedEventSchema = PathGraphSnapshotCreatedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.SURFACE_DRIFT_LEASE_RELEASE_FAILED].readonly();
+export const SurfaceDriftAlertEventSchema =
+  eventObjects[RuntimeGovernanceEventType.SURFACE_DRIFT_ALERT].readonly();
+export const PathGraphSnapshotCreatedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_GRAPH_SNAPSHOT_CREATED].readonly();
 export const PathConsolidationCompletedEventSchema =
-  PathConsolidationCompletedEventObjectSchema.readonly();
-export const PathConsolidationFusedEventSchema = PathConsolidationFusedEventObjectSchema.readonly();
-export const OutputShapingAppliedEventSchema = OutputShapingAppliedEventObjectSchema.readonly();
-export const OutputCommandCompressedEventSchema = OutputCommandCompressedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.PATH_CONSOLIDATION_COMPLETED].readonly();
+export const PathConsolidationFusedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.PATH_CONSOLIDATION_FUSED].readonly();
+export const OutputShapingAppliedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.OUTPUT_SHAPING_APPLIED].readonly();
+export const OutputCommandCompressedEventSchema =
+  eventObjects[RuntimeGovernanceEventType.OUTPUT_COMMAND_COMPRESSED].readonly();
 export const ManifestationBudgetEvaluatedEventSchema =
-  ManifestationBudgetEvaluatedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED].readonly();
 export const ManifestationEscalationDecidedEventSchema =
-  ManifestationEscalationDecidedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED].readonly();
 export const SecurityPassthroughStatusChangedEventSchema =
-  SecurityPassthroughStatusChangedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_STATUS_CHANGED].readonly();
 export const SecurityPassthroughInitializationFailedEventSchema =
-  SecurityPassthroughInitializationFailedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.SECURITY_PASSTHROUGH_INITIALIZATION_FAILED].readonly();
 export const ExtensionDescriptorRegisteredEventSchema =
-  ExtensionDescriptorRegisteredEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTERED].readonly();
 export const ExtensionDescriptorRegistrationRevertedEventSchema =
-  ExtensionDescriptorRegistrationRevertedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_REVERTED].readonly();
 export const ExtensionDescriptorRegistrationCompensationFailedEventSchema =
-  ExtensionDescriptorRegistrationCompensationFailedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_COMPENSATION_FAILED].readonly();
 export const ExtensionToolDiscoveredEventSchema =
-  ExtensionToolDiscoveredEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.EXTENSION_TOOL_DISCOVERED].readonly();
 export const ExtensionGovernanceCheckedEventSchema =
-  ExtensionGovernanceCheckedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.EXTENSION_GOVERNANCE_CHECKED].readonly();
 export const RuntimeSideEffectFailedEventSchema =
-  RuntimeSideEffectFailedEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED].readonly();
 export const ConstitutionalFragmentRegisteredEventSchema =
-  ConstitutionalFragmentRegisteredEventObjectSchema.readonly();
+  eventObjects[RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED].readonly();
 
-export const RuntimeGovernanceEventUnionSchema = z
-  .discriminatedUnion("type", [
-    CanonicalizationAppliedEventObjectSchema,
-    CanonicalizationAliasResolvedEventObjectSchema,
-    StancePolicyEvaluatedEventObjectSchema,
-    StanceResolutionChangedEventObjectSchema,
-    ComputeProviderRoutedEventObjectSchema,
-    BootstrappingPathsPlantedEventObjectSchema,
-    PathRelationCreatedEventObjectSchema,
-    PathRelationRejectedEventObjectSchema,
-    PathRelationLegitimacyUpdatedEventObjectSchema,
-    PathRelationReinforcedEventObjectSchema,
-    PathRelationWeakenedEventObjectSchema,
-    PathRelationRedirectedEventObjectSchema,
-    PathRelationRetiredEventObjectSchema,
-    PathRelationDormantEventObjectSchema,
-    PathRelationRevivedEventObjectSchema,
-    PathRelationMergedEventObjectSchema,
-    SurfaceDriftDetectedEventObjectSchema,
-    SurfaceDriftLeaseAcquiredEventObjectSchema,
-    SurfaceDriftLeaseReleasedEventObjectSchema,
-    SurfaceDriftLeaseReleaseFailedEventObjectSchema,
-    SurfaceDriftAlertEventObjectSchema,
-    PathGraphSnapshotCreatedEventObjectSchema,
-    PathConsolidationCompletedEventObjectSchema,
-    PathConsolidationFusedEventObjectSchema,
-    OutputShapingAppliedEventObjectSchema,
-    OutputCommandCompressedEventObjectSchema,
-    ManifestationBudgetEvaluatedEventObjectSchema,
-    ManifestationEscalationDecidedEventObjectSchema,
-    SecurityPassthroughStatusChangedEventObjectSchema,
-    SecurityPassthroughInitializationFailedEventObjectSchema,
-    ExtensionDescriptorRegisteredEventObjectSchema,
-    ExtensionDescriptorRegistrationRevertedEventObjectSchema,
-    ExtensionDescriptorRegistrationCompensationFailedEventObjectSchema,
-    ExtensionToolDiscoveredEventObjectSchema,
-    ExtensionGovernanceCheckedEventObjectSchema,
-    RuntimeSideEffectFailedEventObjectSchema,
-    ConstitutionalFragmentRegisteredEventObjectSchema
-  ])
-  .readonly();
+type EventObject = EventObjectSchemas[EventType];
+const eventOptions = Object.values(eventObjects) as [EventObject, ...EventObject[]];
+
+export const RuntimeGovernanceEventUnionSchema = z.discriminatedUnion("type", eventOptions).readonly();
 
 export type RuntimeGovernanceEventPayloadMap = {
-  [K in keyof typeof Payloads.runtimeGovernancePayloadSchemas]: z.infer<(typeof Payloads.runtimeGovernancePayloadSchemas)[K]>;
+  [K in keyof PayloadSchemas]: z.infer<(PayloadSchemas)[K]>;
 };
 
-export function parseRuntimeGovernanceEventPayload<T extends keyof typeof Payloads.runtimeGovernancePayloadSchemas>(
+export function parseRuntimeGovernanceEventPayload<T extends keyof PayloadSchemas>(
   type: T,
   payload: Record<string, unknown>
 ): RuntimeGovernanceEventPayloadMap[T] {
-  const schema = Payloads.runtimeGovernancePayloadSchemas[type];
+  const schema = runtimeGovernancePayloadSchemas[type];
 
   if (schema === undefined) {
     throw new Error(`Unknown runtime-governance event type: ${String(type)}`);

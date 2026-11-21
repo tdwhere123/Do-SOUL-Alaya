@@ -1,5 +1,6 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import {
+  MEMORY_ENTRY_PROPOSAL_UPDATE_SQL,
   prepareMemoryEntryEvidenceRefIndexStatements,
   type MemoryEntryEvidenceRefIndexStatements
 } from "../../memory-entry/statements/memory-entry-statement-groups.js";
@@ -202,18 +203,7 @@ const PROPOSAL_MEMORY_APPLY_SQL: SqlDefinitionMap<ProposalMemoryApplyCoreStateme
       WHERE object_id = ?
       LIMIT 1
     `,
-  updateMemoryEntryStatement: `
-      UPDATE memory_entries
-      SET
-        content = COALESCE(?, content),
-        domain_tags = COALESCE(?, domain_tags),
-        evidence_refs = COALESCE(?, evidence_refs),
-        storage_tier = COALESCE(?, storage_tier),
-        confidence = COALESCE(?, confidence),
-        retention_state = COALESCE(?, retention_state),
-        updated_at = ?
-      WHERE object_id = ?
-    `,
+  updateMemoryEntryStatement: MEMORY_ENTRY_PROPOSAL_UPDATE_SQL,
   findRevokableGreenStatusStatement: `
       SELECT object_id
       FROM green_statuses

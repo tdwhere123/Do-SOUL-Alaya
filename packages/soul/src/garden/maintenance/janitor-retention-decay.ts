@@ -8,10 +8,13 @@ export interface JanitorRetentionDecayPort {
 export async function runJanitorRetentionDecayScan(
   port: JanitorRetentionDecayPort | undefined,
   workspaceId: string
-): Promise<string> {
+): Promise<Readonly<{ outcome: "completed" | "skipped"; auditEntry: string }>> {
   if (port === undefined) {
-    return "[SKIPPED] retention_decay_scan: port not wired";
+    return { outcome: "skipped", auditEntry: "[SKIPPED] retention_decay_scan: port not wired" };
   }
   const result = await port.scanRetentionDecay(workspaceId);
-  return `retention_decay_scan: updated ${result.updated_count} hot memories (${result.manifestation_changes} manifestation changes) in ${workspaceId}`;
+  return {
+    outcome: "completed",
+    auditEntry: `retention_decay_scan: updated ${result.updated_count} hot memories (${result.manifestation_changes} manifestation changes) in ${workspaceId}`
+  };
 }

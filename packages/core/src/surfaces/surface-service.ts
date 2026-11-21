@@ -189,6 +189,7 @@ export class SurfaceService {
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => {});
     this.driftCoordinator = new SurfaceDriftCoordinator({
+      entity: "status",
       surfaceDriftService: dependencies.surfaceDriftService,
       warn: this.warn
     });
@@ -299,56 +300,20 @@ export class SurfaceService {
     );
 
     try {
-      const occurredAt = this.now();
-      const event: SurfaceEventDraft = {
-        event_type: SurfaceEventType.SOUL_SURFACE_STATUS_CHANGED,
-        entity_type: "surface_identity",
-        entity_id: existing.object_id,
-        workspace_id: existing.workspace_id,
-        run_id: null,
-        caused_by: parsedCausedBy,
-        payload_json: SoulSurfaceStatusChangedPayloadSchema.parse({
-          object_id: existing.object_id,
-          object_kind: existing.object_kind,
-          workspace_id: existing.workspace_id,
-          run_id: null,
-          surface_id: existing.surface_id,
-          from_status: existing.surface_status,
-          to_status: parsedStatus,
-          reason_code: parsedReason,
-          caused_by: parsedCausedBy,
-          occurred_at: occurredAt
-        })
-      };
+      const updated = await this.applyStatusTransition(existing, parsedStatus, parsedReason, parsedCausedBy);
 
-      const updated = await this.dependencies.surfaceIdentityRepo.updateStatusWithEvent(
-        existing.object_id,
-        parsedStatus,
-        occurredAt,
-        event
-      );
-
-      await this.dependencies.runtimeNotifier.notifyEntry(updated.event);
-
-      if (
-        parsedStatus === SurfaceStatus.REVOKED &&
-        this.dependencies.surfaceBindingCascader !== undefined
-      ) {
-        await this.dependencies.surfaceBindingCascader.cascadeDetachBySurfaceId(
-          updated.identity.surface_id,
-          updated.identity.workspace_id
-        );
-      }
-
-      await this.driftCoordinator.classifyStatusDriftSafely({
+      await this.driftCoordinator.classifyDriftSafely({
         workspaceId: existing.workspace_id,
         operationType: "surface.transition_status",
-        surfaceId: existing.surface_id,
-        fromStatus: existing.surface_status,
-        toStatus: parsedStatus,
-        driftType: parsedStatus === SurfaceStatus.REVOKED ? "policy_override" : "scope_change"
+        driftType: parsedStatus === SurfaceStatus.REVOKED ? "policy_override" : "scope_change",
+        description: `Surface ${existing.surface_id} status changed from ${existing.surface_status} to ${parsedStatus}`,
+        warningContext: {
+          surfaceId: existing.surface_id,
+          fromStatus: existing.surface_status,
+          toStatus: parsedStatus
+        }
       });
-      return updated.identity;
+      return updated;
     } finally {
       await this.driftCoordinator.releaseLeaseSafely({
         leaseId: driftLeaseId,
@@ -357,6 +322,52 @@ export class SurfaceService {
         releasedBy: parsedCausedBy
       });
     }
+  }
+
+  private async applyStatusTransition(
+    existing: Readonly<SurfaceIdentity>, status: SurfaceStatusType, reason: string, causedBy: TransitionCausedBy
+  ): Promise<Readonly<SurfaceIdentity>> {
+    const occurredAt = this.now();
+    const event: SurfaceEventDraft = {
+      event_type: SurfaceEventType.SOUL_SURFACE_STATUS_CHANGED,
+      entity_type: "surface_identity",
+      entity_id: existing.object_id,
+      workspace_id: existing.workspace_id,
+      run_id: null,
+      caused_by: causedBy,
+      payload_json: SoulSurfaceStatusChangedPayloadSchema.parse({
+        object_id: existing.object_id,
+        object_kind: existing.object_kind,
+        workspace_id: existing.workspace_id,
+        run_id: null,
+        surface_id: existing.surface_id,
+        from_status: existing.surface_status,
+        to_status: status,
+        reason_code: reason,
+        caused_by: causedBy,
+        occurred_at: occurredAt
+      })
+    };
+
+    const updated = await this.dependencies.surfaceIdentityRepo.updateStatusWithEvent(
+      existing.object_id,
+      status,
+      occurredAt,
+      event
+    );
+
+    await this.dependencies.runtimeNotifier.notifyEntry(updated.event);
+
+    if (
+      status === SurfaceStatus.REVOKED &&
+      this.dependencies.surfaceBindingCascader !== undefined
+    ) {
+      await this.dependencies.surfaceBindingCascader.cascadeDetachBySurfaceId(
+        updated.identity.surface_id,
+        updated.identity.workspace_id
+      );
+    }
+    return updated.identity;
   }
 
   public async addAnchor(input: {

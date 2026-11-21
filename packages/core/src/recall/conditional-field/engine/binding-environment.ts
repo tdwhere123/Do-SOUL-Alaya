@@ -220,8 +220,11 @@ export function evaluateGuard(
 ): GuardDecision {
   // Inbound verdict is an observer/output stamp, not a Core fact.
   const filters = decodeSourceFilters(guard.predicate_name);
+  if (filters === undefined) return evaluateGuardKind(guard, env, facts, endpoints);
+
   const objectId = objectForFilters(guard, env, endpoints);
-  const filtered = filters === undefined ? "true" : sourceFactsSatisfyFilters(filters, objectId === undefined ? undefined : facts.get(objectId));
+  const filtered = sourceFactsSatisfyFilters(filters, objectId === undefined ? undefined : facts.get(objectId));
+  if (guard.kind === "query_predicate") return filtered;
   const decision = evaluateGuardKind(guard, env, facts, endpoints);
   if (filtered === "false" || decision === "false") return "false";
   return filtered === "unresolved" || decision === "unresolved" ? "unresolved" : "true";
@@ -356,16 +359,10 @@ function evaluateQueryPredicate(
     });
   }
   if (classified.kind === "unknown") return "unresolved";
-  const filters = decodeSourceFilters(guard.predicate_name);
-  if (filters === undefined) {
-    if (guard.predicate_name === undefined) return "true";
-    const id = objectForFilters(guard, env, endpoints);
-    const observed = id === undefined ? undefined : facts.get(id)?.predicates?.[guard.predicate_name];
-    return observed === undefined ? "unresolved" : observed ? "true" : "false";
-  }
-  const objectId = objectForFilters(guard, env, endpoints);
-  if (objectId === undefined) return "unresolved";
-  return sourceFactsSatisfyFilters(filters, facts.get(objectId));
+  if (guard.predicate_name === undefined) return "true";
+  const id = objectForFilters(guard, env, endpoints);
+  const observed = id === undefined ? undefined : facts.get(id)?.predicates?.[guard.predicate_name];
+  return observed === undefined ? "unresolved" : observed ? "true" : "false";
 }
 
 function objectForFilters(

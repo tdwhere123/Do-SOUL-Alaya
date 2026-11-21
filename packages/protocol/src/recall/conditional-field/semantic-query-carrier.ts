@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SOURCE_SEMANTIC_MAX_BYTES } from "../../garden/source-semantic-draft.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
+import { utf8ByteLength } from "../../shared/utf8-byte-length.js";
 import {
   SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH,
   SourceSemanticQueryCarrierBodySchema,
@@ -38,11 +39,12 @@ export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readon
   });
   const raw = JSON.stringify(value);
   if (raw === undefined) fail("query carrier requires JSON structure");
-  if (Buffer.byteLength(raw, "utf8") > SOURCE_SEMANTIC_MAX_BYTES * 4) {
+  const rawBytes = utf8ByteLength(raw);
+  if (rawBytes > SOURCE_SEMANTIC_MAX_BYTES * 4) {
     throw new SourceSemanticResourceExhausted("query carrier input");
   }
   meter.retain(value, "query carrier input");
-  meter.charge(0, Buffer.byteLength(raw, "utf8"), "query carrier serialization");
+  meter.charge(0, rawBytes, "query carrier serialization");
   const body = SourceSemanticQueryCarrierBodySchema.parse(value) as CarrierBody;
   meter.retain(body, "query carrier parsed body");
   const table = new Map<string, CarrierNode>();
@@ -51,12 +53,22 @@ export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readon
     if (table.has(node.node)) fail(`duplicate serialization reference: ${node.node}`);
     table.set(node.node, node);
   }
-  const state = new Map<string, "active" | "done">();
-  const order: string[] = [];
   const roots = body.alternatives.flatMap(alternative => [
     ...alternative.conditions,
     ...(alternative.evidence_inputs ?? []).flatMap(input => input.conditions)
   ]);
+  const order = carrierDependencyOrder(table, roots, meter);
+  chargeCarrierExpansion(body, table, roots, order, meter);
+  return materializeCarrier(body, table);
+}
+
+function carrierDependencyOrder(
+  table: ReadonlyMap<string, CarrierNode>,
+  roots: readonly string[],
+  meter: SourceSemanticResourceLedger
+): readonly string[] {
+  const state = new Map<string, "active" | "done">();
+  const order: string[] = [];
   for (const root of roots) {
     if (state.get(root) === "done") continue;
     const stack = [{ token: root, next: 0 }];
@@ -80,18 +92,29 @@ export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readon
     }
   }
   if (state.size !== table.size) fail("unreachable serialization reference");
+  return order;
+}
+
+function chargeCarrierExpansion(
+  body: CarrierBody,
+  table: ReadonlyMap<string, CarrierNode>,
+  roots: readonly string[],
+  order: readonly string[],
+  meter: SourceSemanticResourceLedger
+): void {
   const statistics = new Map<string, { count: number; bytes: number; depth: number }>();
   for (const token of order) {
     const node = table.get(token)!;
-    meter.charge(1 + references(node).length, 0, "query carrier measurement");
+    const children = references(node);
+    meter.charge(1 + children.length, 0, "query carrier measurement");
     const { node: _token, ...expression } = node;
     let count = 1;
-    let bytes = Buffer.byteLength(JSON.stringify(expression), "utf8");
+    let bytes = utf8ByteLength(JSON.stringify(expression));
     let depth = node.kind === "occurrence" ? 0 : 1;
-    for (const child of references(node)) {
+    for (const child of children) {
       const measured = statistics.get(child)!;
       count += measured.count;
-      bytes += measured.bytes - Buffer.byteLength(JSON.stringify(child), "utf8");
+      bytes += measured.bytes - utf8ByteLength(JSON.stringify(child));
       depth = Math.max(depth, (node.kind === "occurrence" ? 0 : 1) + measured.depth);
       if (count > SOURCE_SEMANTIC_MAX_BYTES || bytes > SOURCE_SEMANTIC_MAX_BYTES) {
         throw new SourceSemanticResourceExhausted("query carrier expansion");
@@ -101,12 +124,12 @@ export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readon
     statistics.set(token, { count, bytes, depth });
   }
   let expandedCount = 0;
-  let expandedBytes = Buffer.byteLength(JSON.stringify({ ...body, nodes: undefined }), "utf8");
+  let expandedBytes = utf8ByteLength(JSON.stringify({ ...body, nodes: undefined }));
   for (const token of roots) {
     meter.charge(1, 0, "query carrier measurement");
     const measured = statistics.get(token)!;
     expandedCount += measured.count;
-    expandedBytes += measured.bytes - Buffer.byteLength(JSON.stringify(token), "utf8");
+    expandedBytes += measured.bytes - utf8ByteLength(JSON.stringify(token));
     if (expandedCount > SOURCE_SEMANTIC_MAX_BYTES || expandedBytes > SOURCE_SEMANTIC_MAX_BYTES) {
       throw new SourceSemanticResourceExhausted("query carrier expansion");
     }
@@ -114,7 +137,12 @@ export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readon
   if (expandedBytes > SOURCE_SEMANTIC_MAX_BYTES) throw new SourceSemanticResourceExhausted("query carrier expansion");
   // Charge the expanded copy before allocating it, including non-expression fields.
   meter.charge(expandedCount, expandedBytes, "query carrier expansion");
+}
 
+function materializeCarrier(
+  body: CarrierBody,
+  table: ReadonlyMap<string, CarrierNode>
+): SourceSemanticQueryMeaningBody {
   const expand = (token: string): QueryMeaning => {
     const { node: _token, ...expression } = table.get(token)!;
     const result: Record<string, unknown> = { ...expression };

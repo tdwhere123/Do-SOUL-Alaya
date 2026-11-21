@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EventTypeSchema } from "../../events/event-log.js";
 import {
   RuntimeGovernanceEventType,
+  RuntimeGovernanceEventUnionSchema,
   parseRuntimeGovernanceEventPayload
 } from "../../events/runtime-governance.js";
 
@@ -52,6 +53,8 @@ describe("RelationAssertion EventLog contracts", () => {
     expect(
       parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.RELATION_ASSERTION_ADMITTED, payload)
     ).toEqual(payload);
+    const event = { type: RuntimeGovernanceEventType.RELATION_ASSERTION_ADMITTED, payload };
+    expect(RuntimeGovernanceEventUnionSchema.parse(event)).toEqual(event);
   });
 
   it("registers only typed append-only resolutions", () => {
@@ -70,6 +73,8 @@ describe("RelationAssertion EventLog contracts", () => {
     expect(
       parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.RELATION_ASSERTION_RESOLVED, payload)
     ).toEqual(payload);
+    const event = { type: RuntimeGovernanceEventType.RELATION_ASSERTION_RESOLVED, payload };
+    expect(RuntimeGovernanceEventUnionSchema.parse(event)).toEqual(event);
     expect(() =>
       parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.RELATION_ASSERTION_RESOLVED, {
         ...payload,

@@ -8,7 +8,7 @@ import { admitContractRow, advanceContractCoordinates, coordinateOf, emptyContra
 import { RetainedSequence, type RetainedRows } from "./retained-sequence.js";
 
 export type FieldGraphAdditions = Readonly<{ seeds: RetainedRows<SeedActivation>; transitions: RetainedRows<Transition> }>;
-type PartitionNode = Readonly<{ product: string; contract: string; explicit: boolean }>;
+type PartitionNode = Readonly<{ product: string; contract: string }>;
 type ProductGrade = ContractGradeSummary;
 
 /** Persistent product projection; conflicting declared contracts never regain a scalar by arrival order. */
@@ -213,8 +213,7 @@ function registerNode(state: PreparedFieldGraph, key: ProductStateKey, contract:
   const product = canonicalProductIdentity(key);
   const normalized = normalizeFieldPartitionContract(contract);
   const id = fieldPartitionNodeId(product, contract);
-  const prior = state.nodes.get(id);
-  const node = { product, contract: normalized, explicit: prior?.explicit === true || contract !== undefined };
+  const node = { product, contract: normalized };
   return { id, node, state: { ...state, graph: extendMaxMinGraph(state.graph, [id], []),
     keys: state.keys.has(product) ? state.keys : state.keys.with(product, key), nodes: state.nodes.with(id, node) } };
 }

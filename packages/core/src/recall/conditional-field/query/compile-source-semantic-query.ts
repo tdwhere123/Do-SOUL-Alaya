@@ -3,9 +3,8 @@ import { SourceSemanticResourceLedger, type QueryProgram, type SourceSemanticQue
 import { CoreError } from "../../../shared/errors.js";
 import { sourceSemanticRelationKey as key, correspondencePredicateKey, correspondenceSlotKey,
   type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
-import { semanticInstanceProof } from "./source-semantic-proof-program.js";
+import { semanticInstanceProof, semanticRelation, semanticSequence } from "./source-semantic-proof-program.js";
 
-const GUARD = { schema_version: 1 as const, kind: "query_predicate" as const, verdict: "unresolved" as const, time_scope: "none" as const };
 type Edge = Readonly<{ from: string; to: string; forward: string; backward: string }>;
 type Graph = Readonly<{ edges: readonly Edge[]; properties: ReadonlyMap<string, readonly string[]> }>;
 export type SourceSemanticLoweredObligation = Readonly<{
@@ -27,34 +26,20 @@ export function compileSourceSemanticGroupProgram(query: SourceSemanticQuery, al
   return compileSourceSemanticAlternative(query, alternative, alt, meter, finite, false, groupFrame, acceptIndex, groupQueryFrame, obligations);
 }
 
-function rel(predicate: string, from: string, to: string, meter: SourceSemanticResourceLedger): QueryProgram {
-  meter.charge(1, 512 + 4 * (predicate.length + from.length + to.length), "query lowering");
-  return { schema_version: 1, kind: "relation", relation_kind: predicate, source_variable: from, target_variable: to,
-    guard: GUARD, facet_mode: "same_path", threshold_milligrades: 0 };
-}
-
 export function compileSourceSemanticAlternative(querySemantics: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,
   meter: SourceSemanticResourceLedger, finite?: SourceSemanticCompilation, omitAccept = false, groupFrame?: string,
   acceptIndex?: number, groupQueryFrame?: string, obligations?: SourceSemanticLoweredObligation[]): QueryProgram {
   const graph = buildGraph(querySemantics, alternative, alt, meter, groupFrame, groupQueryFrame, obligations);
   const root = alternative.frames[0]!.variable;
   const seed = groupFrame === undefined ? `@seed:${alt}` : `@seed:${alt}:${groupFrame}`;
-  const steps = [rel(key("candidate_route"), seed, root, meter)];
-  const adjacency = new Map<string, number[]>();
-  graph.edges.forEach((edge, index) => {
-    for (const variable of new Set([edge.from, edge.to])) {
-      const rows = adjacency.get(variable) ?? []; rows.push(index); adjacency.set(variable, rows);
-    }
-  });
-  const visited = new Set<string>(), edgesSeen = new Set<number>();
+  const steps = [semanticRelation(key("candidate_route"), seed, root, meter)];
   const enter = (variable: string) => {
-    visited.add(variable);
     const properties = graph.properties.get(variable) ?? [];
     for (const predicate of properties) {
       if (finite !== undefined && predicate === key("source_interpretation_entailed_permission")) {
         steps.push(semanticInstanceProof(variable, finite.population, finite.source_interpretation, meter, true));
       } else {
-        steps.push(rel(predicate === key("source_interpretation_entailed_permission") ? key("source_interpretation_assertion_permission") : predicate, variable, variable, meter));
+        steps.push(semanticRelation(predicate === key("source_interpretation_entailed_permission") ? key("source_interpretation_assertion_permission") : predicate, variable, variable, meter));
       }
     }
     if (finite !== undefined && finite.population.instances.size > 0 && properties.includes(key("source_interpretation_presence"))
@@ -62,8 +47,25 @@ export function compileSourceSemanticAlternative(querySemantics: SourceSemanticQ
       steps.push(semanticInstanceProof(variable, finite.population, finite.source_interpretation, meter));
     }
   };
+  walkQueryGraph(graph, root, meter, enter, (predicate, from, to) => {
+    steps.push(semanticRelation(predicate, from, to, meter));
+  });
+  if (!omitAccept) steps.push(semanticRelation(key("accept"), root, `@accepted:${acceptIndex ?? alt}`, meter));
+  return semanticSequence(steps);
+}
+
+function walkQueryGraph(graph: Graph, root: string, meter: SourceSemanticResourceLedger,
+  enter: (variable: string) => void, traverse: (predicate: string, from: string, to: string) => void): void {
+  const adjacency = new Map<string, number[]>();
+  graph.edges.forEach((edge, index) => {
+    for (const variable of new Set([edge.from, edge.to])) {
+      const rows = adjacency.get(variable) ?? []; rows.push(index); adjacency.set(variable, rows);
+    }
+  });
+  const visited = new Set<string>(), edgesSeen = new Set<number>();
   type Visit = { variable: string; next: number; back?: { predicate: string; target: string } };
   const stack: Visit[] = [{ variable: root, next: 0 }];
+  visited.add(root);
   enter(root);
   while (stack.length > 0) {
     meter.charge(1, 0, "query traversal");
@@ -71,7 +73,7 @@ export function compileSourceSemanticAlternative(querySemantics: SourceSemanticQ
     const neighbors = adjacency.get(visit.variable) ?? [];
     if (visit.next >= neighbors.length) {
       stack.pop();
-      if (visit.back !== undefined) steps.push(rel(visit.back.predicate, visit.variable, visit.back.target, meter));
+      if (visit.back !== undefined) traverse(visit.back.predicate, visit.variable, visit.back.target);
       continue;
     }
     const index = neighbors[visit.next++]!;
@@ -80,23 +82,17 @@ export function compileSourceSemanticAlternative(querySemantics: SourceSemanticQ
     const edge = graph.edges[index]!, forward = edge.from === visit.variable;
     const target = forward ? edge.to : edge.from;
     const predicate = forward ? edge.forward : edge.backward, reverse = forward ? edge.backward : edge.forward;
-    steps.push(rel(predicate, visit.variable, target, meter));
-    if (visited.has(target)) steps.push(rel(reverse, target, visit.variable, meter));
-    else { enter(target); stack.push({ variable: target, next: 0, back: { predicate: reverse, target: visit.variable } }); }
+    traverse(predicate, visit.variable, target);
+    if (visited.has(target)) traverse(reverse, target, visit.variable);
+    else {
+      visited.add(target);
+      enter(target);
+      stack.push({ variable: target, next: 0, back: { predicate: reverse, target: visit.variable } });
+    }
   }
   if (edgesSeen.size !== graph.edges.length || [...graph.properties.keys()].some((id) => !visited.has(id))) {
     throw new CoreError("OBLIGATION_VIOLATION", "query lowering omitted an atomic obligation");
   }
-  if (!omitAccept) steps.push(rel(key("accept"), root, `@accepted:${acceptIndex ?? alt}`, meter));
-  return sequence(steps);
-}
-
-function sequence(steps: readonly QueryProgram[]): QueryProgram {
-  if (steps.length === 1) return steps[0]!;
-  if (steps.length <= 64) return { schema_version: 1, kind: "sequence", steps };
-  const groups: QueryProgram[] = [];
-  for (let offset = 0; offset < steps.length; offset += 64) groups.push(sequence(steps.slice(offset, offset + 64)));
-  return sequence(groups);
 }
 
 function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,

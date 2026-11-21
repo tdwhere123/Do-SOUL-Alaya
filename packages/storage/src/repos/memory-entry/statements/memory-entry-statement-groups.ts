@@ -314,63 +314,49 @@ ${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}      ORDER BY created_a
 ${ACTIVE_MEMORY_FILTER_SQL}${CONFLICT_MEMORY_FILTER_SQL}    `
 };
 
+const PROPOSAL_UPDATABLE_MEMORY_COLUMNS = `
+        content = COALESCE(?, content),
+        domain_tags = COALESCE(?, domain_tags),
+        evidence_refs = COALESCE(?, evidence_refs),
+        storage_tier = COALESCE(?, storage_tier),
+        confidence = COALESCE(?, confidence),
+        retention_state = COALESCE(?, retention_state),`;
+
+const EXTENDED_MEMORY_UPDATE_COLUMNS = `
+        last_used_at = COALESCE(?, last_used_at),
+        last_hit_at = COALESCE(?, last_hit_at),
+        projection_schema_version = CASE WHEN ? THEN ? ELSE projection_schema_version END,
+        event_time_start = CASE WHEN ? THEN ? ELSE event_time_start END,
+        event_time_end = CASE WHEN ? THEN ? ELSE event_time_end END,
+        valid_from = CASE WHEN ? THEN ? ELSE valid_from END,
+        valid_to = CASE WHEN ? THEN ? ELSE valid_to END,
+        time_precision = CASE WHEN ? THEN ? ELSE time_precision END,
+        time_source = CASE WHEN ? THEN ? ELSE time_source END,
+        preference_subject = CASE WHEN ? THEN ? ELSE preference_subject END,
+        preference_predicate = CASE WHEN ? THEN ? ELSE preference_predicate END,
+        preference_object = CASE WHEN ? THEN ? ELSE preference_object END,
+        preference_category = CASE WHEN ? THEN ? ELSE preference_category END,
+        preference_polarity = CASE WHEN ? THEN ? ELSE preference_polarity END,
+        facet_tags = CASE WHEN ? THEN ? ELSE facet_tags END,
+        canonical_entities = CASE WHEN ? THEN ? ELSE canonical_entities END,`;
+
+function memoryEntryUpdateSql(columns: string, predicate: string): string {
+  return `
+      UPDATE memory_entries
+      SET${columns}
+        updated_at = ?
+      WHERE ${predicate}
+    `;
+}
+
+export const MEMORY_ENTRY_PROPOSAL_UPDATE_SQL =
+  memoryEntryUpdateSql(PROPOSAL_UPDATABLE_MEMORY_COLUMNS, "object_id = ?");
+
+const FULL_MEMORY_UPDATE_COLUMNS = PROPOSAL_UPDATABLE_MEMORY_COLUMNS + EXTENDED_MEMORY_UPDATE_COLUMNS;
+
 const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {
-  updateStatement: `
-      UPDATE memory_entries
-      SET
-        content = COALESCE(?, content),
-        domain_tags = COALESCE(?, domain_tags),
-        evidence_refs = COALESCE(?, evidence_refs),
-        storage_tier = COALESCE(?, storage_tier),
-        confidence = COALESCE(?, confidence),
-        retention_state = COALESCE(?, retention_state),
-        last_used_at = COALESCE(?, last_used_at),
-        last_hit_at = COALESCE(?, last_hit_at),
-        projection_schema_version = CASE WHEN ? THEN ? ELSE projection_schema_version END,
-        event_time_start = CASE WHEN ? THEN ? ELSE event_time_start END,
-        event_time_end = CASE WHEN ? THEN ? ELSE event_time_end END,
-        valid_from = CASE WHEN ? THEN ? ELSE valid_from END,
-        valid_to = CASE WHEN ? THEN ? ELSE valid_to END,
-        time_precision = CASE WHEN ? THEN ? ELSE time_precision END,
-        time_source = CASE WHEN ? THEN ? ELSE time_source END,
-        preference_subject = CASE WHEN ? THEN ? ELSE preference_subject END,
-        preference_predicate = CASE WHEN ? THEN ? ELSE preference_predicate END,
-        preference_object = CASE WHEN ? THEN ? ELSE preference_object END,
-        preference_category = CASE WHEN ? THEN ? ELSE preference_category END,
-        preference_polarity = CASE WHEN ? THEN ? ELSE preference_polarity END,
-        facet_tags = CASE WHEN ? THEN ? ELSE facet_tags END,
-        canonical_entities = CASE WHEN ? THEN ? ELSE canonical_entities END,
-        updated_at = ?
-      WHERE object_id = ?
-    `,
-  updateScopedStatement: `
-      UPDATE memory_entries
-      SET
-        content = COALESCE(?, content),
-        domain_tags = COALESCE(?, domain_tags),
-        evidence_refs = COALESCE(?, evidence_refs),
-        storage_tier = COALESCE(?, storage_tier),
-        confidence = COALESCE(?, confidence),
-        retention_state = COALESCE(?, retention_state),
-        last_used_at = COALESCE(?, last_used_at),
-        last_hit_at = COALESCE(?, last_hit_at),
-        projection_schema_version = CASE WHEN ? THEN ? ELSE projection_schema_version END,
-        event_time_start = CASE WHEN ? THEN ? ELSE event_time_start END,
-        event_time_end = CASE WHEN ? THEN ? ELSE event_time_end END,
-        valid_from = CASE WHEN ? THEN ? ELSE valid_from END,
-        valid_to = CASE WHEN ? THEN ? ELSE valid_to END,
-        time_precision = CASE WHEN ? THEN ? ELSE time_precision END,
-        time_source = CASE WHEN ? THEN ? ELSE time_source END,
-        preference_subject = CASE WHEN ? THEN ? ELSE preference_subject END,
-        preference_predicate = CASE WHEN ? THEN ? ELSE preference_predicate END,
-        preference_object = CASE WHEN ? THEN ? ELSE preference_object END,
-        preference_category = CASE WHEN ? THEN ? ELSE preference_category END,
-        preference_polarity = CASE WHEN ? THEN ? ELSE preference_polarity END,
-        facet_tags = CASE WHEN ? THEN ? ELSE facet_tags END,
-        canonical_entities = CASE WHEN ? THEN ? ELSE canonical_entities END,
-        updated_at = ?
-      WHERE object_id = ? AND workspace_id = ?
-    `
+  updateStatement: memoryEntryUpdateSql(FULL_MEMORY_UPDATE_COLUMNS, "object_id = ?"),
+  updateScopedStatement: memoryEntryUpdateSql(FULL_MEMORY_UPDATE_COLUMNS, "object_id = ? AND workspace_id = ?")
 };
 
 const MEMORY_ENTRY_LIFECYCLE_SQL: SqlDefinitionMap<MemoryEntryLifecycleStatements> = {

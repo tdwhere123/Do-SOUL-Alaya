@@ -23,11 +23,11 @@ import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 import { registerRetainedSourceChunkDigest } from "./retained-source-chunk-digest.js";
 import { registerUtcInstantComparison } from "./utc-instant-comparison.js";
 import { isUninitializedDatabaseFile, knownMigrationMaxVersion, runMigrations } from "./run-migrations.js";
-import { parseRows, type RowParser } from "../repos/shared/parse-row.js";
 import { diagnosticWarn } from "@do-soul/alaya-protocol";
 
 export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
 export { isUninitializedDatabaseFile } from "./run-migrations.js";
+export { selectRows } from "../repos/shared/select-rows.js";
 
 export type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
@@ -373,18 +373,6 @@ function readPersistedMaxVersion(database: SqliteConnection): number | null {
     diagnosticWarn("sqlite/db: failed to read schema_version max; treating as unknown", { error: String(error) });
     return null;
   }
-}
-
-export function selectRows<T>(
-  database: SqliteConnection,
-  sql: string,
-  args: readonly unknown[] | Record<string, unknown>,
-  parser: RowParser<T>,
-  label: string
-): readonly T[] {
-  const statement = database.prepare(sql);
-  const values = Array.isArray(args) ? statement.all(...args) : statement.all(args);
-  return parseRows(values, parser, label);
 }
 
 /**

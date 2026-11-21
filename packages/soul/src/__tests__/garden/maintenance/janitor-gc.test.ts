@@ -82,7 +82,7 @@ describe("Janitor GC task kinds", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  it("runs tombstone gc through its port and respects batch size", async () => {
+  it("reports the unbound disposition sweep and preserves physical GC up to the batch size", async () => {
     const tombstoneGcPort = {
       findTombstonedMemories: vi.fn(
         async () =>
@@ -111,6 +111,7 @@ describe("Janitor GC task kinds", () => {
     const result = await janitor.run(createTask("tombstone_gc"));
 
     expect(tombstoneGcPort.hardDelete).toHaveBeenCalledTimes(JANITOR_CONSTANTS.BATCH_SIZE);
+    expect(result).toMatchObject({ success: true, outcome: "skipped", error_message: null });
     expect(result.objects_affected).toHaveLength(JANITOR_CONSTANTS.BATCH_SIZE);
     expect(result.audit_entries).toEqual([
       "[SKIPPED] tombstone_gc: disposition sweep port not wired",
