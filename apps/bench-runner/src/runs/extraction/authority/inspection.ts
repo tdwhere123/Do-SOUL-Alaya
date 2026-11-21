@@ -1,8 +1,4 @@
-import {
-  extractionArtifactPrompt, extractionArtifactRequests, extractionTypedArtifactMode, extractionRequestUnitCount,
-  type ExtractionOpenSemanticsGeneration
-} from "../request-artifact.js";
-import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
+import type { ExtractionOpenSemanticsGeneration } from "../request-artifact.js";
 import { AlayaError, type SourceInterpretationProfile, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -10,36 +6,15 @@ import { lstatSync, realpathSync, statfsSync } from "node:fs";
 import { samePhysicalLocation } from "../../fs/opened-contained-path.js";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
-import {
-  assertRequiredRequestProfile,
-  resolveExtractionTransportRoute
-} from "../transport-route.js";
-import { isObsoleteRequestProfile } from "../../provider/catalog.js";
-import {
-  computeExtractionTurnCacheKeys
-} from "../../compile-seed/compile-seed-cache.js";
-import {
-  EXTRACTION_CACHE_KEY_ALGO,
-  computeSystemPromptSha256,
-  readExtractionCacheManifestIdentity
-} from "../cache/extraction-cache-manifest.js";
 import type { ExtractionFillVariant } from "../fill/fill-window.js";
-import { nativeSourceRequestInventory } from "../fill/source-request-workset.js";
-import { inspectExtractionFillCompletion } from "../fill/fill-completion.js";
-import { prepareExtractionFillWindow } from "../fill/fill-window.js";
 import type {
   ExtractionAuthorityObservation,
   ExtractionAuthorityReceipt
 } from "./receipt.js";
 import type { ExtractionRepairShard } from "./repair/repair-scope.js";
-import {
-  createExtractionPreservedValidClosure,
-  type ExtractionPreservedValidClosure
-} from "./repair/preserved-valid-closure.js";
+import type { ExtractionPreservedValidClosure } from "./repair/preserved-valid-closure.js";
 import type { ExtractionContentClosureEntry } from "../content-closure.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
-import { inspectExtractionCacheWriterLock } from "../fill/manifest/writer-lock.js";
 import { nonCredentialChildEnv } from "../fill/manifest/non-credential-child-env.js";
 
 const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
@@ -61,9 +36,38 @@ export interface ExtractionAuthorityInspection {
   readonly modelReadiness: "not_probed";
 }
 
+type AuthorityInspectionRuntime = Awaited<ReturnType<typeof loadAuthorityInspectionRuntime>>;
 type ExtractionAuthorityInspectionInput = Parameters<typeof inspectExtractionAuthority>[0];
-type ExtractionAuthorityWindow = Awaited<ReturnType<typeof prepareExtractionFillWindow>>;
-type ExtractionAuthorityCompletion = ReturnType<typeof inspectExtractionFillCompletion>;
+type ExtractionAuthorityWindow = Awaited<ReturnType<AuthorityInspectionRuntime["prepareExtractionFillWindow"]>>;
+type ExtractionAuthorityCompletion = ReturnType<AuthorityInspectionRuntime["inspectExtractionFillCompletion"]>;
+type CompileSeedExtractionConfig = ReturnType<AuthorityInspectionRuntime["resolveCompileSeedExtractionConfig"]>;
+type ExtractionCacheManifestIdentity = ReturnType<AuthorityInspectionRuntime["readExtractionCacheManifestIdentity"]>;
+
+/** Defer heavy fill-window and compile-seed imports so synchronous Git revision checks stay lightweight. */
+async function loadAuthorityInspectionRuntime() {
+  const [
+    requestArtifact, cacheShard, compileSeedConfig, transportRoute, providerCatalog, compileSeedCache,
+    cacheManifest, sourceRequestWorkset, fillCompletion, fillWindow, preservedValidClosure, writerLock
+  ] = await Promise.all([
+    import("../request-artifact.js"),
+    import("../../compile-seed/cache/cache-shard.js"),
+    import("../../compile-seed/compile-seed-config.js"),
+    import("../transport-route.js"),
+    import("../../provider/catalog.js"),
+    import("../../compile-seed/compile-seed-cache.js"),
+    import("../cache/extraction-cache-manifest.js"),
+    import("../fill/source-request-workset.js"),
+    import("../fill/fill-completion.js"),
+    import("../fill/fill-window.js"),
+    import("./repair/preserved-valid-closure.js"),
+    import("../fill/manifest/writer-lock.js")
+  ]);
+  return {
+    ...requestArtifact, ...cacheShard, ...compileSeedConfig, ...transportRoute,
+    ...providerCatalog, ...compileSeedCache, ...cacheManifest, ...sourceRequestWorkset,
+    ...fillCompletion, ...fillWindow, ...preservedValidClosure, ...writerLock
+  };
+}
 
 /**
  * Read only the local dataset, cache and runtime configuration needed to bind
@@ -87,46 +91,49 @@ export async function inspectExtractionAuthority(input: {
   readonly excludeContentClosureKeys?: readonly string[];
   readonly preservedValidExclusionKeys?: readonly string[];
 }): Promise<ExtractionAuthorityInspection> {
-  const manifestIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
-  const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest, input.sourcePacking, input.sourceInterpretationProfile, input.openSemantics);
-  assertRequiredRequestProfile(config);
-  if (isObsoleteRequestProfile(config.requestProfile)) {
+  const runtime = await loadAuthorityInspectionRuntime();
+  const manifestIdentity = runtime.readExtractionCacheManifestIdentity(input.cacheRoot);
+  const config = runtime.resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest, input.sourcePacking, input.sourceInterpretationProfile, input.openSemantics);
+  runtime.assertRequiredRequestProfile(config);
+  if (runtime.isObsoleteRequestProfile(config.requestProfile)) {
     throw new Error(
       `extraction authority refuses obsolete request profile ${config.requestProfile}`
     );
   }
-  const window = await prepareExtractionFillWindow({ ...input, config,
+  const window = await runtime.prepareExtractionFillWindow({ ...input, config,
     sourcePacking: config.sourcePacking, openSemantics: config.openSemantics !== undefined }, undefined);
   const authorizedTurns = input.repairInvalidShards === true
     ? window.executionExtractionTurns
     : window.distinctExtractionTurns;
-  const completion = inspectAuthorityCompletion(input, config, authorizedTurns, window);
+  const completion = inspectAuthorityCompletion(runtime, input, config, authorizedTurns, window);
   const shardStatus = collectShardStatus(
+    runtime,
     input.cacheRoot,
     config,
     authorizedTurns, window,
     new Set(input.preservedValidExclusionKeys ?? [])
   );
-  const observation = buildAuthorityObservation(input, manifestIdentity, config, window, completion);
-  return buildExtractionAuthorityInspection(input, config, shardStatus, observation, window);
+  const observation = buildAuthorityObservation(runtime, input, manifestIdentity, config, window, completion);
+  return buildExtractionAuthorityInspection(runtime, input, config, shardStatus, observation, window);
 }
 
 function inspectAuthorityCompletion(
+  runtime: AuthorityInspectionRuntime,
   input: ExtractionAuthorityInspectionInput,
-  config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
+  config: CompileSeedExtractionConfig,
   authorizedTurns: readonly LongMemEvalExtractionTurn[],
   window: ExtractionAuthorityWindow
 ): ExtractionAuthorityCompletion {
-  return inspectExtractionFillCompletion({
+  return runtime.inspectExtractionFillCompletion({
     cacheRoot: input.cacheRoot,
     model: config.model,
     requestProfile: config.requestProfile,
     sourcePacking: config.sourcePacking,
     sourceInterpretationProfile: config.sourceInterpretationProfile,
     openSemantics: config.openSemantics,
-    systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking),
+    systemPrompt: runtime.extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking),
     ...(window.nativeSourceRecords === undefined ? { extractionTurns: authorizedTurns } : {
-      expectedRequestKeys: nativeSourceRequestInventory(window.nativeSourceRecords,
+      expectedRequestKeys: runtime.nativeSourceRequestInventory(window.nativeSourceRecords,
         window.datasetRevision, config).requests.map(item => item.line.key) }),
     ...(input.excludeContentClosureKeys === undefined ? {} : {
       excludeContentClosureKeys: input.excludeContentClosureKeys
@@ -135,9 +142,10 @@ function inspectAuthorityCompletion(
 }
 
 function buildAuthorityObservation(
+  runtime: AuthorityInspectionRuntime,
   input: ExtractionAuthorityInspectionInput,
-  manifestIdentity: ReturnType<typeof readExtractionCacheManifestIdentity>,
-  config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
+  manifestIdentity: ExtractionCacheManifestIdentity,
+  config: CompileSeedExtractionConfig,
   window: ExtractionAuthorityWindow,
   completion: ExtractionAuthorityCompletion
 ): ExtractionAuthorityObservation {
@@ -159,8 +167,8 @@ function buildAuthorityObservation(
     }),
     keyDigest: completion.expectedKeySetSha256,
     dataset: buildAuthorityDatasetObservation(input, window, completion),
-    extraction: buildAuthorityExtractionObservation(config, manifestIdentity, completion),
-    transport: resolveExtractionTransportRoute(config),
+    extraction: buildAuthorityExtractionObservation(runtime, config, manifestIdentity, completion),
+    transport: runtime.resolveExtractionTransportRoute(config),
     inventory: buildAuthorityInventoryObservation(completion)
   } satisfies ExtractionAuthorityObservation);
 }
@@ -187,8 +195,9 @@ function buildAuthorityDatasetObservation(
 }
 
 function buildAuthorityExtractionObservation(
-  config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
-  manifestIdentity: ReturnType<typeof readExtractionCacheManifestIdentity>,
+  runtime: AuthorityInspectionRuntime,
+  config: CompileSeedExtractionConfig,
+  manifestIdentity: ExtractionCacheManifestIdentity,
   completion: ExtractionAuthorityCompletion
 ) {
   return Object.freeze({
@@ -199,8 +208,8 @@ function buildAuthorityExtractionObservation(
       sourcePacking: config.sourcePacking
     }),
     providerUrl: config.providerUrl,
-    systemPromptSha256: computeSystemPromptSha256(extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking)),
-    cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
+    systemPromptSha256: runtime.computeSystemPromptSha256(runtime.extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking)),
+    cacheKeyAlgorithm: runtime.EXTRACTION_CACHE_KEY_ALGO,
     manifestSha256: manifestIdentity?.manifestSha256 ?? null,
     rawContentClosureSha256: completion.partialContentClosureSha256
   });
@@ -217,8 +226,9 @@ function buildAuthorityInventoryObservation(completion: ExtractionAuthorityCompl
 }
 
 function buildExtractionAuthorityInspection(
+  runtime: AuthorityInspectionRuntime,
   input: ExtractionAuthorityInspectionInput,
-  config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
+  config: CompileSeedExtractionConfig,
   shardStatus: ReturnType<typeof collectShardStatus>,
   observation: ExtractionAuthorityObservation,
   window: ExtractionAuthorityWindow
@@ -231,8 +241,8 @@ function buildExtractionAuthorityInspection(
     pendingShards: Object.freeze(shardStatus.pendingShards),
     nonemptyKeys: Object.freeze(shardStatus.nonemptyKeys ?? []),
     invalidShards: Object.freeze(shardStatus.invalidShards),
-    preservedValidClosure: createExtractionPreservedValidClosure(shardStatus.validEntries),
-    writerLock: inspectExtractionCacheWriterLock(input.cacheRoot),
+    preservedValidClosure: runtime.createExtractionPreservedValidClosure(shardStatus.validEntries),
+    writerLock: runtime.inspectExtractionCacheWriterLock(input.cacheRoot),
     disk: inspectExtractionAuthorityDisk(input.cacheRoot),
     credentialStatus: config.apiKey === null ? "absent" : "present",
     modelReadiness: "not_probed"
@@ -240,8 +250,9 @@ function buildExtractionAuthorityInspection(
 }
 
 function collectShardStatus(
+  runtime: AuthorityInspectionRuntime,
   cacheRoot: string,
-  config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
+  config: CompileSeedExtractionConfig,
   turns: readonly LongMemEvalExtractionTurn[],
   window: ExtractionAuthorityWindow,
   preservedValidExclusionKeys: ReadonlySet<string>
@@ -261,23 +272,23 @@ function collectShardStatus(
   const revisionsSeen = new Set<string>();
   const requests = window.nativeSourceRecords === undefined
     ? turns.flatMap(turn => {
-      const keys = computeExtractionTurnCacheKeys(config.model, config.requestProfile,
-        extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking), turn,
+      const keys = runtime.computeExtractionTurnCacheKeys(config.model, config.requestProfile,
+        runtime.extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics, config.sourcePacking), turn,
         config.sourcePacking, config.sourceInterpretationProfile, config.openSemantics);
-      return extractionArtifactRequests(turn, config.sourcePacking, config.sourceInterpretationProfile,
+      return runtime.extractionArtifactRequests(turn, config.sourcePacking, config.sourceInterpretationProfile,
         config.openSemantics).map((request, index) => ({ key: keys[index]!,
-          nonempty: extractionRequestUnitCount(request.source) > 0,
+          nonempty: runtime.extractionRequestUnitCount(request.source) > 0,
           revision: request.semantic?.source_request.revision?.base_request_sha256 }));
     })
-    : nativeSourceRequestInventory(window.nativeSourceRecords, window.datasetRevision, config).requests
-      .map(item => ({ key: item.line.key, nonempty: extractionRequestUnitCount(item.request) > 0,
+    : runtime.nativeSourceRequestInventory(window.nativeSourceRecords, window.datasetRevision, config).requests
+      .map(item => ({ key: item.line.key, nonempty: runtime.extractionRequestUnitCount(item.request) > 0,
         revision: JSON.parse(item.line.userPrompt).source_request.revision?.base_request_sha256 as string | undefined }));
   for (const request of requests) {
       const { key } = request;
       if (request.revision !== undefined) revisionsSeen.add(request.revision);
       if (request.nonempty) nonemptyKeys.push(key);
-      const shard = inspectCachedExtractionArtifact(
-        cacheRoot, key, config.model, config.requestProfile, extractionTypedArtifactMode(config)
+      const shard = runtime.inspectCachedExtractionArtifact(
+        cacheRoot, key, config.model, config.requestProfile, runtime.extractionTypedArtifactMode(config)
       );
       if (shard.status === "missing") missingKeys.push(key);
       if (shard.status === "pending" && shard.attemptOrdinal !== undefined &&

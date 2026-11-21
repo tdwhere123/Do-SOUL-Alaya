@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
   rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
@@ -57,15 +57,26 @@ type Fixture = ReturnType<typeof fixture>;
 function run(f: Fixture, program?: string, optIn = true, readRoots: readonly string[] = []) {
   const preload = new URL(guard);
   if (optIn) preload.searchParams.set("authority_checkout", f.root);
-  const argv = ["--input-type=module", "--eval", program ?? revisionProgram(f.app)];
-  return spawnSync(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${repository}`,
+  const argv = [
+    "--permission", "--allow-child-process", `--allow-fs-read=${repository}`,
     `--allow-fs-read=${f.outer}`, ...readRoots.map(root => `--allow-fs-read=${root}`),
     `--allow-fs-read=${gitExecutable}`, `--allow-fs-write=${f.out}`,
-    "--import", preload.href, "--import", strict, ...argv], {
+    "--import", preload.href, "--import", strict,
+    "--input-type=module", "--eval", program ?? revisionProgram(f.app)
+  ];
+  const options: SpawnSyncOptionsWithStringEncoding = {
     // Discover through the physical executable directory, not an alias requiring directory read grants.
     cwd: f.root, env: { PATH: dirname(gitExecutable), LANG: "C", LC_ALL: "C", TMPDIR: f.out, TEMP: f.out, TMP: f.out },
-    encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024
-  });
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8", timeout: 12_000, maxBuffer: 4 * 1024 * 1024
+  };
+  const first = spawnSync(process.execPath, argv, options);
+  // Node 24.22.3 on Linux intermittently stalls ESM loader startup under --permission + registerHooks.
+  // Every fixture invocation here is pure/fail-closed; retry once only on a raw subprocess ETIMEDOUT stall.
+  if (first.status === null && (first.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
+    return spawnSync(process.execPath, argv, options);
+  }
+  return first;
 }
 function receipt(stderr: string) {
   const line = stderr.split("\n").find(line => line.startsWith("[source-import-guard-receipt] "));
@@ -222,7 +233,8 @@ it.each([".env", ".env.local", "service.env", ".aws/config", ".azure/token", "cr
       expect(evidence.operations.at(-1)).toMatchObject({ blocked: true });
       expect(evidence.credential_file_violations).toEqual([]);
     }
-  }
+  },
+  60_000
 );
 
 it("does not exempt the public template from provider-free filesystem credential guards", () => {
