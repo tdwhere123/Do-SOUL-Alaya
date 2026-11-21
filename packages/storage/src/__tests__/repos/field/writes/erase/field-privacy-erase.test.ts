@@ -12,7 +12,6 @@ import {
 } from "../../../../../repos/capsules/mappers/evidence-capsule-mappers.js";
 import {
   SqliteFieldEraseBarrierRepo,
-  SqliteFieldFactorRepo,
   SqliteFieldProjectionGenerationRepo,
   SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo
@@ -20,9 +19,7 @@ import {
 import {
   CLOCK,
   fieldSha256,
-  hashedFactor,
   hashedGeneration,
-  hashedIncidence,
   hashedRecord,
   hashedSpan,
   openFieldDatabase,
@@ -71,14 +68,8 @@ describe("field privacy erase", () => {
     expect(environment.records.findById("workspace-1", graph.record.record_id)?.source_body)
       .toBeNull();
     expect(environment.spans.findById("workspace-1", graph.span.span_id)).toBeNull();
-    expect(environment.factors.findIncidence("workspace-1", graph.incidence.incidence_id))
-      .toBeNull();
-    expect(environment.factors.findDescriptor("workspace-1", graph.factor.factor_id)
-      ?.canonical_payload).toBeNull();
     expect(barrierSubjects(environment.database)).toEqual([
-      ["factor", graph.factor.factor_id],
       ["generation", generation.generation_id],
-      ["incidence", graph.incidence.incidence_id],
       ["source_record", graph.record.record_id],
       ["source_span", graph.span.span_id]
     ]);
@@ -94,7 +85,7 @@ describe("field privacy erase", () => {
     });
     expect(parseEvidenceCapsuleRow(readEvidenceRow(environment.database, graph.evidenceId))
       .lifecycle_state).toBe("tombstone");
-    expect(derivedArtifactCounts(environment.database, graph.evidenceId)).toEqual([0, 0, 0, 0]);
+    expect(derivedArtifactCounts(environment.database, graph.evidenceId)).toEqual([0, 0]);
     expect(derivedPrivacyArtifactCounts(environment.database)).toEqual([0, 0, 0, 0, 0]);
     expect(readDerivedPrivacyState(environment.database)).toEqual({
       memory: {
@@ -184,10 +175,7 @@ describe("field privacy erase", () => {
       .toThrow(/identity (collision|mismatch)/u);
     expect(environment.records.insert(graph.record).source_body).toBeNull();
     expect(() => environment.spans.insert(graph.span)).toThrow(/erased|check failed/u);
-    expect(() => environment.factors.insertDescriptor(graph.factor)).toThrow(/collision|erased/u);
-    expect(() => environment.factors.insertIncidence(graph.incidence))
-      .toThrow(/erased|check failed/u);
-    expect(count(environment.database, "projection_erase_barriers")).toBe(4);
+
   });
 
   it.each(["erased", "independent"] as const)(
@@ -313,16 +301,12 @@ describe("field privacy erase", () => {
     );
   });
 
-  it("rejects replay of source-linked formation payloads", () => {
+  it("rejects restoring plaintext to erased evidence", () => {
     const environment = createEnvironment(openFieldDatabase());
     const graph = seedSourceGraph(environment);
     seedEvidenceArtifacts(environment.database, graph.evidenceId);
     environment.erase.apply(barrier(graph.record.record_id));
 
-    expect(() => insertFactFrame(environment.database, graph.evidenceId))
-      .toThrow(/erased source fact-frame formation/u);
-    expect(() => insertSemanticFormation(environment.database, graph.evidenceId))
-      .toThrow(/erased source semantic formation/u);
     expect(() => environment.database.connection.prepare(`
       UPDATE evidence_capsules SET gist = 'restored plaintext'
       WHERE object_id = ?
@@ -336,7 +320,6 @@ function createEnvironment(database: StorageDatabase) {
     database,
     records: new SqliteFieldSourceRecordRepo(database, fieldSha256),
     spans: new SqliteFieldSourceSpanRepo(database, fieldSha256),
-    factors: new SqliteFieldFactorRepo(database, fieldSha256),
     generations: new SqliteFieldProjectionGenerationRepo(database, fieldSha256),
     erase: new SqliteFieldEraseBarrierRepo(database, fieldSha256)
   };
@@ -348,13 +331,9 @@ function seedSourceGraph(environment: ReturnType<typeof createEnvironment>) {
   const record = { ...hashedRecord("workspace-1", "private source body"),
     evidence_object_id: evidenceId };
   const span = hashedSpan("workspace-1", record.record_id, 0, 7);
-  const factor = hashedFactor("workspace-1", "private factor payload");
-  const incidence = hashedIncidence("workspace-1", span.span_id, factor.factor_id, "claim");
   environment.records.insert(record);
   environment.spans.insert(span);
-  environment.factors.insertDescriptor(factor);
-  environment.factors.insertIncidence(incidence);
-  return { evidenceId, record, span, factor, incidence };
+  return { evidenceId, record, span };
 }
 
 function seedGeneration(environment: ReturnType<typeof createEnvironment>) {
@@ -412,28 +391,6 @@ function seedEvidenceArtifacts(database: StorageDatabase, evidenceId: string): v
     ) VALUES ('workspace-1', ?, 'document-private', 'private hash', 'evidence_document',
       'local', 'test', 1, 1, ?, 1, ?, ?)
   `).run(evidenceId, Buffer.from([1, 2, 3]), CLOCK, CLOCK);
-  insertFactFrame(database, evidenceId);
-  insertSemanticFormation(database, evidenceId);
-}
-
-function insertFactFrame(database: StorageDatabase, evidenceId: string): void {
-  database.connection.prepare(`
-    INSERT INTO evidence_fact_frame_formations (
-      evidence_object_id, workspace_id, schema_version, operator_id, status,
-      producer_operator_id, source_hash, fact_frame_json, capture_digest
-    ) VALUES (?, 'workspace-1', 1, 'evidence_fact_frame_formation_v1', 'formed',
-      'test-producer', 'private hash', '{"fact":"private"}', ?)
-  `).run(evidenceId, `sha256:${"b".repeat(64)}`);
-}
-
-function insertSemanticFormation(database: StorageDatabase, evidenceId: string): void {
-  database.connection.prepare(`
-    INSERT INTO evidence_semantic_factor_formations (
-      evidence_object_id, workspace_id, schema_version, operator_id, status,
-      producer_operator_id, source_sha256, graph_json, capture_digest
-    ) VALUES (?, 'workspace-1', 1, 'open_semantic_factor_formation_v1', 'formed',
-      'test-producer', ?, '{"factor":"private"}', ?)
-  `).run(evidenceId, `sha256:${"c".repeat(64)}`, `sha256:${"d".repeat(64)}`);
 }
 
 function seedDecisionHistory(database: StorageDatabase): void {
@@ -494,8 +451,6 @@ function derivedArtifactCounts(database: StorageDatabase, evidenceId: string): r
   return [
     countWhere(database, "evidence_search_projections", "evidence_object_id", evidenceId),
     countWhere(database, "evidence_recall_embeddings", "owner_object_id", evidenceId),
-    countWhere(database, "evidence_fact_frame_formations", "evidence_object_id", evidenceId),
-    countWhere(database, "evidence_semantic_factor_formations", "evidence_object_id", evidenceId)
   ];
 }
 

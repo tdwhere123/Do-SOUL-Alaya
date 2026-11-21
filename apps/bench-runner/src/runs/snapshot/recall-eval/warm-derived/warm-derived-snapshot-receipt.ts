@@ -11,48 +11,6 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const Sha256Schema = z.string().regex(SHA256_PATTERN);
 const CountSchema = z.number().int().nonnegative();
 
-const FactFrameRetrofitReportSchema = z.object({
-  schema_version: z.literal(1),
-  ledger_sha256: Sha256Schema,
-  ledger_record_count: CountSchema,
-  rebuilt_owner_count: CountSchema,
-  rejected_record_count: z.literal(0),
-  projection_count: CountSchema,
-  projection_content_sha256: Sha256Schema,
-  formation_operator_id: z.string().trim().min(1).max(128).optional(),
-  formation_capture_count: CountSchema.optional(),
-  formation_capture_sha256: Sha256Schema.optional()
-}).strict().readonly();
-
-const FactFrameFormationSummarySchema = z.object({
-  schema_version: z.literal(1),
-  capture_count: CountSchema,
-  source_bound_count: CountSchema,
-  status_counts: z.array(z.object({
-    status: z.string().trim().min(1).max(64),
-    capture_count: CountSchema
-  }).strict().readonly()),
-  producer_operator_counts: z.array(z.object({
-    producer_operator_id: z.string().trim().min(1).max(128).nullable(),
-    capture_count: CountSchema
-  }).strict().readonly()),
-  capture_binding_sha256: Sha256Schema
-}).strict().readonly();
-
-const FactFrameFormationBackfillReportSchema = z.object({
-  schema_version: z.literal(1),
-  operator_id: z.literal("default_evidence_fact_frame_formation_backfill_v1"),
-  eligible_owner_count: CountSchema,
-  existing_capture_count: CountSchema,
-  backfilled_capture_count: CountSchema,
-  formed_capture_count: CountSchema,
-  unavailable_capture_count: CountSchema,
-  rejected_capture_count: CountSchema,
-  projection_count: CountSchema,
-  capture_binding_sha256: Sha256Schema,
-  projection_content_sha256: Sha256Schema
-}).strict().readonly();
-
 const RebuildReportSchema = z.object({
   schema_version: z.literal(1),
   promotable: z.boolean(),
@@ -71,9 +29,6 @@ const RebuildReportSchema = z.object({
     child_count: CountSchema
   }).strict().readonly()),
   projection_content_sha256: Sha256Schema,
-  fact_frame_formation: FactFrameFormationSummarySchema.optional(),
-  fact_frame_formation_backfill: FactFrameFormationBackfillReportSchema.optional(),
-  fact_frame_retrofit: FactFrameRetrofitReportSchema.optional(),
   source_extraction_system_prompt_sha256: Sha256Schema.optional()
 }).strict().readonly();
 
@@ -204,23 +159,6 @@ function freezeReport(
     ...report,
     projection_kind_counts: Object.freeze(
       report.projection_kind_counts.map((entry) => Object.freeze(entry))
-    ),
-    ...(report.fact_frame_formation === undefined ? {} : {
-      fact_frame_formation: Object.freeze({
-        ...report.fact_frame_formation,
-        status_counts: Object.freeze(report.fact_frame_formation.status_counts),
-        producer_operator_counts: Object.freeze(
-          report.fact_frame_formation.producer_operator_counts
-        )
-      })
-    }),
-    ...(report.fact_frame_retrofit === undefined
-      ? {}
-      : { fact_frame_retrofit: Object.freeze(report.fact_frame_retrofit) }),
-    ...(report.fact_frame_formation_backfill === undefined
-      ? {}
-      : { fact_frame_formation_backfill: Object.freeze(
-          report.fact_frame_formation_backfill
-        ) })
+    )
   }) as EvidenceSearchProjectionRebuildReport;
 }

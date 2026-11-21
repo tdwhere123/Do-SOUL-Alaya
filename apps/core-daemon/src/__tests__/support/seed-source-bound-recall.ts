@@ -1,11 +1,8 @@
 import {
-  FACTOR_INCIDENCE_OPERATOR_ID,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   fieldReceiptContractFields,
   hashAddressableSourceSpanId,
   hashContentDigest,
-  hashFactorId,
-  hashIncidenceId,
   hashSourceRecordId,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
@@ -59,22 +56,23 @@ export function seedSourceBoundRecall(input: Readonly<{
     source_version: "1",
     content_digest: contentDigest
   }, fieldContractSha256);
-  stores.putRecord({
-    ...receiptFields(recordId, SOURCE_SPAN_IDENTITY_OPERATOR_ID, "projection_generation"),
-    schema_version: 1,
-    workspace_id: input.workspaceId,
-    source_id: `test-source:${input.evidenceId}`,
-    source_version: "1",
-    content_digest: contentDigest,
-    evidence_object_id: input.evidenceId,
-    recorded_at: input.recordedAt,
-    event_time: input.recordedAt,
-    valid_from: null,
-    valid_to: null,
-    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID
-  }, input.body);
-  const spanId = putSpan(stores, input, recordId);
-  putFactorIncidence(stores, input, spanId);
+  stores.runAtomic(() => {
+    stores.putRecord({
+      ...receiptFields(recordId, SOURCE_SPAN_IDENTITY_OPERATOR_ID, "projection_generation"),
+      schema_version: 1,
+      workspace_id: input.workspaceId,
+      source_id: `test-source:${input.evidenceId}`,
+      source_version: "1",
+      content_digest: contentDigest,
+      evidence_object_id: input.evidenceId,
+      recorded_at: input.recordedAt,
+      event_time: input.recordedAt,
+      valid_from: null,
+      valid_to: null,
+      operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID
+    }, input.body);
+    putSpan(stores, input, recordId);
+  });
 }
 
 function ensureEvidenceCapsule(input: Parameters<typeof seedSourceBoundRecall>[0]): void {
@@ -124,43 +122,6 @@ function putSpan(
     recorded_at: input.recordedAt
   });
   return spanId;
-}
-
-function putFactorIncidence(
-  stores: ReturnType<typeof createDaemonFieldComposition>["stores"],
-  input: Parameters<typeof seedSourceBoundRecall>[0],
-  spanId: string
-): void {
-  const factorId = hashFactorId({
-    family: "f1",
-    canonical_payload: input.factorValue,
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID
-  }, fieldContractSha256);
-  stores.putDescriptor({
-    ...receiptFields(factorId, FACTOR_INCIDENCE_OPERATOR_ID, "projection_generation"),
-    schema_version: 1,
-    workspace_id: input.workspaceId,
-    family: "f1",
-    canonical_payload: input.factorValue,
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID,
-    recorded_at: input.recordedAt
-  });
-  const incidenceId = hashIncidenceId({
-    span_id: spanId,
-    factor_id: factorId,
-    scope: input.workspaceId,
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID
-  }, fieldContractSha256);
-  stores.putIncidence({
-    ...receiptFields(incidenceId, FACTOR_INCIDENCE_OPERATOR_ID, "projection_generation"),
-    schema_version: 1,
-    workspace_id: input.workspaceId,
-    span_id: spanId,
-    factor_id: factorId,
-    scope: input.workspaceId,
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID,
-    recorded_at: input.recordedAt
-  });
 }
 
 function receiptFields(identity: string, producer: string, consumer: string) {

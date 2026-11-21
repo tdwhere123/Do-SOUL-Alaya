@@ -3,15 +3,12 @@ import {
   RequestBudgetSchema,
   buildVerifiedUserAssertionReceiptV2Preimage,
   formatVerifiedUserAssertionV2SourceHash,
-  hashDerivationJobId,
   LegacyCandidateMemorySignalSchema,
   type LegacyCandidateMemorySignal,
-  type OpenSemanticFactorFormationCapture
 } from "@do-soul/alaya-protocol";
 import {
   EvidenceService,
   MemoryService,
-  RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
   SignalService,
   fieldContractSha256,
   runConditionalFieldRecall,
@@ -31,8 +28,6 @@ import {
   prepareIndexedRecallProjection,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { readStoredSemanticFactorFormation } from
-  "../../../../../../packages/storage/src/repos/capsules/reads/qualification/semantic-factor-formation-read.js";
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import { conditionalRecallPayload } from "../../runtime/field/query-only-hydration-fixture.js";
 import {
@@ -74,7 +69,6 @@ export async function openEligibilityRuntime(): Promise<EligibilityLiveRuntime> 
     now: () => CLOCK,
     sha256: fieldContractSha256,
     fieldStores: field.stores,
-    factFrameProposalNormalizer: RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER
   });
   const router = new MaterializationRouter({
     evidenceService,
@@ -190,14 +184,6 @@ export function createdEvidenceId(
     : undefined;
 }
 
-export async function readQualifiedCapture(
-  repo: SqliteEvidenceCapsuleRepo,
-  evidenceId: string
-): Promise<OpenSemanticFactorFormationCapture | undefined> {
-  const qualified = await readQualifiedEvidence(repo, evidenceId);
-  return qualified[0]?.semantic_factor_formation;
-}
-
 export async function readQualifiedEvidence(
   repo: SqliteEvidenceCapsuleRepo,
   evidenceId: string
@@ -205,35 +191,6 @@ export async function readQualifiedEvidence(
   return await repo.findRecallQualifiedByIds(WORKSPACE_ID, [
     { object_id: evidenceId }
   ]);
-}
-
-export function readDurableFormation(
-  database: StorageDatabase,
-  evidenceId: string
-): OpenSemanticFactorFormationCapture | undefined {
-  const row = database.connection.prepare(`
-    SELECT workspace_id AS semantic_formation_workspace_id,
-           schema_version AS semantic_formation_schema_version,
-           operator_id AS semantic_formation_operator_id,
-           status AS semantic_formation_status,
-           producer_operator_id AS semantic_formation_producer_operator_id,
-           source_sha256 AS semantic_formation_source_sha256,
-           graph_json AS semantic_formation_graph_json,
-           capture_digest AS semantic_formation_capture_digest
-    FROM evidence_semantic_factor_formations
-    WHERE evidence_object_id = ?
-  `).get(evidenceId);
-  const evidence = database.connection.prepare(`
-    SELECT excerpt FROM evidence_capsules WHERE object_id = ?
-  `).get(evidenceId) as { readonly excerpt: string | null } | undefined;
-  return row === undefined
-    ? undefined
-    : readStoredSemanticFactorFormation(
-      row as Parameters<typeof readStoredSemanticFactorFormation>[0],
-      WORKSPACE_ID,
-      evidence?.excerpt ?? null,
-      undefined
-    );
 }
 
 export async function recallLiveSource(
@@ -260,16 +217,4 @@ export async function recallLiveSource(
     ...request, readers, as_of: CLOCK, budget: RequestBudgetSchema.parse(request.budget),
     snapshot_id: snapshotIdFromPin(WORKSPACE_ID, readers.snapshotPin!(WORKSPACE_ID))
   });
-}
-
-export function f3Factors(field: PlantedField) {
-  return field.stores.listFactors(WORKSPACE_ID).filter((factor) => factor.family === "f3");
-}
-
-export function f3CaptureJob(field: PlantedField, producer: string) {
-  return field.stores.getJob(WORKSPACE_ID, hashDerivationJobId({
-    purpose: "f3_semantic_capture",
-    operator_id: producer,
-    input_evidence_ids: [EVIDENCE_ID]
-  }, fieldContractSha256));
 }

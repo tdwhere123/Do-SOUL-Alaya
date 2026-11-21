@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  FACTOR_INCIDENCE_OPERATOR_ID,
   EvidenceCapsuleSchema,
   MemoryDimension,
   RunMode,
@@ -12,8 +11,6 @@ import {
   WorkspaceState,
   hashAddressableSourceSpanId,
   hashContentDigest,
-  hashFactorId,
-  hashIncidenceId,
   hashSourceRecordId,
   type EventLogEntry,
   type FieldContractSha256
@@ -389,30 +386,4 @@ function insertIncidence(
     workspace_id: workspaceId, span_id, record_id, start_offset: 0, end_offset: token.length,
     purpose: "sentence", producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID, recorded_at: CLOCK
   });
-  const factor_id = hashFactorId({
-    family: "f0",
-    canonical_payload: token,
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID
-  }, fieldSha256);
-  database.connection.prepare(`
-    INSERT INTO factor_descriptors (
-      workspace_id, factor_id, family, canonical_payload, operator_id, recorded_at
-    ) VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    workspaceId, factor_id, "f0", token, FACTOR_INCIDENCE_OPERATOR_ID, CLOCK
-  );
-  const incidence_id = hashIncidenceId({
-    span_id,
-    factor_id,
-    scope: workspaceId,
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID
-  }, fieldSha256);
-  database.connection.prepare(`
-    INSERT INTO factor_incidences (
-      workspace_id, incidence_id, span_id, factor_id, scope, operator_id, recorded_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    workspaceId, incidence_id, span_id, factor_id, workspaceId,
-    FACTOR_INCIDENCE_OPERATOR_ID, CLOCK
-  );
 }

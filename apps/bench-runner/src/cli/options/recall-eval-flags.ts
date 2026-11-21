@@ -28,13 +28,6 @@ export function consumeRecallEvalPathFlag(
     );
     return nextIndex(index, token);
   }
-  if (matchFlagToken(token, "--fact-frame-retrofit-ledger")) {
-    state.factFrameRetrofitLedger = readRequiredFlagValue(
-      args, index, token, "--fact-frame-retrofit-ledger",
-      "--fact-frame-retrofit-ledger requires an NDJSON path"
-    );
-    return nextIndex(index, token);
-  }
   if (matchFlagToken(token, "--snapshot-consume-authority")) {
     const raw = readRequiredFlagValue(
       args, index, token, "--snapshot-consume-authority",

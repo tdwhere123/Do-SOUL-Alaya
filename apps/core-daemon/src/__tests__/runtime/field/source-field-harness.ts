@@ -126,9 +126,6 @@ export async function produceAdaSource(
   stores: PlantedField["stores"],
   factorValue: string
 ): Promise<void> {
-  const extract = vi.fn(async () => {
-    throw new Error("provider must not run during source formation");
-  });
   const service = new EvidenceService({
     evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database),
     eventLogRepo: new SqliteEventLogRepo(database),
@@ -136,11 +133,7 @@ export async function produceAdaSource(
     generateObjectId: () => EVIDENCE_ID,
     now: () => CLOCK,
     sha256: fieldContractSha256,
-    fieldStores: stores,
-    semanticExtractor: {
-      operator_id: "structured_open_semantic_factor_v1",
-      extract
-    }
+    fieldStores: stores
   });
   await service.create({
     created_by: "system",
@@ -160,7 +153,6 @@ export async function produceAdaSource(
     workspace_id: WORKSPACE_ID,
     surface_id: null
   });
-  expect(extract).not.toHaveBeenCalled();
 }
 
 export function plantRevoke(

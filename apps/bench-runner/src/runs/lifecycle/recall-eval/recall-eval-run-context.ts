@@ -150,10 +150,6 @@ function assertDerivedProjectionRebuildBoundary(
       options.experiment !== true) {
     throw new Error("historical extraction prompt requires experiment mode");
   }
-  if (options.factFrameRetrofitLedgerPath !== undefined &&
-      options.derivedEvidenceProjectionRebuild !== true) {
-    throw new Error("fact-frame retrofit ledger requires derived evidence projection rebuild");
-  }
   if (options.warmDerivedSnapshotReceiptPath !== undefined &&
       options.experiment !== true) {
     throw new Error("warm derived snapshot restore requires experiment mode");

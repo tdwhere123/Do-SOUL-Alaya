@@ -49,11 +49,6 @@ export function buildRecallEvalWorkerCliArgs(
   pushOptionalArg(args, "--pinned-meta-root", opts.pinnedMetaRoot);
   pushFlag(args, "--experiment", opts.experiment);
   pushFlag(args, "--rebuild-evidence-search-projections", opts.derivedEvidenceProjectionRebuild);
-  pushFlag(
-    args,
-    "--backfill-missing-fact-frame-formations",
-    opts.backfillMissingFactFrameFormations
-  );
   pushOptionalArg(args, "--warm-derived-snapshot-receipt", opts.warmDerivedSnapshotReceiptPath);
   pushOptionalArg(
     args,
@@ -65,7 +60,6 @@ export function buildRecallEvalWorkerCliArgs(
   pushOptionalArg(args, "--query-semantic-factor-cache", opts.querySemanticFactorCachePath);
   pushOptionalArg(args, "--snapshot-consume-authority", opts.snapshotConsumeAuthority);
   pushOptionalArg(args, "--seed-extraction-system-prompt", opts.seedExtractionSystemPromptPath);
-  pushOptionalArg(args, "--fact-frame-retrofit-ledger", opts.factFrameRetrofitLedgerPath);
   pushOptionalArg(args, "--question-manifest", opts.questionManifest);
   pushOptionalArg(args, "--embedding", opts.embeddingMode);
   return args;

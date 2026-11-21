@@ -9,9 +9,7 @@ import {
   hashDerivationJobId,
   hashEffectRequestDigest,
   hashEffectGovernanceFrontier,
-  hashFactorId,
   hashGenerationId,
-  hashIncidenceId,
   hashSourceRecordId,
   type FieldContractSha256
 } from "@do-soul/alaya-protocol";
@@ -20,8 +18,6 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import type {
   FieldCausalUsageRow,
   FieldDerivationJobRow,
-  FieldFactorDescriptorRow,
-  FieldFactorIncidenceRow,
   FieldProjectionGenerationRow,
   FieldProofEffectRow,
   FieldSourceRecordRow,
@@ -31,7 +27,7 @@ import type {
 export function assertSubjectNotErased(
   database: StorageDatabase,
   workspaceId: string,
-  subjectKind: "source_record" | "factor",
+  subjectKind: "source_record",
   subjectId: string
 ): void {
   const row = database.connection.prepare(`
@@ -60,28 +56,6 @@ export function verifyPersistedSourceSpan(
   sha256: FieldContractSha256
 ): void {
   assertHashed("source span", row.span_id, () => hashAddressableSourceSpanId(row, sha256));
-}
-
-export function verifyPersistedFactor(
-  row: FieldFactorDescriptorRow,
-  sha256: FieldContractSha256
-): void {
-  const canonicalPayload = row.canonical_payload;
-  if (canonicalPayload === null) {
-    throw new StorageError("VALIDATION_FAILED", "factor payload is required");
-  }
-  assertHashed("factor", row.factor_id, () => hashFactorId({
-    family: row.family,
-    canonical_payload: canonicalPayload,
-    operator_id: row.operator_id
-  }, sha256));
-}
-
-export function verifyPersistedIncidence(
-  row: FieldFactorIncidenceRow,
-  sha256: FieldContractSha256
-): void {
-  assertHashed("incidence", row.incidence_id, () => hashIncidenceId(row, sha256));
 }
 
 export function canonicalizeEvidenceIdsJson(json: string): string {

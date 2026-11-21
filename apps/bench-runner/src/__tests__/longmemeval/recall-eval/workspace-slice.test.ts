@@ -589,14 +589,19 @@ describe("workspace slice install and daemon reopen", () => {
     }
   });
 
-  it("restores foreign_keys after a failed slice attach", () => {
+  it("rolls back an incomplete slice replacement and restores SQLite state", () => {
     const dataDir = join(root, "fk-restore");
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
     const live = initDatabase({ filename: join(dataDir, "alaya.db") });
     try {
+      const original = live.connection.prepare("SELECT workspace_id FROM workspaces ORDER BY workspace_id").all();
+      expect(original.length).toBeGreaterThan(0);
       const triggerCountBefore = countTriggers(live);
       expect(triggerCountBefore).toBeGreaterThan(0);
-      expect(() => loadSliceIntoOpenDatabase(live, join(dataDir, "missing-slice.db"))).toThrow();
+      expect(() => loadSliceIntoOpenDatabase(live, join(dataDir, "missing-slice.db"))).toThrow(/no such table/u);
+      expect(live.connection.inTransaction).toBe(false);
+      expect(live.connection.prepare("SELECT workspace_id FROM workspaces ORDER BY workspace_id").all()).toEqual(original);
+      expect(live.connection.pragma("database_list")).not.toContainEqual(expect.objectContaining({ name: "slice_src" }));
       const fk = live.connection.pragma("foreign_keys") as ReadonlyArray<{ foreign_keys: number }>;
       expect(fk[0]?.foreign_keys).toBe(1);
       expect(countTriggers(live)).toBe(triggerCountBefore);
@@ -628,8 +633,6 @@ function assertSliceMatchesPacked(
   try {
     expect(countTableWhere(slice, "memory_entries", workspaceId))
       .toBe(countTableWhere(packed, "memory_entries", workspaceId));
-    expect(countTableWhere(slice, "factor_incidences", workspaceId))
-      .toBe(countTableWhere(packed, "factor_incidences", workspaceId));
     expect(countFts(slice, "memory_content_fts_porter"))
       .toBe(countTableWhere(packed, "memory_entries", workspaceId));
     expect(countTableWhere(slice, "memory_entries", workspaceId === WORKSPACE_A ? WORKSPACE_B : WORKSPACE_A))

@@ -2,12 +2,10 @@ import { normalizeMemoryObjectKeySurface } from "@do-soul/alaya-protocol";
 import { tokenizeWithSpans } from "../normalize/tokenize.js";
 
 export function occupancySet(
-  memoryContent: string,
-  factKeyContents: readonly string[]
+  memoryContent: string
 ): ReadonlySet<string> {
   const occupied = new Set<string>();
   addTextOccupancy(occupied, memoryContent);
-  for (const fact of factKeyContents) addTextOccupancy(occupied, fact);
   return occupied;
 }
 

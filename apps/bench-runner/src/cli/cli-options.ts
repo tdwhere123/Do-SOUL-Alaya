@@ -67,10 +67,8 @@ export interface ParsedFlags {
   readonly tolerateProviderTaskFailures: boolean;
   readonly experiment?: boolean;
   readonly rebuildEvidenceSearchProjections?: boolean;
-  readonly backfillMissingFactFrameFormations?: boolean;
   readonly warmDerivedSnapshotReceipt?: string;
   readonly embeddingCacheOverlayReceipt?: string;
-  readonly factFrameRetrofitLedger?: string;
   readonly seedExtractionSystemPrompt?: string;
   readonly querySemanticFactorCache?: string;
   // --qa gates the end-to-end QA harness; default off means zero LLM calls/cost.
@@ -120,10 +118,8 @@ export interface ParsedFlagsState {
   tolerateProviderTaskFailures: boolean;
   experiment: boolean;
   rebuildEvidenceSearchProjections: boolean;
-  backfillMissingFactFrameFormations: boolean;
   warmDerivedSnapshotReceipt?: string;
   embeddingCacheOverlayReceipt?: string;
-  factFrameRetrofitLedger?: string;
   seedExtractionSystemPrompt?: string;
   querySemanticFactorCache?: string;
   qa: boolean;
@@ -138,7 +134,6 @@ export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   // Hidden --r3-spend-approval is a historical operator flag for the same field.
   assertFlagAtMostOnce(args, ["--expansion-spend-approval", "--r3-spend-approval"]);
   assertFlagAtMostOnce(args, "--extraction-predecessor-authority");
-  assertFlagAtMostOnce(args, "--fact-frame-retrofit-ledger");
   assertFlagAtMostOnce(args, "--seed-extraction-system-prompt");
   assertFlagAtMostOnce(args, "--warm-derived-snapshot-receipt");
   assertFlagAtMostOnce(args, "--embedding-cache-overlay");
@@ -179,7 +174,6 @@ function createParsedFlagsState(): ParsedFlagsState {
     materializeQuestionDbs: false,
     experiment: false,
     rebuildEvidenceSearchProjections: false,
-    backfillMissingFactFrameFormations: false,
     tolerateProviderTaskFailures: false,
     shards: [],
     collectingShards: false
@@ -296,34 +290,12 @@ function consumePathFlags(
   token: string,
   state: ParsedFlagsState
 ): number | undefined {
-  const manifestIndex = consumeQuestionManifestFlag(args, index, token, state);
-  if (manifestIndex !== undefined) return manifestIndex;
-  return consumeOtherPathFlags(args, index, token, state);
-}
-
-function consumeQuestionManifestFlag(
-  args: ReadonlyArray<string>,
-  index: number,
-  token: string,
-  state: ParsedFlagsState
-): number | undefined {
-  if (!matchFlagToken(token, "--question-manifest")) return undefined;
-  state.questionManifest = readRequiredFlagValue(
-    args,
-    index,
-    token,
-    "--question-manifest",
-    "--question-manifest requires a path"
-  );
-  return nextIndex(index, token);
-}
-
-function consumeOtherPathFlags(
-  args: ReadonlyArray<string>,
-  index: number,
-  token: string,
-  state: ParsedFlagsState
-): number | undefined {
+  if (matchFlagToken(token, "--question-manifest")) {
+    state.questionManifest = readRequiredFlagValue(
+      args, index, token, "--question-manifest", "--question-manifest requires a path"
+    );
+    return nextIndex(index, token);
+  }
   const promotionEvidenceIndex = consumePromotionEvidencePathFlags(args, index, token, state);
   if (promotionEvidenceIndex !== undefined) return promotionEvidenceIndex;
   const recallEvalIndex = consumeRecallEvalPathFlag(args, index, token, state);

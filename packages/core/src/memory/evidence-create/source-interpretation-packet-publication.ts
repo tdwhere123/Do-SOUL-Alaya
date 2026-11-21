@@ -69,8 +69,9 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
         evidence_health_state: "questionable", gist: JSON.stringify(bound),
         excerpt: bound.interpretation.mentions.map((row) => row.text).join("\n"),
         source_hash: bound.source_target.content_digest,
-        run_id: input.runId, workspace_id: input.workspaceId, surface_id: null
-      }, [], undefined, undefined, undefined, current, SOURCE_PROVENANCE_CAPSULE);
+        run_id: input.runId, workspace_id: input.workspaceId, surface_id: null,
+        assertSourceCurrent: current, sourceProvenance: SOURCE_PROVENANCE_CAPSULE
+      });
       } catch (error) {
         const raced = await findExisting();
         if (raced === null) throw error;

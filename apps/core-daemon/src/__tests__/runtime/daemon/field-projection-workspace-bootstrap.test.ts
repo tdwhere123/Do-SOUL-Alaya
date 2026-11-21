@@ -7,7 +7,6 @@ import {
   projectSourceFormationSnapshot
 } from "@do-soul/alaya-core";
 import {
-  FACTOR_INCIDENCE_OPERATOR_ID,
   RuntimeGovernanceEventType,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   WorkspaceKind,
@@ -16,8 +15,6 @@ import {
   fieldReceiptContractFields,
   hashAddressableSourceSpanId,
   hashContentDigest,
-  hashFactorId,
-  hashIncidenceId,
   hashSourceRecordId,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
@@ -360,83 +357,47 @@ function seedCurrentSource(
     source_version: "1",
     content_digest
   }, fieldContractSha256);
-  const record = stores.putRecord({
-    ...fieldReceiptContractFields({
-      identity,
-      producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
-      consumer: "projection_generation"
-    }),
-    schema_version: 1,
-    workspace_id: workspaceId,
-    source_id: sourceId,
-    source_version: "1",
-    content_digest,
-    evidence_object_id: EVIDENCE_ID,
-    recorded_at: at,
-    event_time: null,
-    valid_from: null,
-    valid_to: null,
-    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID
-  }, body);
-  const spanIdentity = hashAddressableSourceSpanId({
-    record_id: record.identity,
-    start_offset: 0,
-    end_offset: 16,
-    purpose: "sentence",
-    producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID
-  }, fieldContractSha256);
-  const span = stores.putSpan({
-    ...fieldReceiptContractFields({
-      identity: spanIdentity,
-      producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
-      consumer: "factor_incidence"
-    }),
-    schema_version: 1,
-    workspace_id: workspaceId,
-    record_id: record.identity,
-    start_offset: 0,
-    end_offset: 16,
-    purpose: "sentence",
-    producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
-    recorded_at: at
-  });
-  const factorIdentity = hashFactorId({
-    family: "f1",
-    canonical_payload: "ada",
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID
-  }, fieldContractSha256);
-  stores.putDescriptor({
-    ...fieldReceiptContractFields({
-      identity: factorIdentity,
-      producer: FACTOR_INCIDENCE_OPERATOR_ID,
-      consumer: "projection_generation"
-    }),
-    schema_version: 1,
-    workspace_id: workspaceId,
-    family: "f1",
-    canonical_payload: "ada",
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID,
-    recorded_at: at
-  });
-  const incidenceIdentity = hashIncidenceId({
-    span_id: span.identity,
-    factor_id: factorIdentity,
-    scope: workspaceId,
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID
-  }, fieldContractSha256);
-  stores.putIncidence({
-    ...fieldReceiptContractFields({
-      identity: incidenceIdentity,
-      producer: FACTOR_INCIDENCE_OPERATOR_ID,
-      consumer: "projection_generation"
-    }),
-    schema_version: 1,
-    workspace_id: workspaceId,
-    span_id: span.identity,
-    factor_id: factorIdentity,
-    scope: workspaceId,
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID,
-    recorded_at: at
+  stores.runAtomic(() => {
+    const record = stores.putRecord({
+      ...fieldReceiptContractFields({
+        identity,
+        producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+        consumer: "projection_generation"
+      }),
+      schema_version: 1,
+      workspace_id: workspaceId,
+      source_id: sourceId,
+      source_version: "1",
+      content_digest,
+      evidence_object_id: EVIDENCE_ID,
+      recorded_at: at,
+      event_time: null,
+      valid_from: null,
+      valid_to: null,
+      operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID
+    }, body);
+    const spanIdentity = hashAddressableSourceSpanId({
+      record_id: record.identity,
+      start_offset: 0,
+      end_offset: 16,
+      purpose: "sentence",
+      producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID
+    }, fieldContractSha256);
+    stores.putSpan({
+      ...fieldReceiptContractFields({
+        identity: spanIdentity,
+        producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+        consumer: "factor_incidence"
+      }),
+      schema_version: 1,
+      workspace_id: workspaceId,
+      record_id: record.identity,
+      start_offset: 0,
+      end_offset: 16,
+      purpose: "sentence",
+      producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+      recorded_at: at
+    });
   });
 }
 

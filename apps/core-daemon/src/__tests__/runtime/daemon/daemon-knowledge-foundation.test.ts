@@ -28,7 +28,7 @@ import { createDaemonRepositories } from
   "../../../runtime/daemon/wiring/daemon-repositories.js";
 
 describe("daemon knowledge foundation", () => {
-  it("forms Fact Keys from retained verified assertion receipts without a model fact frame", async () => {
+  it("keeps verified source assertions readable after retiring generated Fact Keys", async () => {
     const harness = await createHarness();
     try {
       const signal = await compileVerifiedAssertionSignal("I have a dog.");
@@ -42,17 +42,13 @@ describe("daemon knowledge foundation", () => {
       );
       await appendMaterializationEvent(harness.repositories, signal, evidence);
 
-      const qualified = await harness.repositories.evidenceCapsuleRepo
-        .findRecallQualifiedFactKeysByIds("workspace-1", [evidence.object_id]);
+      const repo = harness.repositories.evidenceCapsuleRepo;
+      const [qualified] = await repo.findRecallQualifiedByIds("workspace-1", [{ object_id: evidence.object_id }]);
 
       expect(parseVerifiedUserAssertionSourceHash(evidence.source_hash)?.version).toBe(2);
-      expect(qualified.map((row) => row.matched_projection?.content))
-        .toContain("I have a dog");
-      expect(qualified[0]?.matched_fact_frame?.slots).toEqual([
-        { role: "subject", text: "I" },
-        { role: "relation", text: "have" },
-        { role: "value", text: "a dog" }
-      ]);
+      expect(qualified?.capsule.excerpt).toBe("I have a dog.");
+      await expect(repo.findRecallQualifiedFactKeysByIds("workspace-1", [evidence.object_id]))
+        .resolves.toEqual([]);
     } finally {
       harness.database.close();
     }

@@ -6,14 +6,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { initDatabase, StorageDatabase } from "../../../sqlite/db.js";
 import {
   SqliteFieldEraseBarrierRepo,
-  SqliteFieldFactorRepo,
   SqliteFieldProjectionGenerationRepo,
   SqliteFieldSourceRecordRepo
 } from "../../../repos/field/index.js";
 import {
   CLOCK,
   fieldSha256,
-  hashedFactor,
   hashedGeneration,
   hashedRecord,
   openFieldDatabase
@@ -165,10 +163,9 @@ describe("field contract cutover", () => {
   });
 
   it("fails closed on erase identity collision and does not wipe another subject", () => {
-    const { records, factors, erase } = createRepos();
+    const { records, erase } = createRepos();
     const record = records.insert(hashedRecord("workspace-1", "visible body"));
     const other = records.insert(hashedRecord("workspace-1", "other body", "src-2"));
-    const factor = factors.insertDescriptor(hashedFactor("workspace-1", "secret token"));
 
     erase.apply(eraseBarrier("barrier-1", "workspace-1", "source_record", record.record_id));
     expect(() => erase.apply(
@@ -177,8 +174,6 @@ describe("field contract cutover", () => {
     expect(records.findById("workspace-1", record.record_id)?.source_body).toBeNull();
     expect(records.findById("workspace-1", other.record_id)?.source_body).toBe("other body");
 
-    erase.apply(eraseBarrier("barrier-2", "workspace-1", "factor", factor.factor_id));
-    expect(factors.findDescriptor("workspace-1", factor.factor_id)?.canonical_payload).toBeNull();
   });
 
   it("does not restore plaintext on replay and rejects admit after erase", () => {
@@ -228,7 +223,6 @@ function createRepos() {
   tracked.add(database);
   return {
     records: new SqliteFieldSourceRecordRepo(database, fieldSha256),
-    factors: new SqliteFieldFactorRepo(database, fieldSha256),
     generations: new SqliteFieldProjectionGenerationRepo(database, fieldSha256),
     erase: new SqliteFieldEraseBarrierRepo(database, fieldSha256)
   };

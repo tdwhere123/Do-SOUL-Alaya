@@ -1,13 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { hashLabeledIdentity, hashSourceRecordId, sourceRecallTarget, type SourceRepresentation } from "@do-soul/alaya-protocol";
 import { type StorageDatabase } from "../../../../../sqlite/db.js";
-import { SqliteFieldEraseBarrierRepo, SqliteFieldFactorRepo, SqliteFieldSourceRecordRepo,
+import { SqliteFieldEraseBarrierRepo, SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo } from "../../../../../repos/field/index.js";
 import {
   CLOCK,
   fieldSha256,
-  hashedFactor,
-  hashedIncidence,
   hashedRecord,
   hashedSpan,
   openFieldDatabase
@@ -69,7 +67,6 @@ describe("source interpretation dependency erase", () => {
     tracked.add(database);
     const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
     const spans = new SqliteFieldSourceSpanRepo(database, fieldSha256);
-    const factors = new SqliteFieldFactorRepo(database, fieldSha256);
     const erase = new SqliteFieldEraseBarrierRepo(database, fieldSha256);
     const origin = records.insert(representedRecord("raw-private", "private\t source\n body", { kind: "retained_excerpt" }));
     const other = records.insert(representedRecord("raw-other", "Unrelated retained text.", { kind: "retained_excerpt" }));
@@ -80,8 +77,6 @@ describe("source interpretation dependency erase", () => {
       kind: "canonical_projection", source_record_ids: [origin.record_id, other.record_id]
     }), evidence_object_id: aliasId });
     const span = spans.insert(hashedSpan("workspace-1", projection.record_id, 0, 7));
-    const factor = factors.insertDescriptor(hashedFactor("workspace-1", "private projection factor"));
-    const incidence = factors.insertIncidence(hashedIncidence("workspace-1", span.span_id, factor.factor_id, "claim"));
     seedCapsule(database, interpretationId, JSON.stringify({
       contract: "published-source-interpretation-v4", broken: true,
       source_target: sourceRecallTarget({ workspace_id: "workspace-1", root_kind: "source_record",
@@ -111,8 +106,6 @@ describe("source interpretation dependency erase", () => {
     ).get("workspace-1", projection.record_id)).toEqual({ count: 0 });
     expect.soft(erase.isErased("workspace-1", projection.record_id)).toBe(true);
     expect.soft(spans.findById("workspace-1", span.span_id)).toBeNull();
-    expect.soft(factors.findIncidence("workspace-1", incidence.incidence_id)).toBeNull();
-    expect.soft(factors.findDescriptor("workspace-1", factor.factor_id)?.canonical_payload).toBeNull();
     expect.soft(readCapsule(database, aliasId)).toEqual({ lifecycle_state: "tombstone", gist: "erased" });
     expect.soft(readCapsule(database, interpretationId)).toEqual({ lifecycle_state: "tombstone", gist: "erased" });
     expect(() => database.connection.prepare(`

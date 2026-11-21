@@ -56,7 +56,7 @@ export function publishStatement(environment: Pick<Fixture, "database">, input: 
       event_anchor: null, physical_anchor: null, evidence_health_state: "questionable", gist: canonicalJson(bound),
       excerpt: bound.message.text, source_hash: bound.source_target.content_digest,
       run_id: "run-statements", workspace_id: input.record.workspace_id, surface_id: null
-    }, [], undefined, undefined, undefined, true);
+    }, [], true);
     putSourceStatementArtifact(environment.database, artifact);
   })();
   return { bound, source: sourceIndexStatementTarget(artifact, input.record.source_id) };

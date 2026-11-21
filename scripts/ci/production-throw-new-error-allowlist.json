@@ -188,7 +188,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/cli/recall-eval/command.ts": {
-    "max": 7,
+    "max": 4,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/cli/source-snapshot/command.ts": {
@@ -1004,7 +1004,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-run-context.ts": {
-    "max": 15,
+    "max": 14,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/lifecycle/recall-eval/recall-eval-runtime.ts": {
@@ -1288,23 +1288,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/snapshot/recall-eval/evidence-search-projection-rebuild.ts": {
-    "max": 3,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/snapshot/recall-eval/fact-frame-formation-replay.ts": {
-    "max": 1,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/snapshot/recall-eval/fact-frame-formation/backfill.ts": {
-    "max": 5,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/snapshot/recall-eval/fact-frame-formation/verified-assertion-authority.ts": {
-    "max": 1,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/bench-runner/src/runs/snapshot/recall-eval/fact-frame-retrofit.ts": {
-    "max": 4,
+    "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/snapshot/recall-eval/recall-eval-db.ts": {
@@ -2156,22 +2140,6 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/storage/src/repos/capsules/reads/evidence-search/evidence-keyword-search.ts": {
-    "max": 3,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "packages/storage/src/repos/capsules/reads/qualification/fact-frame-formation-read.ts": {
-    "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "packages/storage/src/repos/capsules/reads/qualification/semantic-factor-formation-read.ts": {
-    "max": 3,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "packages/storage/src/repos/capsules/writes/fact-frame-formation/capture-store.ts": {
-    "max": 4,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "packages/storage/src/repos/capsules/writes/semantic-factor-formation/capture-store.ts": {
     "max": 3,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },

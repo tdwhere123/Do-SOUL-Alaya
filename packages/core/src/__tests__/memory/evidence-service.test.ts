@@ -76,12 +76,6 @@ describe("EvidenceService", () => {
     expect(create).toHaveBeenCalledWith(
       expect.any(Object),
       [projection],
-      expect.objectContaining({ status: "unavailable" }),
-      expect.objectContaining({ status: "unavailable", graph: null }),
-      expect.objectContaining({
-        status: "not_applicable",
-        reason_code: "upstream_not_formed"
-      }),
       false
     );
     expect(appendedEvents[1]).toMatchObject({

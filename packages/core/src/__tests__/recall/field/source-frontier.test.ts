@@ -19,9 +19,7 @@ describe("conditional field source generation frontier", () => {
     const reordered = {
       ...stores,
       listStoredRecords: (workspaceId: string) => [...stores.listStoredRecords(workspaceId)].reverse(),
-      listSpans: (workspaceId: string) => [...stores.listSpans(workspaceId)].reverse(),
-      listFactors: (workspaceId: string) => [...stores.listFactors(workspaceId)].reverse(),
-      listIncidences: (workspaceId: string) => [...stores.listIncidences(workspaceId)].reverse()
+      listSpans: (workspaceId: string) => [...stores.listSpans(workspaceId)].reverse()
     };
     expect(projectSourceFormationSnapshot({ workspaceId: "workspace-1", stores: reordered })).toEqual(first);
     expect(Object.keys(first)).toEqual(["input_event_frontier"]);

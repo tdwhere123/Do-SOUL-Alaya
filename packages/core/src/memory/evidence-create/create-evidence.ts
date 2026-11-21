@@ -1,32 +1,22 @@
 import {
   EvidenceCapsuleSchema,
+  EvidenceSearchProjectionSchema,
   CommittedObjectError,
-  OPEN_SEMANTIC_FACTOR_FORMATION_REJECTED_ADMISSION,
   MemoryGovernanceEventType,
   SoulEvidenceCreatedPayloadSchema,
   type EvidenceCapsule,
-  type EvidenceFactFrameFormationProposal,
   type EvidenceSearchProjection,
   type EventLogEntry,
-  type FactorIncidencePort,
-  type FieldContractSha256,
-  type OpenSemanticFactorFormationAdmission,
   type SourceAdmissionPort
 } from "@do-soul/alaya-protocol";
+import type { EvidenceCapsuleInput, EvidenceServiceEvidenceCapsuleRepoPort } from "../evidence-service.js";
 import { CoreError } from "../../shared/errors.js";
 import {
   appendEventLogSynchronously,
   EventLogSyncAppendRequiredError
 } from "../../runtime/event-publisher.js";
 import { runEventLogTransaction } from "../memory-service/memory-audit-append.js";
-import type { OpenSemanticFactorExtractionPort } from
-  "../../semantic/open-semantic-factor-extraction-port.js";
-import type { EvidenceFactFrameProposalNormalizer } from "@do-soul/alaya-protocol/node/source-frame";
-import {
-  admitEvidenceFieldFormation,
-  planEvidenceFormation,
-  type EvidenceFormationPlan
-} from "./formation-plan.js";
+import { admitEvidenceSource } from "./admit-evidence-source.js";
 import type { FieldFormationStores } from "./field-stores.js";
 import { appendSourceRecordAdmitted } from "./source-admission-audit.js";
 import {
@@ -39,36 +29,12 @@ import {
 // Keep this out of the package-root exports and all serialized contracts.
 export const SOURCE_PROVENANCE_CAPSULE = Symbol("source provenance capsule");
 
-export async function createEvidenceCapsule(input: Readonly<{
+type EvidenceCreateInput = Readonly<{
   readonly assertSourceCurrent?: () => void;
-  readonly sourceFieldFormation?: typeof SOURCE_PROVENANCE_CAPSULE;
-  readonly capsuleInput: Omit<
-    EvidenceCapsule,
-    "object_id" | "object_kind" | "schema_version" | "lifecycle_state" | "created_at" | "updated_at"
-  > & {
-    readonly object_id?: string;
-  };
+  readonly sourceProvenance?: typeof SOURCE_PROVENANCE_CAPSULE;
+  readonly capsuleInput: EvidenceCapsuleInput;
   readonly searchProjections: readonly Readonly<EvidenceSearchProjection>[];
-  readonly factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>;
-  readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>;
-  readonly evidenceCapsuleRepo: {
-    create(
-      capsule: EvidenceCapsule,
-      searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-      factFrameFormation?: EvidenceFormationPlan["factFrameCapture"],
-      semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"]
-      , semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"],
-      sourceProvenance?: boolean
-    ): Promise<Readonly<EvidenceCapsule>>;
-    createInCurrentTransaction?(
-      capsule: EvidenceCapsule,
-      searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-      factFrameFormation?: EvidenceFormationPlan["factFrameCapture"],
-      semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"]
-      , semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"],
-      sourceProvenance?: boolean
-    ): Readonly<EvidenceCapsule>;
-  };
+  readonly evidenceCapsuleRepo: Pick<EvidenceServiceEvidenceCapsuleRepoPort, "createInCurrentTransaction">;
   readonly eventLogRepo: {
     append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
       EventLogEntry | Promise<EventLogEntry>;
@@ -77,15 +43,11 @@ export async function createEvidenceCapsule(input: Readonly<{
   readonly runtimeNotifier: {
     notifyEntry(entry: EventLogEntry): void | Promise<void>;
   };
-  readonly factFrameProposalNormalizer?: Readonly<EvidenceFactFrameProposalNormalizer> | null;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly generateObjectId: () => string;
   readonly now: () => string;
-  readonly sha256?: FieldContractSha256;
-  readonly sourceAdmission?: SourceAdmissionPort;
-  readonly factorIncidence?: FactorIncidencePort;
-  readonly fieldStores?: FieldFormationStores;
-  readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
+  readonly sourceAdmission: SourceAdmissionPort;
+  readonly fieldStores: FieldFormationStores;
   readonly gardenIntentPort?: SourceWriteGardenIntentPort;
   readonly projectionLifecycle?: Readonly<{
     requestRebuild(workspaceId: string, requestedAt: string): void;
@@ -95,10 +57,12 @@ export async function createEvidenceCapsule(input: Readonly<{
     readonly runId: string | null;
     readonly sourceSignalId: string | null;
   };
-}>): Promise<Readonly<EvidenceCapsule>> {
+}>;
+
+export async function createEvidenceCapsule(input: EvidenceCreateInput): Promise<Readonly<EvidenceCapsule>> {
   const timestamp = input.now();
   const evidence = parseCreatedCapsule(input, timestamp);
-  const formation = planOptionalFormation(input, evidence);
+  const projections = parseSearchProjections(input, evidence.object_id);
   const enqueueEnrichment = freezeEvidenceEnrichmentIntent(input.enqueueEnrichment);
   if (enqueueEnrichment !== undefined && input.gardenIntentPort === undefined) {
     throw new CoreError(
@@ -106,9 +70,9 @@ export async function createEvidenceCapsule(input: Readonly<{
       "Atomic enrichment enqueue requested but no Garden intent port is wired."
     );
   }
-  const { event, created } = persistCreatedEvidence(input, evidence, formation, enqueueEnrichment);
-  if (input.sourceFieldFormation !== SOURCE_PROVENANCE_CAPSULE) {
-    await admitOptionalFieldFormation(input, created, formation);
+  const { event, created } = persistCreatedEvidence(input, evidence, projections, enqueueEnrichment);
+  if (input.sourceProvenance !== SOURCE_PROVENANCE_CAPSULE) {
+    await admitOptionalEvidenceSource(input, created);
   }
   try {
     input.projectionLifecycle?.drainPending();
@@ -130,18 +94,7 @@ export async function createEvidenceCapsule(input: Readonly<{
   return created;
 }
 
-function parseCreatedCapsule(
-  input: Readonly<{
-    readonly capsuleInput: Omit<
-      EvidenceCapsule,
-      "object_id" | "object_kind" | "schema_version" | "lifecycle_state" | "created_at" | "updated_at"
-    > & {
-      readonly object_id?: string;
-    };
-    readonly generateObjectId: () => string;
-  }>,
-  timestamp: string
-): EvidenceCapsule {
+function parseCreatedCapsule(input: EvidenceCreateInput, timestamp: string): EvidenceCapsule {
   const { object_id: reservedObjectId, ...capsuleInput } = input.capsuleInput;
   try {
     return EvidenceCapsuleSchema.parse({
@@ -158,75 +111,28 @@ function parseCreatedCapsule(
   }
 }
 
-function planOptionalFormation(
-  input: Readonly<{
-    readonly searchProjections: readonly Readonly<EvidenceSearchProjection>[];
-    readonly factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>;
-    readonly semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>;
-    readonly factFrameProposalNormalizer?: Readonly<EvidenceFactFrameProposalNormalizer> | null;
-    readonly warn?: (message: string, meta: Record<string, unknown>) => void;
-    readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
-  }>,
-  evidence: EvidenceCapsule
-): EvidenceFormationPlan {
-  idleExtractor(input.semanticExtractor);
+function parseSearchProjections(input: EvidenceCreateInput, evidenceId: string): readonly EvidenceSearchProjection[] {
   try {
-    return planEvidenceFormation({
-      evidence,
-      searchProjections: input.searchProjections,
-      factFrameProposal: input.factFrameProposal,
-      semanticFactorProposal: input.semanticFactorProposal,
-      factFrameProposalNormalizer: input.factFrameProposalNormalizer
-    });
+    const projections = input.searchProjections.map((projection) => EvidenceSearchProjectionSchema.parse(projection));
+    if (projections.some(({ projection_kind }) => projection_kind === "fact_key")) {
+      throw new CoreError("VALIDATION", "Fact-key projections are not accepted on evidence creation");
+    }
+    return projections;
   } catch (error) {
-    input.warn?.("optional evidence formation failed", {
-      evidence_object_id: evidence.object_id,
+    input.warn?.("optional evidence search projections rejected", {
+      evidence_object_id: evidenceId,
       error: error instanceof Error ? error.message : String(error)
     });
-    return planEvidenceFormation({
-      evidence,
-      searchProjections: [],
-      ...(input.semanticFactorProposal === undefined ? {} : {
-        semanticFactorProposal: OPEN_SEMANTIC_FACTOR_FORMATION_REJECTED_ADMISSION
-      })
-    });
+    return [];
   }
 }
 
-async function admitOptionalFieldFormation(
-  input: Readonly<{
-    readonly sha256?: FieldContractSha256;
-    readonly sourceAdmission?: SourceAdmissionPort;
-    readonly factorIncidence?: FactorIncidencePort;
-    readonly fieldStores?: FieldFormationStores;
-    readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
-    readonly warn?: (message: string, meta: Record<string, unknown>) => void;
-    readonly eventLogRepo: {
-      append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
-        EventLogEntry | Promise<EventLogEntry>;
-    };
-    readonly runtimeNotifier: {
-      notifyEntry(entry: EventLogEntry): void | Promise<void>;
-    };
-  }>,
-  evidence: EvidenceCapsule,
-  views: EvidenceFormationPlan
-): Promise<void> {
+async function admitOptionalEvidenceSource(input: EvidenceCreateInput, evidence: EvidenceCapsule): Promise<void> {
   try {
-    const admitted = admitEvidenceFieldFormation({
-      evidence,
-      views,
-      sha256: input.sha256,
-      sourceAdmission: input.sourceAdmission,
-      factorIncidence: input.factorIncidence,
-      fieldStores: input.fieldStores,
-      semanticExtractor: input.semanticExtractor
-    });
-    if (admitted !== null) {
-      await appendSourceRecordAdmitted(input.eventLogRepo, admitted, input.runtimeNotifier);
-    }
+    const admitted = admitEvidenceSource(evidence, input.sourceAdmission, input.fieldStores);
+    await appendSourceRecordAdmitted(input.eventLogRepo, admitted, input.runtimeNotifier);
   } catch (error) {
-    input.warn?.("optional evidence formation failed", {
+    input.warn?.("optional evidence source admission failed", {
       evidence_object_id: evidence.object_id,
       error: error instanceof Error ? error.message : String(error)
     });
@@ -234,35 +140,10 @@ async function admitOptionalFieldFormation(
 }
 
 function persistCreatedEvidence(
-  input: Readonly<{
-    readonly assertSourceCurrent?: () => void;
-    readonly sourceFieldFormation?: typeof SOURCE_PROVENANCE_CAPSULE;
-    readonly evidenceCapsuleRepo: {
-      createInCurrentTransaction?(
-        capsule: EvidenceCapsule,
-        searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-        factFrameFormation?: EvidenceFormationPlan["factFrameCapture"],
-        semanticFactorFormation?: EvidenceFormationPlan["semanticFormation"],
-        semanticCompleteness?: EvidenceFormationPlan["semanticCompleteness"],
-        sourceProvenance?: boolean
-      ): Readonly<EvidenceCapsule>;
-    };
-    readonly eventLogRepo: {
-      append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">):
-        EventLogEntry | Promise<EventLogEntry>;
-      transactional?<T>(fn: () => T): T;
-    };
-    readonly gardenIntentPort?: SourceWriteGardenIntentPort;
-    readonly projectionLifecycle?: Readonly<{
-      requestRebuild(workspaceId: string, requestedAt: string): void;
-    }>;
-  }>,
+  input: EvidenceCreateInput,
   evidence: EvidenceCapsule,
-  formation: EvidenceFormationPlan,
-  enqueueEnrichment: {
-    readonly runId: string | null;
-    readonly sourceSignalId: string | null;
-  } | undefined
+  projections: readonly EvidenceSearchProjection[],
+  enqueueEnrichment: EvidenceCreateInput["enqueueEnrichment"]
 ): { readonly event: EventLogEntry; readonly created: Readonly<EvidenceCapsule> } {
   const createInCurrentTransaction = input.evidenceCapsuleRepo.createInCurrentTransaction;
   if (createInCurrentTransaction === undefined) {
@@ -278,11 +159,8 @@ function persistCreatedEvidence(
       const created = createInCurrentTransaction.call(
         input.evidenceCapsuleRepo,
         evidence,
-        formation.searchProjections,
-        formation.factFrameCapture,
-        formation.semanticFormation,
-        formation.semanticCompleteness,
-        input.sourceFieldFormation === SOURCE_PROVENANCE_CAPSULE
+        projections,
+        input.sourceProvenance === SOURCE_PROVENANCE_CAPSULE
       );
       if (enqueueEnrichment !== undefined && input.gardenIntentPort !== undefined) {
         admitSourceEnrichmentIntent(input.gardenIntentPort, {
@@ -337,9 +215,6 @@ function appendCreatedSynchronously(
   }
 }
 
-function idleExtractor(extractor?: OpenSemanticFactorExtractionPort): void {
-  if (extractor === undefined) return;
-}
 
 function freezeEvidenceEnrichmentIntent(
   intent: { readonly runId: string | null; readonly sourceSignalId: string | null } | undefined

@@ -63,28 +63,6 @@ it("reports bounded post-commit and memory-profile completion failures", async (
   );
 });
 
-it("requires projection rebuild for default fact-frame backfill", async () => {
-  await expect(runRecallEvalCommand({
-    ...flags(),
-    experiment: true,
-    backfillMissingFactFrameFormations: true
-  })).resolves.toBe(2);
-
-  expect(mocks.runRecallEval).not.toHaveBeenCalled();
-});
-
-it("rejects mixing default backfill with the sealed retrofit ledger", async () => {
-  await expect(runRecallEvalCommand({
-    ...flags(),
-    experiment: true,
-    rebuildEvidenceSearchProjections: true,
-    backfillMissingFactFrameFormations: true,
-    factFrameRetrofitLedger: "/tmp/frames.ndjson"
-  })).resolves.toBe(2);
-
-  expect(mocks.runRecallEval).not.toHaveBeenCalled();
-});
-
 function result(payload: ReturnType<typeof buildFullLongMemEvalPayload>) {
   return {
     slug: "fixture",

@@ -6,9 +6,6 @@ export type {
   FieldEraseBarrierRepo,
   FieldEraseBarrierInput,
   FieldEraseBarrierRow,
-  FieldFactorDescriptorRow,
-  FieldFactorIncidenceRow,
-  FieldFactorRepo,
   FieldProjectionGenerationRepo,
   FieldProjectionGenerationRow,
   FieldProjectionPinRow,
@@ -23,10 +20,7 @@ export type {
   FieldSourceSpanRepo,
   FieldSourceSpanRow
 } from "./ports.js";
-export {
-  SqliteFieldDerivationJobRepo,
-  SqliteFieldFactorRepo
-} from "./factor-repo.js";
+export { SqliteFieldDerivationJobRepo } from "./derivation-job-repo.js";
 export { SqliteFieldEraseBarrierRepo } from "./erase-repo.js";
 export { SqliteFieldProjectionGenerationRepo } from "./generation-repo.js";
 export {
@@ -50,10 +44,8 @@ export {
   SqliteFieldProofEffectRepo
 } from "./usage-effect-repo.js";
 export {
-  factorFromRow,
   generationFromRow,
   generationToRow,
-  incidenceFromRow,
   jobFromRow,
   sourceRecordFromRow,
   sourceSpanFromRow

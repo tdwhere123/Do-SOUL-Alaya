@@ -151,7 +151,7 @@ describe("native retained capsule SourceIndex roots", () => {
         semantic_anchor: { topic: "Proposed source interpretation", keywords: [], summary: "Unreviewed interpretation hypothesis" },
         event_anchor: null, physical_anchor: null, evidence_health_state: "questionable", gist: "provenance gist",
         excerpt: body, source_hash: sourceHash, run_id: "run-1", workspace_id: WORKSPACE, surface_id: null
-      }, [], undefined, undefined, undefined, true);
+      }, [], true);
       if (order === "source-first") {
         const record = publishSource(env, body);
         const first = buildReady(env);

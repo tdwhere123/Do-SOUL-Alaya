@@ -1,8 +1,5 @@
 import type {
   EvidenceCapsule,
-  EvidenceFactFrameFormationCapture,
-  OpenSemanticFactorFormationCapture,
-  EvidenceOsfSemanticCompletenessReceipt,
   EvidenceHealthState,
   EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
@@ -25,18 +22,12 @@ export interface EvidenceCapsuleRepo {
   create(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
-    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
-    semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>,
     // Create-time role: derived provenance excerpts are not new source bodies.
     sourceProvenance?: boolean
   ): Promise<Readonly<EvidenceCapsule>>;
   createInCurrentTransaction(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
-    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
-    semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>,
     sourceProvenance?: boolean
   ): Readonly<EvidenceCapsule>;
   deleteById(objectId: string, workspaceId: string): Promise<void>;

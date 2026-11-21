@@ -2,7 +2,6 @@ import {
   CausalUsageKindSchema,
   DerivationJobStatusSchema,
   EffectDecisionSchema,
-  FactorFamilySchema,
   ProjectionEraseSubjectKindSchema,
   ProjectionGenerationStatusSchema,
   SourceRepresentationSchema,
@@ -20,8 +19,6 @@ import type {
   FieldCausalUsageRow,
   FieldDerivationJobRow,
   FieldEraseBarrierRow,
-  FieldFactorDescriptorRow,
-  FieldFactorIncidenceRow,
   FieldProjectionGenerationRow,
   FieldProjectionArtifactsRow,
   FieldProjectionPinRow,
@@ -81,35 +78,6 @@ export const fieldSourceSpanParser: RowParser<FieldSourceSpanRow> = {
       end_offset: readIntegerField(row, "end_offset"),
       purpose: readNonEmptyStringField(row, "purpose"),
       producer_version: readNonEmptyStringField(row, "producer_version"),
-      workspace_id: readNonEmptyStringField(row, "workspace_id"),
-      recorded_at: readNonEmptyStringField(row, "recorded_at")
-    });
-  }
-};
-
-export const fieldFactorDescriptorParser: RowParser<FieldFactorDescriptorRow> = {
-  parse(value: unknown): FieldFactorDescriptorRow {
-    const row = readRecord(value, "factor_descriptor");
-    return Object.freeze({
-      factor_id: readNonEmptyStringField(row, "factor_id"),
-      workspace_id: readNonEmptyStringField(row, "workspace_id"),
-      family: FactorFamilySchema.parse(readNonEmptyStringField(row, "family")),
-      canonical_payload: readNullableStringField(row, "canonical_payload"),
-      operator_id: readNonEmptyStringField(row, "operator_id"),
-      recorded_at: readNonEmptyStringField(row, "recorded_at")
-    });
-  }
-};
-
-export const fieldFactorIncidenceParser: RowParser<FieldFactorIncidenceRow> = {
-  parse(value: unknown): FieldFactorIncidenceRow {
-    const row = readRecord(value, "factor_incidence");
-    return Object.freeze({
-      incidence_id: readNonEmptyStringField(row, "incidence_id"),
-      span_id: readNonEmptyStringField(row, "span_id"),
-      factor_id: readNonEmptyStringField(row, "factor_id"),
-      scope: readNonEmptyStringField(row, "scope"),
-      operator_id: readNonEmptyStringField(row, "operator_id"),
       workspace_id: readNonEmptyStringField(row, "workspace_id"),
       recorded_at: readNonEmptyStringField(row, "recorded_at")
     });

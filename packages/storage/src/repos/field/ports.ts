@@ -2,7 +2,6 @@ import type {
   CausalUsageKind,
   DerivationJobStatus,
   EffectDecision,
-  FactorFamily,
   ProjectionEraseSubjectKind,
   ProjectionGenerationStatus
 } from "@do-soul/alaya-protocol";
@@ -55,25 +54,6 @@ export type FieldSourceEvidenceBindingRow = Readonly<{
   readonly workspace_id: string;
   readonly record_id: string;
   readonly evidence_object_id: string;
-}>;
-
-export type FieldFactorDescriptorRow = Readonly<{
-  readonly factor_id: string;
-  readonly workspace_id: string;
-  readonly family: FactorFamily;
-  readonly canonical_payload: string | null;
-  readonly operator_id: string;
-  readonly recorded_at: string;
-}>;
-
-export type FieldFactorIncidenceRow = Readonly<{
-  readonly incidence_id: string;
-  readonly span_id: string;
-  readonly factor_id: string;
-  readonly scope: string;
-  readonly operator_id: string;
-  readonly workspace_id: string;
-  readonly recorded_at: string;
 }>;
 
 export type FieldDerivationJobRow = Readonly<{
@@ -182,15 +162,6 @@ export interface FieldSourceSpanRepo {
   insert(row: FieldSourceSpanRow): FieldSourceSpanRow;
   findById(workspaceId: string, spanId: string): FieldSourceSpanRow | null;
   listByWorkspace(workspaceId: string): readonly FieldSourceSpanRow[];
-}
-
-export interface FieldFactorRepo {
-  insertDescriptor(row: FieldFactorDescriptorRow): FieldFactorDescriptorRow;
-  insertIncidence(row: FieldFactorIncidenceRow): FieldFactorIncidenceRow;
-  findDescriptor(workspaceId: string, factorId: string): FieldFactorDescriptorRow | null;
-  findIncidence(workspaceId: string, incidenceId: string): FieldFactorIncidenceRow | null;
-  listDescriptors(workspaceId: string): readonly FieldFactorDescriptorRow[];
-  listIncidences(workspaceId: string): readonly FieldFactorIncidenceRow[];
 }
 
 export interface FieldDerivationJobRepo {

@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { canonicalJson, isHostOccurrenceResourceLimit, type HostOccurrence, type SourceAdmissionContext, type SourceAdmissionRequest } from "@do-soul/alaya-protocol";
+import { isHostOccurrenceResourceLimit, type HostOccurrence, type SourceAdmissionContext, type SourceAdmissionRequest } from "@do-soul/alaya-protocol";
 import { createInMemoryFieldStores } from "../../memory/evidence-create/field-stores.js";
 import { createSourceAdmissionPort } from "../../memory/evidence-create/source-admission.js";
-import { emitDeterministicIncidences } from "../../memory/evidence-create/factor-emit.js";
 import { fieldContractSha256 as sha256 } from "../../shared/field-hash.js";
 
 const occurrence = (overrides: Partial<HostOccurrence> = {}): HostOccurrence => ({ occurrence_id: "local-0",
@@ -20,7 +19,7 @@ function fixture() {
 }
 
 describe("host occurrence source admission", () => {
-  it("keeps unknown, captured empty and empty messages distinct without changing source identity or factor bytes", () => {
+  it("keeps unknown, captured empty and empty messages distinct without changing source identity", () => {
     const plain = fixture(), captured = fixture();
     const before = plain.port.admit(request());
     const after = captured.port.admit(request({ host_occurrences: [occurrence(), occurrence({
@@ -30,17 +29,6 @@ describe("host occurrence source admission", () => {
     expect(after.record.speaker).toBe(before.record.speaker);
     expect(after.spans.map(row => row.purpose)).toEqual(["native_structure", "message"]);
     expect(after.record.host_structure?.occurrence_count).toBe(2);
-    const factors = (spans: typeof after.spans) => emitDeterministicIncidences({ sha256,
-      workspace_id: "workspace-1", scope: "workspace-1", source_id: "record", source_version: "1", content_bytes: "café",
-      recorded_at: "2026-09-13T00:00:00Z", actor: "user_action", event_time: null, valid_from: null, valid_to: null,
-      factFrameSlots: [], semanticSurfaces: [], spans });
-    expect(canonicalJson(factors([after.spans[1]!, after.spans[0]!]))).toBe(canonicalJson(factors(before.spans)));
-    expect(plain.stores.getHostInventory("workspace-1", before.record.identity)).toBeNull();
-    const empty = captured.port.admit(request({ source_id: "empty-inventory", host_occurrences: [] }), context);
-    expect(empty.record.host_structure?.occurrence_count).toBe(0);
-    expect(empty.spans).toHaveLength(1);
-    const excerpt = captured.port.admit(request({ source_id: "excerpt", host_occurrences: [occurrence({ completeness: "excerpt" })] }), context);
-    expect(excerpt.spans).toHaveLength(1);
   });
 
   it("copies before issuer callbacks, requires real context and retains only exact stored inventories", () => {

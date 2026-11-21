@@ -40,8 +40,6 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
     const flags = parseFlags([
       "--experiment",
       "--rebuild-evidence-search-projections",
-      "--fact-frame-retrofit-ledger",
-      "/tmp/fact-frames.ndjson",
       "--seed-extraction-system-prompt",
       "/tmp/historical-prompt.txt"
     ]);
@@ -49,7 +47,6 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
     expect(buildRecallEvalOptions(flags, "/tmp/snapshot.db")).toMatchObject({
       experiment: true,
       derivedEvidenceProjectionRebuild: true,
-      factFrameRetrofitLedgerPath: "/tmp/fact-frames.ndjson",
       seedExtractionSystemPromptPath: "/tmp/historical-prompt.txt"
     });
   });
@@ -106,21 +103,15 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
     expect(stderr).toMatch(/cannot be combined/u);
   });
 
-  it("rejects a retrofit ledger without the explicit rebuild boundary", async () => {
-    const exitCode = await runCli([
-      "recall-eval",
-      "--snapshot",
-      "/tmp/not-read.db",
-      "--experiment",
-      "--fact-frame-retrofit-ledger",
-      "/tmp/fact-frames.ndjson"
-    ]);
-
-    expect(exitCode).toBe(2);
-    expect(stderr).toMatch(
-      /--fact-frame-retrofit-ledger requires --rebuild-evidence-search-projections/u
-    );
-  });
+  it.each(["--fact-frame-retrofit-ledger", "--backfill-missing-fact-frame-formations"])(
+    "rejects retired CLI flag %s", async (flag) => {
+      expect(await runCli([
+        "recall-eval", "--snapshot", "/tmp/not-read.db", "--experiment",
+        "--rebuild-evidence-search-projections", flag
+      ])).toBe(2);
+      expect(stderr).toContain(`Unknown benchmark argument: ${flag}`);
+    }
+  );
 
   it("rejects direct non-experiment access before reading a snapshot", async () => {
     await expect(prepareRecallEvalRunContext({
@@ -140,17 +131,7 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
     }, undefined, {})).rejects.toThrow(/requires experiment mode/u);
   });
 
-  it("rejects a direct retrofit ledger without projection rebuild", async () => {
-    await expect(prepareRecallEvalRunContext({
-      snapshotDbPath: "/tmp/not-read.db",
-      variant: "longmemeval_s",
-      historyRoot: "/tmp/not-written",
-      experiment: true,
-      factFrameRetrofitLedgerPath: "/tmp/fact-frames.ndjson"
-    }, undefined, {})).rejects.toThrow(/requires derived evidence projection rebuild/u);
-  });
-
-  it("allows a historical prompt to verify an experiment snapshot without retrofit", async () => {
+  it("allows a historical prompt to verify an experiment snapshot", async () => {
     const exitCode = await runCli([
       "recall-eval",
       "--snapshot",
@@ -161,7 +142,6 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
     ]);
 
     expect(exitCode).toBe(2);
-    expect(stderr).not.toMatch(/requires --fact-frame-retrofit-ledger/u);
     expect(stderr).toMatch(/not-read\.db/u);
   });
 

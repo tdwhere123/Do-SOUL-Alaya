@@ -1,13 +1,8 @@
-import type {
-  MemoryObjectKey,
-  OpenSemanticFactorGraph
-} from "@do-soul/alaya-protocol";
+import type { MemoryObjectKey } from "@do-soul/alaya-protocol";
 
 export interface MintableEvidence {
   readonly object_id: string;
   readonly gist: string;
-  readonly fact_key_contents: readonly string[];
-  readonly osf_graph: Readonly<OpenSemanticFactorGraph> | null;
 }
 
 export interface MintMemoryObjectKeysInput {

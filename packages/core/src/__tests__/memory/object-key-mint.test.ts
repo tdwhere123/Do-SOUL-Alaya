@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { OpenSemanticFactorGraph } from "@do-soul/alaya-protocol";
 import { mintMemoryObjectKeys } from "../../memory/object-keys/mint/mint.js";
 import { complementaryNumericAliasSurfaces } from "../../memory/object-keys/mint/numeric-aliases.js";
 import { complementaryTemporalAliasSurfaces } from "../../memory/object-keys/mint/temporal-aliases.js";
@@ -11,14 +10,14 @@ const EVIDENCE = "capsule-1";
 describe("mintMemoryObjectKeys", () => {
   it.each(["2/8/6", "2/8/26", "2/8/123", "2/8/12345", "2/8/123456"])("does not erase the unsupported explicit year in %s", (text) => {
     const keys = mintMemoryObjectKeys({ workspace_id: WORKSPACE, owner_id: OWNER, memory_content: text,
-      evidence: [{ object_id: EVIDENCE, gist: text, fact_key_contents: [], osf_graph: null }] });
+      evidence: [{ object_id: EVIDENCE, gist: text }] });
     expect(surfacesOf(keys, "temporal_alias")).toEqual([]);
     expect(complementaryTemporalAliasSurfaces(text)).toEqual([]);
   });
 
   it.each(["一百", "一百二十", "两千", "十万", "一〇〇"])("does not mint a partial small-number alias from %s", (text) => {
     const keys = mintMemoryObjectKeys({ workspace_id: WORKSPACE, owner_id: OWNER, memory_content: text,
-      evidence: [{ object_id: EVIDENCE, gist: text, fact_key_contents: [], osf_graph: null }] });
+      evidence: [{ object_id: EVIDENCE, gist: text }] });
     expect(surfacesOf(keys, "numeric_alias")).toEqual([]);
     expect(complementaryNumericAliasSurfaces(text)).toEqual([]);
   });
@@ -30,7 +29,7 @@ describe("mintMemoryObjectKeys", () => {
   });
   it.each(["-5", "+5", "−5", "3.14", "3.0", ".5"])("keeps %s whole when minting cardinal aliases", text => {
     const keys = mintMemoryObjectKeys({ workspace_id: WORKSPACE, owner_id: OWNER, memory_content: "The recorded value.",
-      evidence: [{ object_id: EVIDENCE, gist: `It was ${text}.`, fact_key_contents: [], osf_graph: null }] });
+      evidence: [{ object_id: EVIDENCE, gist: `It was ${text}.` }] });
     expect(surfacesOf(keys, "numeric_alias")).toEqual([]);
     expect(complementaryNumericAliasSurfaces(`It was ${text}.`)).toEqual([]);
   });
@@ -42,8 +41,6 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{
         object_id: EVIDENCE,
         gist: "By the way, I took my niece to the Natural History Museum. She loves her Golden Retriever.",
-        fact_key_contents: ["I took my niece to the museum"],
-        osf_graph: null
       }]
     });
 
@@ -54,27 +51,6 @@ describe("mintMemoryObjectKeys", () => {
     expect(keys.some((key) => key.surface.toLowerCase().includes("niece"))).toBe(false);
   });
 
-  it("mints OSF factor surfaces and distinct semantic identities", () => {
-    const keys = mintMemoryObjectKeys({
-      workspace_id: WORKSPACE,
-      owner_id: OWNER,
-      memory_content: "I bought books.",
-      evidence: [{
-        object_id: EVIDENCE,
-        gist: "I bought three used books in July.",
-        fact_key_contents: [],
-        osf_graph: osfGraph()
-      }]
-    });
-
-    expect(surfacesOf(keys, "osf_surface")).toEqual(
-      expect.arrayContaining(["three used books", "July"])
-    );
-    expect(surfacesOf(keys, "osf_identity")).toEqual(
-      expect.arrayContaining(["buy"])
-    );
-  });
-
   it("normalizes stored date surfaces into complementary aliases without inventing a year", () => {
     const keys = mintMemoryObjectKeys({
       workspace_id: WORKSPACE,
@@ -83,8 +59,6 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{
         object_id: EVIDENCE,
         gist: "I took my niece to the Natural History Museum on 2/8.",
-        fact_key_contents: [],
-        osf_graph: null
       }]
     });
 
@@ -101,8 +75,6 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{
         object_id: EVIDENCE,
         gist: "我们2月8日去过博物馆，那是3天前。",
-        fact_key_contents: [],
-        osf_graph: null
       }]
     });
 
@@ -118,8 +90,6 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{
         object_id: EVIDENCE,
         gist: "She loves her Golden Retriever.",
-        fact_key_contents: ["Golden Retriever"],
-        osf_graph: null
       }]
     });
 
@@ -144,8 +114,6 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{
         object_id: EVIDENCE,
         gist: "I bought 3 used books.",
-        fact_key_contents: [],
-        osf_graph: null
       }]
     });
 
@@ -173,8 +141,6 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{
         object_id: EVIDENCE,
         gist: `She mentioned ${oversized} today.`,
-        fact_key_contents: [],
-        osf_graph: null
       }]
     });
     expect(keys.every((key) => key.surface.length <= 512)).toBe(true);
@@ -189,8 +155,6 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{
         object_id: EVIDENCE,
         gist: "She watched the episode 04 01 733 last night.",
-        fact_key_contents: [],
-        osf_graph: null
       }]
     });
 
@@ -209,8 +173,6 @@ describe("mintMemoryObjectKeys", () => {
       evidence: [{
         object_id: EVIDENCE,
         gist: "We visited the museum in 2月.",
-        fact_key_contents: [],
-        osf_graph: null
       }]
     });
 
@@ -225,57 +187,4 @@ function surfacesOf(
   keyType: string
 ): readonly string[] {
   return keys.filter((key) => key.key_type === keyType).map((key) => key.surface);
-}
-
-function osfGraph(): OpenSemanticFactorGraph {
-  return {
-    schema_version: 2,
-    source_kind: "evidence",
-    factors: [
-      {
-        factor_id: "predicate",
-        surface: "bought",
-        source_span: [2, 8],
-        semantic_identity: "buy"
-      },
-      {
-        factor_id: "purchase",
-        surface: "three used books",
-        source_span: [9, 25],
-        semantic_identity: "three used books"
-      },
-      {
-        factor_id: "period",
-        surface: "July",
-        source_span: [29, 33],
-        semantic_identity: "july"
-      }
-    ],
-    variables: [],
-    result_variable_ids: [],
-    propositions: [{
-      proposition_id: "purchase-event",
-      predicate_factor_id: "predicate",
-      arguments: [
-        {
-          position: 0,
-          binding_identity: "buy",
-          reference_kind: "factor",
-          reference_id: "predicate"
-        },
-        {
-          position: 1,
-          binding_identity: "three used books",
-          reference_kind: "factor",
-          reference_id: "purchase"
-        },
-        {
-          position: 2,
-          binding_identity: "july",
-          reference_kind: "factor",
-          reference_id: "period"
-        }
-      ]
-    }]
-  };
 }

@@ -148,8 +148,9 @@ describe("field composition admission", () => {
     const create = () => service.create({ created_by: "system", evidence_kind: "user_statement",
       semantic_anchor: { topic: "notes", keywords: ["Ada"], summary: "Ada notes" },
       event_anchor: null, physical_anchor: null, evidence_health_state: "verified", gist: "Ada notes",
-      excerpt: "Ada wrote notes.", source_hash: null, run_id: "run-1", workspace_id: WORKSPACE, surface_id: null
-    }, [], undefined, undefined, undefined, undefined, mode === "provenance" ? SOURCE_PROVENANCE_CAPSULE : undefined);
+      excerpt: "Ada wrote notes.", source_hash: null, run_id: "run-1", workspace_id: WORKSPACE, surface_id: null,
+      sourceProvenance: mode === "provenance" ? SOURCE_PROVENANCE_CAPSULE : undefined
+    });
     field.database.connection.exec(`CREATE TRIGGER reject_capsule_intent BEFORE INSERT ON field_projection_rebuild_requests
       BEGIN SELECT RAISE(ABORT, 'capsule repair intent unavailable'); END`);
     await expect(create()).rejects.toThrow("capsule repair intent unavailable");

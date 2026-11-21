@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   bindEmbeddingOverlayIfPresent,
   detachEmbeddingOverlay,
@@ -21,6 +22,9 @@ export function loadSliceIntoOpenDatabase(
   live: StorageDatabase,
   sliceDbPath: string
 ): void {
+  if (live.connection.inTransaction) {
+    throw new AlayaError("CONFLICT", "Workspace slice replacement requires a top-level SQLite transaction");
+  }
   const triggers = readTriggers(live);
   // TEMP overlay views must not shadow main table DML during slice replace.
   detachEmbeddingOverlay(live.connection);
@@ -36,17 +40,14 @@ export function loadSliceIntoOpenDatabase(
     // Unqualified ANALYZE writes sqlite_stat on every attached schema, including the sealed slice.
     live.connection.exec("ANALYZE main");
   } finally {
-    if (attached) {
-      try {
-        detachSlice(live);
-      } catch {
-        // Keep FK/trigger restore even if DETACH fails.
-      }
+    try {
+      if (attached) detachSlice(live);
+    } finally {
+      live.connection.pragma("foreign_keys = ON");
+      // Rebuild domain triggers from the replacement rows.
+      restoreTriggers(live, replaced ? triggers.filter(trigger => !isLexicalDomainTrigger(trigger.name)) : triggers);
+      bindEmbeddingOverlayIfPresent(live.connection, live.filename);
     }
-    live.connection.pragma("foreign_keys = ON");
-    // Domain triggers are rebuilt with the replacement rows, never restored from the old workspace set.
-    restoreTriggers(live, replaced ? triggers.filter(trigger => !isLexicalDomainTrigger(trigger.name)) : triggers);
-    bindEmbeddingOverlayIfPresent(live.connection, live.filename);
   }
 }
 
@@ -61,8 +62,7 @@ function detachSlice(live: StorageDatabase): void {
 }
 
 function replaceAttachedTables(live: StorageDatabase, catalog: ClassifiedCatalog): void {
-  live.connection.exec("BEGIN");
-  try {
+  live.connection.transaction(() => {
     for (const table of catalog.workspace) {
       replaceAttachedTable(live, table.name);
     }
@@ -70,15 +70,7 @@ function replaceAttachedTables(live: StorageDatabase, catalog: ClassifiedCatalog
       applyAttachedGlobalTable(live, table.name, table.policy);
     }
     rebuildWorkspaceFts(live.connection, catalog.ftsVirtual);
-    live.connection.exec("COMMIT");
-  } catch (error) {
-    try {
-      live.connection.exec("ROLLBACK");
-    } catch {
-      // live may already be rolled back
-    }
-    throw error;
-  }
+  })();
 }
 
 function applyAttachedGlobalTable(

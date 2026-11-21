@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CONDITIONAL_FIELD_GENERATION_OPERATOR_ID,
   FIELD_OPERATOR_MANIFEST,
-  FACTOR_INCIDENCE_OPERATOR_ID,
   FieldGenerationEventType,
   MemoryGovernanceEventType,
   SoulEvidenceDeletedPayloadSchema,
@@ -13,8 +12,6 @@ import {
   hashAddressableSourceSpanId,
   hashCausalUsageId,
   hashContentDigest,
-  hashFactorId,
-  hashIncidenceId,
   hashSourceRecordId,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID
 } from "@do-soul/alaya-protocol";
@@ -38,21 +35,6 @@ afterEach(() => {
 });
 
 describe("field composition", () => {
-  it("rolls back an incidence when its durable rebuild request cannot be stored", () => {
-    const { database, stores } = openComposition();
-    seedProjectionSource(stores);
-    const before = stores.listIncidences("workspace-1");
-    const original = before[0]!;
-    const fields = { span_id: original.span_id, factor_id: original.factor_id,
-      scope: "another-scope", operator_id: original.operator_id };
-    database.connection.exec(`CREATE TRIGGER reject_rebuild BEFORE INSERT ON field_projection_rebuild_requests
-      BEGIN SELECT RAISE(ABORT, 'rebuild intent unavailable'); END`);
-    expect(() => stores.putIncidence({ ...original, ...fields,
-      identity: hashIncidenceId(fields, fieldContractSha256) })).toThrow("rebuild intent unavailable");
-    expect(stores.listIncidences("workspace-1")).toEqual(before);
-  });
-
-
   it("does not expose a retired selector or create a generation on construction", () => {
     const field = openComposition();
     const { database, fieldRepos } = field;
@@ -333,66 +315,30 @@ function openComposition() {
 function seedProjectionSource(
   stores: ReturnType<typeof openComposition>["stores"]
 ): void {
-  const record = stores.putRecord(sourceRecord("Ada wrote notes."), "Ada wrote notes.");
-  const spanIdentity = hashAddressableSourceSpanId({
-    record_id: record.identity,
-    start_offset: 0,
-    end_offset: 16,
-    purpose: "sentence",
-    producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID
-  }, fieldContractSha256);
-  const span = stores.putSpan({
-    ...fieldReceiptContractFields({
-      identity: spanIdentity,
-      producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
-      consumer: "factor_incidence"
-    }),
-    schema_version: 1,
-    workspace_id: "workspace-1",
-    record_id: record.identity,
-    start_offset: 0,
-    end_offset: 16,
-    purpose: "sentence",
-    producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
-    recorded_at: CLOCK
-  });
-  const factorIdentity = hashFactorId({
-    family: "f1",
-    canonical_payload: "ada",
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID
-  }, fieldContractSha256);
-  stores.putDescriptor({
-    ...fieldReceiptContractFields({
-      identity: factorIdentity,
-      producer: FACTOR_INCIDENCE_OPERATOR_ID,
-      consumer: "projection_generation"
-    }),
-    schema_version: 1,
-    workspace_id: "workspace-1",
-    family: "f1",
-    canonical_payload: "ada",
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID,
-    recorded_at: CLOCK
-  });
-  const incidenceIdentity = hashIncidenceId({
-    span_id: span.identity,
-    factor_id: factorIdentity,
-    scope: "workspace-1",
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID
-  }, fieldContractSha256);
-  stores.putIncidence({
-    ...fieldReceiptContractFields({
-      identity: incidenceIdentity,
-      producer: FACTOR_INCIDENCE_OPERATOR_ID,
-      consumer: "projection_generation"
-    }),
-    schema_version: 1,
-    workspace_id: "workspace-1",
-    span_id: span.identity,
-    factor_id: factorIdentity,
-    scope: "workspace-1",
-    operator_id: FACTOR_INCIDENCE_OPERATOR_ID,
-    recorded_at: CLOCK
+  stores.runAtomic(() => {
+    const record = stores.putRecord(sourceRecord("Ada wrote notes."), "Ada wrote notes.");
+    const spanIdentity = hashAddressableSourceSpanId({
+      record_id: record.identity,
+      start_offset: 0,
+      end_offset: 16,
+      purpose: "sentence",
+      producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID
+    }, fieldContractSha256);
+    stores.putSpan({
+      ...fieldReceiptContractFields({
+        identity: spanIdentity,
+        producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+        consumer: "factor_incidence"
+      }),
+      schema_version: 1,
+      workspace_id: "workspace-1",
+      record_id: record.identity,
+      start_offset: 0,
+      end_offset: 16,
+      purpose: "sentence",
+      producer_version: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
+      recorded_at: CLOCK
+    });
   });
 }
 

@@ -3,28 +3,17 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import BetterSqlite3 from "better-sqlite3";
 import {
-  SqliteFieldFactorRepo,
-  SqliteFieldSourceRecordRepo,
-  SqliteFieldSourceSpanRepo
-} from "../../repos/field/index.js";
-import type { StorageDatabase } from "../../sqlite/db.js";
-import {
   CLOCK,
-  fieldSha256,
   hashedFactor,
   hashedIncidence,
   hashedRecord,
   hashedSpan,
-  openFieldDatabase
 } from "../repos/field/field-contract-fixture.js";
 import { applyBaselineSql, seedWorkspaceRow } from "./apply-baseline.js";
 
-const tracked = new Set<StorageDatabase>();
 const trackedRaw = new Set<BetterSqlite3.Database>();
 
 afterEach(() => {
-  for (const database of tracked) database.close();
-  tracked.clear();
   for (const database of trackedRaw) database.close();
   trackedRaw.clear();
 });
@@ -47,13 +36,14 @@ const COMPACT_MIGRATION_SQL = fs.readFileSync(
 
 describe("factor_incidences compact primary key", () => {
   it("lists and erases via the clustered WITHOUT ROWID primary key", () => {
-    const database = openSeededIncidences();
-    const listPlan = explain(database.connection, LIST_INCIDENCES_SQL, ["workspace-1"]);
-    const deletePlan = explain(database.connection, DELETE_INCIDENCE_SQL, [
+    const database = openVersion8Incidences();
+    database.exec(COMPACT_MIGRATION_SQL);
+    const listPlan = explain(database, LIST_INCIDENCES_SQL, ["workspace-1"]);
+    const deletePlan = explain(database, DELETE_INCIDENCE_SQL, [
       "workspace-1",
       "missing-incidence"
     ]);
-    const rows = database.connection.prepare(LIST_INCIDENCES_SQL).all("workspace-1") as ReadonlyArray<{
+    const rows = database.prepare(LIST_INCIDENCES_SQL).all("workspace-1") as ReadonlyArray<{
       readonly incidence_id: string;
     }>;
 
@@ -64,9 +54,9 @@ describe("factor_incidences compact primary key", () => {
     expect(listPlan).not.toMatch(/SCAN/i);
     expect(deletePlan).not.toMatch(/SCAN/i);
     expect(rows).toHaveLength(3);
-    database.connection.prepare(DELETE_INCIDENCE_SQL).run("workspace-1", rows[0]!.incidence_id);
-    expect(database.connection.prepare(LIST_INCIDENCES_SQL).all("workspace-1")).toHaveLength(2);
-    assertCompactCatalog(database.connection);
+    database.prepare(DELETE_INCIDENCE_SQL).run("workspace-1", rows[0]!.incidence_id);
+    expect(database.prepare(LIST_INCIDENCES_SQL).all("workspace-1")).toHaveLength(2);
+    assertCompactCatalog(database);
   });
 
   it("copies existing incidences through 009 without changing identity", () => {
@@ -132,26 +122,6 @@ describe("factor_incidences compact primary key", () => {
     )).toThrow(/UNIQUE constraint failed/u);
   });
 });
-
-function openSeededIncidences(): StorageDatabase {
-  const database = openFieldDatabase();
-  tracked.add(database);
-  const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
-  const spans = new SqliteFieldSourceSpanRepo(database, fieldSha256);
-  const factors = new SqliteFieldFactorRepo(database, fieldSha256);
-  const record = records.insert(hashedRecord("workspace-1", "body"));
-  const span = spans.insert(hashedSpan("workspace-1", record.record_id));
-  const factor = factors.insertDescriptor(hashedFactor("workspace-1", "token"));
-  for (const scope of ["workspace-1", "scope-b", "scope-c"] as const) {
-    factors.insertIncidence(hashedIncidence(
-      "workspace-1",
-      span.span_id,
-      factor.factor_id,
-      scope
-    ));
-  }
-  return database;
-}
 
 function openVersion8Incidences(): BetterSqlite3.Database {
   const database = new BetterSqlite3(":memory:");

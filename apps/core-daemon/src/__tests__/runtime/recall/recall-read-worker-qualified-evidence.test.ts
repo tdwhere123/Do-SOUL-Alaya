@@ -11,6 +11,7 @@ import {
   SoulSignalMaterializedPayloadSchema,
   WorkspaceKind,
   WorkspaceState,
+  buildAssociativeFactKeyProjections,
   buildVerifiedUserAssertionReceiptV2Preimage,
   formatVerifiedUserAssertionV2SourceHash,
   type CandidateMemorySignal,
@@ -138,31 +139,6 @@ describe("RecallReadWorkerClient qualified evidence", () => {
     }
   }, 20_000);
 
-  it("round-trips a stored fact_frame_formation through the worker", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "alaya-qualified-formation-worker-"));
-    const databasePath = join(directory, "alaya.db");
-    const fixture = await seedQualifiedFactKey(databasePath);
-    const client = createRecallReadWorkerClient({
-      databaseFilename: databasePath,
-      workerUrl: builtWorkerUrl
-    });
-    try {
-      if (client === null) throw new Error("file-backed recall worker client is unavailable");
-      const findQualified = client.evidenceSearchPort.findRecallQualifiedByIds;
-      if (findQualified === undefined) throw new Error("qualified evidence reader is unavailable");
-
-      const [qualified] = await findQualified("workspace-1", [{
-        object_id: fixture.capsule.object_id
-      }]);
-      expect(qualified?.fact_frame_formation).toEqual(fixture.capture);
-      expect(structuredClone(qualified?.fact_frame_formation)).toEqual(fixture.capture);
-      expect(JSON.parse(JSON.stringify(qualified?.fact_frame_formation)))
-        .toEqual(fixture.capture);
-    } finally {
-      await client?.close();
-      rmSync(directory, { recursive: true, force: true });
-    }
-  }, 20_000);
 });
 
 type TestDatabase = ReturnType<typeof initDatabase>;
@@ -186,33 +162,27 @@ async function seedQualifiedEvidence(databasePath: string): Promise<Readonly<{
 
 async function seedQualifiedFactKey(databasePath: string): Promise<Readonly<{
   readonly capsule: Readonly<EvidenceCapsule>;
-  readonly capture: ReturnType<typeof materializeEvidenceFactFrameFormation>["capture"];
 }>> {
   const database = initDatabase({ filename: databasePath });
   try {
     await seedWorkspaceAndRun(database);
     const signal = await seedAssertionSignal(database);
     const capsuleInput = buildAssertionCapsule(signal);
-    const formation = materializeEvidenceFactFrameFormation({
-      sourceAssertion: assertion,
-      sourceHash: capsuleInput.source_hash,
-      proposal: {
-        schema_version: 1,
-        producer_operator_id: "qualified_evidence_worker_fixture_v1",
-        source_assertion: assertion,
-        fact_frame: assertionFactFrame
-      }
-    });
     const capsule = await new SqliteEvidenceCapsuleRepo(
       database,
       verifyOfficialApiSourceLocatorBinding
-    ).create(
-      capsuleInput,
-      formation.searchProjections,
-      formation.capture
-    );
+    ).create(capsuleInput);
+    const insertProjection = database.connection.prepare(`
+      INSERT INTO evidence_search_projections (
+        evidence_object_id, projection_id, projection_kind, workspace_id, source_hash, content
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    for (const projection of buildAssociativeFactKeyProjections(assertionFactFrame)) {
+      insertProjection.run(capsule.object_id, projection.projection_id, projection.projection_kind,
+        capsule.workspace_id, capsule.source_hash, projection.content);
+    }
     appendMaterializationEvent(database, signal, capsule);
-    return { capsule, capture: formation.capture };
+    return { capsule };
   } finally {
     database.close();
   }

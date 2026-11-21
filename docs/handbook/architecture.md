@@ -22,7 +22,6 @@ apps/bench-runner          Offline benchmark harness
 - **Online recall & source backbone:** `source_records`, `source_spans`, `source_host_inventories`, `source_index_*`, `source_statement_artifacts`, `source_statement_relation_vectors / pending`, `source_statement_memory_bindings`, `source_statement_dependencies`, `host_session_*`.
 - **Governance, audit, erasure & archival:** `event_log`, `evidence_capsules`, `memory_entries`, `claim_forms`, `synthesis_capsules`, `proposals`, `claim_election_leases`, `relation_assertions`, `relation_assertion_evidence`, `relation_path_projections`, `field_projection_rebuild_requests`, `projection_erase_barriers`, `privacy_dependency_quarantine`, `source_erase_closure_progress`, `historical_memory_captures`.
 - **Background Garden:** `garden_tasks`, `garden_semantic_artifacts`, `garden_embedding_backfill_*`, `statement_session_sweeps`.
-- **Legacy / pending-retirement compat:** `factor_descriptors`, `factor_incidences`, `evidence_semantic_factor_formations`, `evidence_fact_frame_formations` (excluded from ordinary `native_query` scoring, but still written by optional evidence formation and read by qualification, `input_event_frontier`, and erase closure pending explicit migration).
 
 ### Temporal Migration, Cutover, and Rollback
 
