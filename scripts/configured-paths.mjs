@@ -63,7 +63,7 @@ export function parseStorageDbPathFromToml(tomlContent) {
     if (line.length === 0 || line.startsWith("#")) {
       continue;
     }
-    const sectionMatch = line.match(/^\[(.+)\]$/u);
+    const sectionMatch = line.match(/^\[([^\]]+)\]\s*(?:#.*)?$/u);
     if (sectionMatch) {
       section = sectionMatch[1]?.trim() ?? null;
       continue;
@@ -71,7 +71,7 @@ export function parseStorageDbPathFromToml(tomlContent) {
     if (section !== "storage") {
       continue;
     }
-    const kvMatch = line.match(/^db_path\s*=\s*(.+)$/u);
+    const kvMatch = line.match(/^db_path\s*=\s*(.*)$/u);
     if (!kvMatch || kvMatch[1] === undefined) {
       continue;
     }
@@ -82,11 +82,61 @@ export function parseStorageDbPathFromToml(tomlContent) {
 
 function parseTomlStringLiteral(rawValue) {
   const trimmed = rawValue.trim();
-  if (!trimmed.startsWith("\"") || !trimmed.endsWith("\"")) {
-    return null;
+  if (trimmed.length === 0) {
+    throw new Error("Malformed [storage].db_path in alaya.toml: missing string value.");
   }
+  if (trimmed.startsWith("'")) {
+    return parseSingleQuotedTomlString(trimmed);
+  }
+  if (trimmed.startsWith("\"")) {
+    return parseDoubleQuotedTomlString(trimmed);
+  }
+  throw new Error("Malformed [storage].db_path in alaya.toml: expected a quoted string.");
+}
+
+function parseSingleQuotedTomlString(trimmed) {
+  if (trimmed.startsWith("'''")) {
+    throw new Error("Malformed [storage].db_path in alaya.toml: multiline strings are not supported.");
+  }
+  const closeIndex = trimmed.indexOf("'", 1);
+  if (closeIndex === -1) {
+    throw new Error("Malformed [storage].db_path in alaya.toml: unterminated single-quoted string.");
+  }
+  assertValidTomlTrailingComment(trimmed.slice(closeIndex + 1));
+  return trimmed.slice(1, closeIndex);
+}
+
+function parseDoubleQuotedTomlString(trimmed) {
+  if (trimmed.startsWith("\"\"\"")) {
+    throw new Error("Malformed [storage].db_path in alaya.toml: multiline strings are not supported.");
+  }
+  let closeIndex = -1;
+  for (let i = 1; i < trimmed.length; i += 1) {
+    if (trimmed[i] === "\\") {
+      if (i + 1 >= trimmed.length) {
+        throw new Error("Malformed [storage].db_path in alaya.toml: unterminated escape sequence.");
+      }
+      i += 1;
+      continue;
+    }
+    if (trimmed[i] === "\"") {
+      closeIndex = i;
+      break;
+    }
+  }
+  if (closeIndex === -1) {
+    throw new Error("Malformed [storage].db_path in alaya.toml: unterminated double-quoted string.");
+  }
+  assertValidTomlTrailingComment(trimmed.slice(closeIndex + 1));
   // Decode once: an escaped backslash must not reopen as a newline escape.
-  return trimmed.slice(1, -1).replace(/\\(\\|"|n)/gu, (_match, escaped) => escaped === "n" ? "\n" : escaped);
+  return trimmed.slice(1, closeIndex).replace(/\\(\\|"|n)/gu, (_match, escaped) => escaped === "n" ? "\n" : escaped);
+}
+
+function assertValidTomlTrailingComment(trailing) {
+  const rest = trailing.trim();
+  if (rest.length > 0 && !rest.startsWith("#")) {
+    throw new Error("Malformed [storage].db_path in alaya.toml: unexpected trailing tokens after string.");
+  }
 }
 
 function resolveHomeDirectory(environment, homeDir) {

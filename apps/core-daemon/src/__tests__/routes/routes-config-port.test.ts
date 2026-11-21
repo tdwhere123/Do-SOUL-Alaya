@@ -278,7 +278,7 @@ describe("routes-config port batch", () => {
       entity_id: "runtime:garden-compute",
       caused_by: "inspector",
       payload_json: {
-        event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+        event_kind: HealthEventKind.GARDEN_COMPUTE,
         change_summary: {
           fields_changed: ["provider_kind", "provider_url", "secret_ref", "model_id", "enabled"],
           secret_ref_kind: "env",

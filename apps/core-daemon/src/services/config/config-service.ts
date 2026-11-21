@@ -353,7 +353,9 @@ function createRuntimeConfigReadMethods(input: {
         env: input.envProvider()
       }),
     getRuntimeGardenComputeConfig: async () =>
-      await getRuntimeGardenComputeConfig(input.configRepo, input.configPathsProvider(), input.warn)
+      await getRuntimeGardenComputeConfig(
+        input.configRepo, input.configPathsProvider(), input.warn, input.envProvider()
+      )
   };
 }
 

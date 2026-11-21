@@ -23,6 +23,7 @@
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "dist/**/*.d.ts.map",
+    "dist/build-info.json",
     "bin/"
   ],
   "type": "module",

@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import {
   inspectTemporalProjectionSelection,
   openReadOnlyDatabase
@@ -12,26 +13,31 @@ export interface DoctorAuditSnapshot {
   readonly retain_unrouted_facts: boolean;
   readonly mcp_server_config: DoctorMcpConfigStatus;
   readonly temporal_projection: Readonly<{
-    readonly schema: "legacy" | "temporal" | "unknown";
+    readonly schema: "legacy" | "temporal" | "uninitialized" | "error";
     readonly selected: boolean;
     readonly selection_required: boolean;
+    readonly error: string | null;
   }>;
   readonly conflict_llm_raw_key_only: boolean;
   readonly registered_env_keys: readonly string[];
 }
 
-export function readDoctorAuditSnapshot(dbPath: string): DoctorAuditSnapshot {
+export function readDoctorAuditSnapshot(
+  dbPath: string,
+  env: NodeJS.ProcessEnv = processEnvLookup()
+): DoctorAuditSnapshot {
   return {
-    retain_unrouted_facts: isRetainUnroutedFactsEnabled(),
-    mcp_server_config: readMcpServerConfigStatus(),
+    retain_unrouted_facts: isRetainUnroutedFactsEnabled(env.ALAYA_RETAIN_UNROUTED_FACTS),
+    mcp_server_config: readMcpServerConfigStatus(env),
     temporal_projection: readTemporalProjectionStatus(dbPath),
-    conflict_llm_raw_key_only: isConflictLlmRawKeyOnly(),
+    conflict_llm_raw_key_only: isConflictLlmRawKeyOnly(env),
     registered_env_keys: listRegisteredDaemonEnvKeys()
   };
 }
 
 export function doctorAuditCheckStatus(snapshot: DoctorAuditSnapshot): "pass" | "fail" {
   if (snapshot.mcp_server_config === "invalid") return "fail";
+  if (snapshot.temporal_projection.schema === "error") return "fail";
   if (
     snapshot.temporal_projection.schema === "temporal" &&
     snapshot.temporal_projection.selection_required &&
@@ -56,6 +62,11 @@ export function writeDoctorAuditSummary(
       ` selected=${snapshot.temporal_projection.selected ? "yes" : "no"}` +
       ` required=${snapshot.temporal_projection.selection_required ? "yes" : "no"}\n`
   );
+  if (snapshot.temporal_projection.schema === "error") {
+    stream.write(
+      `temporal projection ERROR: ${snapshot.temporal_projection.error ?? "failed to inspect temporal projection state."}\n`
+    );
+  }
   if (
     snapshot.temporal_projection.schema === "temporal" &&
     snapshot.temporal_projection.selection_required &&
@@ -77,8 +88,8 @@ export function writeDoctorAuditSummary(
   );
 }
 
-function readMcpServerConfigStatus(): DoctorMcpConfigStatus {
-  const raw = processEnvLookup().ALAYA_MCP_SERVER_CONFIG_JSON;
+function readMcpServerConfigStatus(env: NodeJS.ProcessEnv): DoctorMcpConfigStatus {
+  const raw = env.ALAYA_MCP_SERVER_CONFIG_JSON;
   if (raw === undefined || raw.trim().length === 0) {
     return "unset";
   }
@@ -93,7 +104,14 @@ function readMcpServerConfigStatus(): DoctorMcpConfigStatus {
 function readTemporalProjectionStatus(dbPath: string): DoctorAuditSnapshot["temporal_projection"] {
   const normalized = dbPath.trim();
   if (normalized.length === 0) {
-    return { schema: "unknown", selected: false, selection_required: false };
+    return { schema: "uninitialized", selected: false, selection_required: false, error: null };
+  }
+  const existence = checkDatabaseExists(normalized);
+  if (existence.status === "missing") {
+    return { schema: "uninitialized", selected: false, selection_required: false, error: null };
+  }
+  if (existence.status === "error") {
+    return { schema: "error", selected: false, selection_required: false, error: existence.error };
   }
   try {
     const database = openReadOnlyDatabase(normalized);
@@ -102,18 +120,42 @@ function readTemporalProjectionStatus(dbPath: string): DoctorAuditSnapshot["temp
       return {
         schema: state.schema,
         selected: state.selected,
-        selection_required: state.selectionRequired
+        selection_required: state.selectionRequired,
+        error: null
       };
     } finally {
       database.close();
     }
-  } catch {
-    return { schema: "unknown", selected: false, selection_required: false };
+  } catch (error) {
+    return {
+      schema: "error",
+      selected: false,
+      selection_required: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
   }
 }
 
-function isConflictLlmRawKeyOnly(): boolean {
-  const rawKey = processEnvLookup().ALAYA_CONFLICT_LLM_API_KEY?.trim();
-  const secretRef = processEnvLookup().ALAYA_CONFLICT_LLM_SECRET_REF?.trim();
+function checkDatabaseExists(
+  dbPath: string
+): { readonly status: "exists" | "missing" } | { readonly status: "error"; readonly error: string } {
+  try {
+    statSync(dbPath);
+    return { status: "exists" };
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? (error as { readonly code?: unknown }).code
+        : undefined;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return { status: "missing" };
+    }
+    return { status: "error", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function isConflictLlmRawKeyOnly(env: NodeJS.ProcessEnv): boolean {
+  const rawKey = env.ALAYA_CONFLICT_LLM_API_KEY?.trim();
+  const secretRef = env.ALAYA_CONFLICT_LLM_SECRET_REF?.trim();
   return Boolean(rawKey) && !secretRef;
 }

@@ -1,4 +1,6 @@
-import { access } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { createAlayaCliBridge } from "../../cli/bridge.js";
@@ -155,5 +157,81 @@ describe("doctor storage access errors", () => {
       writable: false,
       error_code: "EACCES"
     });
+  });
+
+  it("threads ctx.env merged with config-dir .env into doctor runtime wiring, audit, and local ONNX hints", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-doctor-ctx-env-"));
+    try {
+      await writeFile(
+        path.join(configDir, ".env"),
+        [
+          "ALAYA_REQUEST_TOKEN=from-dotenv",
+          "ALAYA_RETAIN_UNROUTED_FACTS=true",
+          "ALAYA_EMBEDDING_PROVIDER=local_onnx",
+          "ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT=1"
+        ].join("\n"),
+        "utf8"
+      );
+      const daemon = {
+        startupSteps: STARTUP_STEPS.map((step) => ({
+          step,
+          completedAt: "2026-05-05T00:00:00.000Z"
+        }))
+      };
+      const stdout = new PassThrough();
+      const chunks: string[] = [];
+      stdout.on("data", (chunk) => chunks.push(chunk.toString("utf8")));
+      const bridge = createAlayaCliBridge(daemon, {
+        env: {
+          ALAYA_CONFIG_DIR: configDir,
+          ALAYA_DAEMON_SOCKET: "/tmp/alaya-ctx.sock"
+        },
+        stdout,
+        stderr: new PassThrough(),
+        isTTY: false
+      });
+      bridge.registerSubcommand(
+        createDoctorCommand({
+          getToolchainStatus: async () => ({
+            tools: {},
+            active_worktrees: 1,
+            db_path: "",
+            files_dir: "/tmp/files"
+          }),
+          getEmbeddingStatus: async (workspaceId) => ({
+            workspace_id: workspaceId,
+            embedding_enabled: true,
+            provider_configured: true,
+            model_id: "local-model",
+            storage_available: true,
+            effective_mode: "embedding_supplement",
+            degraded_reason: null,
+            checked_at: "2026-05-05T00:00:00.000Z"
+          }),
+          getMcpHealth: async () => ({ transport: "ready", enrolled_tools: 0 }),
+          getGardenHealth: async () => ({
+            status: "healthy",
+            last_pass_at: "2026-05-05T00:00:00.000Z"
+          }),
+          clock: () => "2026-05-05T00:00:00.000Z"
+        })
+      );
+
+      const jsonResult = await bridge.dispatch(["doctor", "--json"]);
+      expect(jsonResult.json).toMatchObject({
+        runtime_wiring: {
+          request_token_source: "env",
+          daemon_socket: "/tmp/alaya-ctx.sock"
+        },
+        audit: {
+          retain_unrouted_facts: true
+        }
+      });
+
+      await bridge.dispatch(["doctor"]);
+      expect(chunks.join("")).toContain("local ONNX host single-flight: enabled");
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
   });
 });

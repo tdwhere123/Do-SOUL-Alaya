@@ -119,10 +119,11 @@ export async function listServerHardConstraints(_workspaceId: string) {
 
 export async function resolveDatabasePath(
   configPaths: AlayaConfigPaths,
-  fallbackPath: string
+  fallbackPath: string,
+  env: NodeJS.ProcessEnv = processEnvLookup()
 ): Promise<string> {
   return await resolveConfiguredDatabasePath(configPaths, {
-    env: processEnvLookup(),
+    env,
     fallbackPath
   });
 }

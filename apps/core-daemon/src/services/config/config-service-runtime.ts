@@ -16,15 +16,16 @@ import {
 } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_GARDEN_MODEL } from "@do-soul/alaya-soul";
 import type { ConfigRepo } from "@do-soul/alaya-storage";
-import { selectGardenSecretRef, selectGardenCredentialProvenance } from "../../garden/support/credential.js";
+import { selectGardenSecretRef } from "../../garden/support/credential.js";
 import type { GardenCredentialProvenance } from "../../garden/support/credential.js";
 import type { AlayaConfigPaths } from "../../cli/support/config-files.js";
 import { resolveEffectiveEmbeddingPosture } from "../../ai/daemon-embedding-runtime-config.js";
 import { DAEMON_ONLY_CONFIG_ENV_KEYS, processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import { normalizeLegacyConfigVersion, withConfigVersion } from "./config-version.js";
-import { loadConfigEnv, readConfigEnvValue, readNonEmptyEnv } from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
+import { loadConfigEnv, readNonEmptyEnv } from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 import {
   ALAYA_GARDEN_PROVIDER_KIND_ENV,
+  ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV,
   applyRuntimeGardenComputeConfigFiles,
   applyRuntimeEmbeddingConfigFiles,
   normalizeRuntimeEmbeddingConfigPatch,
@@ -97,16 +98,53 @@ export async function getRuntimeEmbeddingConfig(
   });
 }
 
+const VALID_GARDEN_PROVIDER_KINDS = new Set<string>([
+  "official_api",
+  "local_heuristics",
+  "host_worker"
+]);
+
 export async function getRuntimeGardenComputeConfig(
   repo: ConfigRepo,
   paths: AlayaConfigPaths,
-  warn: (message: string) => void
+  warn: (message: string) => void,
+  env: NodeJS.ProcessEnv = processEnvLookup()
 ): Promise<RuntimeGardenComputeConfigView> {
   const persisted = repo.getParsed(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, {
     parse: (value) => parseGardenComputeConfigWithLegacyFallback(value, "garden-compute config", warn)
   });
-  const raw = persisted ?? (await defaultRuntimeGardenComputeConfig(paths, warn));
-  return parseGardenComputeConfigWithLegacyFallback(raw, "garden-compute config", warn);
+  const configEnv = await loadConfigEnv(paths.envPath);
+  const overrides = readGardenComputeEnvOverrides(env, configEnv, persisted?.secret_ref);
+  if (hasUnrepairedPersistedSchemaFailure(persisted, overrides)) {
+    return persisted!;
+  }
+  const secretRef = overrides.secretSelection?.ref ?? null;
+  const providerKind =
+    overrides.providerKind ??
+    persisted?.provider_kind ??
+    resolveProductGardenProviderKind(overrides.declaredProviderKind, secretRef !== null);
+  const modelId =
+    overrides.modelId ?? (persisted !== null ? persisted.model_id : OFFICIAL_API_GARDEN_MODEL);
+  const providerUrl = overrides.providerUrl ?? persisted?.provider_url ?? null;
+  const providerKindOverridden =
+    overrides.providerKind !== null && persisted !== null && overrides.providerKind !== persisted.provider_kind;
+  const enabled =
+    !providerKindOverridden && persisted !== null
+      ? persisted.enabled
+      : providerKind === "official_api" && secretRef !== null;
+
+  return parseGardenComputeConfigWithLegacyFallback(
+    {
+      config_version: persisted?.config_version ?? CURRENT_CONFIG_VERSION,
+      provider_kind: providerKind,
+      model_id: modelId,
+      provider_url: providerUrl,
+      secret_ref: secretRef,
+      enabled
+    },
+    "garden-compute config",
+    warn
+  );
 }
 
 export async function patchRuntimeEmbeddingConfig(input: Readonly<{
@@ -173,14 +211,14 @@ export async function getGardenCredentialProvenance(input: Readonly<{
   const persisted = input.repo?.getParsed(RUNTIME_GARDEN_COMPUTE_CONFIG_KEY, {
     parse: (value) => parseGardenComputeConfigWithLegacyFallback(value, "garden-compute config", () => undefined)
   });
-  if (persisted !== undefined && persisted !== null) {
-    return { kind: persisted.secret_ref === null ? "none" : secretRefScheme(persisted.secret_ref) ?? "none" };
-  }
   const configEnv = await loadConfigEnv(input.paths.envPath);
-  return selectGardenCredentialProvenance({
-    env: input.env,
-    configEnv
-  });
+  const selected = selectEffectiveGardenSecretRef(input.env, configEnv, persisted?.secret_ref);
+  if (selected === null) {
+    return { kind: "none" };
+  }
+  return {
+    kind: selected.embeddingFallback ? "embedding-fallback" : secretRefScheme(selected.ref) ?? "file"
+  };
 }
 
 function buildRuntimeEmbeddingChangeSummary(normalized: NormalizedRuntimeEmbeddingConfigPatch) {
@@ -309,7 +347,7 @@ function buildRuntimeGardenComputeConfigAuditEvent(
     caused_by: "inspector",
     payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
       entry_id: audit.auditEntryId,
-      event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+      event_kind: HealthEventKind.GARDEN_COMPUTE,
       workspace_id: RUNTIME_CONFIG_WORKSPACE_ID,
       occurred_at: audit.occurredAt,
       change_summary: buildRuntimeGardenComputeChangeSummary(normalized)
@@ -369,17 +407,65 @@ function parseGardenComputeConfigWithLegacyFallback(
   });
 }
 
+function selectEffectiveGardenSecretRef(
+  env: NodeJS.ProcessEnv,
+  configEnv: ReadonlyMap<string, string>,
+  persistedSecretRef?: string | null
+) {
+  return selectGardenSecretRef((key) => {
+    const fromEnvOrFile = env[key] ?? configEnv.get(key);
+    if (key === ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV) {
+      return readNonEmptyEnv(fromEnvOrFile) ?? persistedSecretRef ?? undefined;
+    }
+    return fromEnvOrFile;
+  });
+}
+
+function readGardenComputeEnvOverrides(
+  env: NodeJS.ProcessEnv,
+  configEnv: ReadonlyMap<string, string>,
+  persistedSecretRef?: string | null
+) {
+  const readEnv = (key: string) => env[key] ?? configEnv.get(key);
+  const declaredProviderKind = readNonEmptyEnv(readEnv(ALAYA_GARDEN_PROVIDER_KIND_ENV));
+  return {
+    secretSelection: selectEffectiveGardenSecretRef(env, configEnv, persistedSecretRef),
+    modelId: readNonEmptyEnv(readEnv(OFFICIAL_API_GARDEN_MODEL_ENV)),
+    providerUrl: readNonEmptyEnv(readEnv(OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),
+    declaredProviderKind,
+    providerKind:
+      declaredProviderKind !== null && VALID_GARDEN_PROVIDER_KINDS.has(declaredProviderKind)
+        ? (declaredProviderKind as RuntimeGardenComputeConfig["provider_kind"])
+        : null
+  };
+}
+
+function hasUnrepairedPersistedSchemaFailure(
+  persisted: RuntimeGardenComputeConfigView | null,
+  overrides: ReturnType<typeof readGardenComputeEnvOverrides>
+): boolean {
+  return (
+    persisted !== null &&
+    persisted.degraded_reason !== undefined &&
+    persisted.degraded_reason !== null &&
+    overrides.secretSelection === null &&
+    overrides.modelId === null &&
+    overrides.providerUrl === null &&
+    overrides.providerKind === null
+  );
+}
+
 async function defaultRuntimeGardenComputeConfig(
   paths: AlayaConfigPaths,
-  warn: (message: string) => void
+  warn: (message: string) => void,
+  env: NodeJS.ProcessEnv = processEnvLookup()
 ): Promise<RuntimeGardenComputeConfig> {
   const configEnv = await loadConfigEnv(paths.envPath);
-  const secretRef = selectGardenSecretRef((key) => readConfigEnvValue(configEnv, key))?.ref ?? null;
-  const modelId =
-    readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV)) ??
-    OFFICIAL_API_GARDEN_MODEL;
+  const overrides = readGardenComputeEnvOverrides(env, configEnv);
+  const secretRef = overrides.secretSelection?.ref ?? null;
+  const modelId = overrides.modelId ?? OFFICIAL_API_GARDEN_MODEL;
   const providerKind = resolveProductGardenProviderKind(
-    readNonEmptyEnv(readConfigEnvValue(configEnv, ALAYA_GARDEN_PROVIDER_KIND_ENV)),
+    overrides.declaredProviderKind,
     secretRef !== null
   );
 
@@ -388,7 +474,7 @@ async function defaultRuntimeGardenComputeConfig(
       config_version: CURRENT_CONFIG_VERSION,
       provider_kind: providerKind,
       model_id: modelId,
-      provider_url: readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_PROVIDER_URL_ENV)),
+      provider_url: overrides.providerUrl,
       secret_ref: secretRef,
       enabled: providerKind === "official_api" && secretRef !== null
     },

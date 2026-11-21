@@ -1,5 +1,7 @@
 import { parseEnvBoolean, type EmbeddingStatus, type ToolchainStatus } from "@do-soul/alaya-protocol";
-import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
+import { mergeDaemonEnvLookup } from "../../runtime/config/daemon-config-environment.js";
+import { loadConfigEnv } from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
+import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "../support/config-files.js";
 import { assessStartupReadiness } from "../../runtime/daemon/support/startup-readiness.js";
 import { GARDEN_SCHEDULER_INTERVAL_MS } from "../../garden/runtime/runtime-background-services.js";
 export { GARDEN_SCHEDULER_INTERVAL_MS } from "../../garden/runtime/runtime-background-services.js";
@@ -282,9 +284,10 @@ async function handleDoctorCommand(
   deps: DoctorCommandDependencies,
   now: () => string
 ): Promise<AlayaCliResult> {
-  const report = await buildDoctorReport(ctx, args, deps, now);
+  const effectiveEnv = await resolveDoctorEffectiveEnv(ctx.env);
+  const report = await buildDoctorReport(ctx, args, deps, now, effectiveEnv);
   if (ctx.jsonRequested !== true) {
-    writeHumanSummary(ctx.stdout, report);
+    writeHumanSummary(ctx.stdout, report, effectiveEnv);
   }
   return {
     exitCode: report.overall === "green" ? ALAYA_SYSEXITS.OK : ALAYA_SYSEXITS.TEMPFAIL,
@@ -292,11 +295,18 @@ async function handleDoctorCommand(
   };
 }
 
+async function resolveDoctorEffectiveEnv(env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
+  const configPaths = resolveAlayaConfigPaths(resolveAlayaConfigDir({ env }));
+  const configEnv = await loadConfigEnv(configPaths.envPath);
+  return mergeDaemonEnvLookup(env, configEnv) as NodeJS.ProcessEnv;
+}
+
 async function buildDoctorReport(
   ctx: AlayaCliContext,
   args: DoctorArgs,
   deps: DoctorCommandDependencies,
-  now: () => string
+  now: () => string,
+  effectiveEnv: NodeJS.ProcessEnv
 ): Promise<DoctorReport> {
   const startup = readDoctorStartup(deps, ctx);
   const workspaceId = resolveCliWorkspaceContext(
@@ -304,12 +314,12 @@ async function buildDoctorReport(
     args.workspaceId,
     deps.defaultWorkspaceId
   ).workspaceId;
-  const services = await readDoctorServices(deps, workspaceId);
+  const services = await readDoctorServices(deps, workspaceId, effectiveEnv);
   const bootstrapReconcileSummary = args.reconcileBootstrap
     ? await runBootstrapReconcile(deps.reconcileBootstrapPaths, workspaceId)
     : null;
-  const attachedProfiles = await readAttachedProfileDrift();
-  const audit = readDoctorAuditSnapshot(services.storage.db_path);
+  const attachedProfiles = await readAttachedProfileDrift(ctx.env);
+  const audit = readDoctorAuditSnapshot(services.storage.db_path, effectiveEnv);
   const checks = buildDoctorChecks(
     startup.ready,
     services,
@@ -378,7 +388,8 @@ function readDoctorStartup(
 
 async function readDoctorServices(
   deps: DoctorCommandDependencies,
-  workspaceId: string
+  workspaceId: string,
+  effectiveEnv: NodeJS.ProcessEnv
 ) {
   const toolchainStatus = await deps.getToolchainStatus();
   const [storage, storageGrowth, embeddingStatus, queryEmbeddingWarmup, mcp, garden, gardenCredentialProvenance, gardenCompute, pathPlasticityLookupTelemetry, graphHealth] = await Promise.all([
@@ -396,7 +407,7 @@ async function readDoctorServices(
   const runtimeWiring = withRuntimeWiringDefaults(
     deps.getRuntimeWiring
       ? await deps.getRuntimeWiring()
-      : resolveRuntimeWiringFromEnv(processEnvLookup())
+      : resolveRuntimeWiringFromEnv(effectiveEnv)
   );
   return {
     storage,
@@ -465,11 +476,13 @@ function defaultPathPlasticityLookupTelemetry(): Readonly<PathPlasticityLookupTe
   };
 }
 
-async function readAttachedProfileDrift(): Promise<readonly ProfileInstructionsDriftReport[]> {
+async function readAttachedProfileDrift(
+  env: NodeJS.ProcessEnv
+): Promise<readonly ProfileInstructionsDriftReport[]> {
   return await Promise.all(
     PROFILE_TARGETS.map(async (target) => {
       try {
-        return await detectAttachedProfileInstructionsDrift(target);
+        return await detectAttachedProfileInstructionsDrift(target, { env });
       } catch {
         return {
           target,

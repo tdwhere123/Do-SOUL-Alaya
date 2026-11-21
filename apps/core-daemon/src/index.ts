@@ -154,7 +154,7 @@ async function createRuntimeBootstrapContext() {
   warnLogger.info("effective recall runtime", {
     projections_enabled: getCoreConfig().recall.projectionsEnabled
   });
-  const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
+  const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"), effectiveEnv as NodeJS.ProcessEnv);
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const { database, temporalRuntimeLease } = await openRuntimeDatabase(dbPath, runtimeNotifier, warnLogger.warn);
   recordStartupStep(startupSteps, "database");
@@ -181,6 +181,7 @@ function createDaemonRepositoryWiring(
   const repositories = createDaemonRepositories({
     database: bootstrap.database,
     warn: bootstrap.warnLogger.warn,
+    env: bootstrap.effectiveEnv,
     ...(options.fieldProjectionAdmissionMode === undefined
       ? {}
       : { fieldProjectionAdmissionMode: options.fieldProjectionAdmissionMode })
@@ -199,6 +200,8 @@ async function createDaemonFoundationWiring(
     runtimeNotifier: bootstrap.runtimeNotifier,
     configPaths: bootstrap.configPaths,
     warnLogger: bootstrap.warnLogger,
+    effectiveEnv: bootstrap.effectiveEnv,
+    processEnv: process.env,
     workspaceRepo: repositories.workspaceRepo,
     runRepo: repositories.runRepo,
     eventLogRepo: repositories.eventLogRepo,

@@ -34,14 +34,16 @@ describe("configured database path shared with installer", () => {
     expect(output.trim().split("\t")).toEqual([configDir, expected]);
   });
 
-  it("decodes supported escapes once and preserves unsupported escapes", () => {
+  it("decodes supported escapes, supports single quotes and trailing comments, and throws on malformed db_path", () => {
     const original = 'folder\\new/quoted"file\nnext.db';
     expect(parseStorageDbPathFromToml(`[storage]\ndb_path = ${JSON.stringify(original)}\n`)).toBe(original);
     expect(parseStorageDbPathFromToml(String.raw`[storage]
 db_path = "folder\tname.db"`)).toBe(String.raw`folder\tname.db`);
     expect(parseStorageDbPathFromToml('[storage]\ndb_path = ""\n')).toBe("");
-    for (const literal of ['"unterminated', "unquoted"]) {
-      expect(parseStorageDbPathFromToml(`[storage]\ndb_path = ${literal}\n`)).toBeNull();
+    expect(parseStorageDbPathFromToml('[storage] # section comment\ndb_path = "data/live.db" # trailing "comment"\n')).toBe("data/live.db");
+    expect(parseStorageDbPathFromToml(`[storage]\ndb_path = 'C:\\Users\\new\\alaya.db' # literal path\n`)).toBe(`C:\\Users\\new\\alaya.db`);
+    for (const literal of ['"unterminated', "'unterminated", "unquoted", "", "# comment only", '"a" extra']) {
+      expect(() => parseStorageDbPathFromToml(`[storage]\ndb_path = ${literal}\n`)).toThrow(/Malformed \[storage\]\.db_path/);
     }
   });
 

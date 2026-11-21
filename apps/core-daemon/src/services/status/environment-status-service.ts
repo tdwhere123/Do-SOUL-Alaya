@@ -15,10 +15,13 @@ export function createEnvironmentStatusService(dependencies: {
   readonly probeTool?: (toolName: string) => Promise<boolean>;
   readonly countActiveWorktrees?: () => Promise<number | null>;
   readonly getFilesDirectory?: () => string;
+  readonly env?: NodeJS.ProcessEnv;
 }): EnvironmentStatusService {
+  const env = dependencies.env ?? processEnvLookup();
   const toolNames = dependencies.toolNames ?? ["git", "node", "pnpm", "rg"];
-  const probeTool = dependencies.probeTool ?? defaultProbeTool;
-  const countActiveWorktrees = dependencies.countActiveWorktrees ?? defaultCountActiveWorktrees;
+  const probeTool = dependencies.probeTool ?? ((toolName: string) => defaultProbeTool(toolName, env));
+  const countActiveWorktrees =
+    dependencies.countActiveWorktrees ?? (() => defaultCountActiveWorktrees(env));
   const getDatabasePath = dependencies.getDatabasePath;
   const getFilesDirectory = dependencies.getFilesDirectory ?? (() => "./data/files");
 
@@ -60,15 +63,15 @@ const ENVIRONMENT_PROBE_CHILD_ENV_ALLOWLIST = [
   "PATHEXT"
 ] as const;
 
-async function defaultProbeTool(toolName: string): Promise<boolean> {
-  return await findExecutableOnPath(toolName, processEnvLookup());
+async function defaultProbeTool(toolName: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+  return await findExecutableOnPath(toolName, env);
 }
 
-async function defaultCountActiveWorktrees(): Promise<number | null> {
+async function defaultCountActiveWorktrees(env: NodeJS.ProcessEnv): Promise<number | null> {
   try {
     const result = await runExecFile("git", ["worktree", "list", "--porcelain"], {
       encoding: "utf8"
-    });
+    }, env);
 
     if (typeof result.stdout !== "string") {
       return null;
@@ -92,14 +95,15 @@ async function defaultCountActiveWorktrees(): Promise<number | null> {
 function runExecFile(
   command: string,
   args: readonly string[],
-  options?: Parameters<typeof execFile>[2]
+  options?: Parameters<typeof execFile>[2],
+  sourceEnv: NodeJS.ProcessEnv = processEnvLookup()
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(command, [...args], {
       ...options,
       timeout: DEFAULT_ENVIRONMENT_PROBE_TIMEOUT_MS,
       windowsHide: true,
-      env: createEnvironmentProbeChildEnv()
+      env: createEnvironmentProbeChildEnv(sourceEnv)
     }, (error, stdout, stderr) => {
       if (error) {
         reject(error);

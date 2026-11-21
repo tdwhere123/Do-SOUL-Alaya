@@ -87,22 +87,47 @@ describe("routes-config port batch", () => {
     });
   });
 
-  it("the persisted runtime row wins over a disagreeing ALAYA_GARDEN_PROVIDER_KIND env default", async () => {
-    const harness = await createServiceHarness();
+  it("gives process.env then .env per-key precedence over the persisted Garden compute row and provenance", async () => {
+    const env: NodeJS.ProcessEnv = {
+      OFFICIAL_API_GARDEN_MODEL: "process-garden-model"
+    };
+    const harness = await createServiceHarness({ env });
     await harness.service.patchRuntimeGardenComputeConfig({
       provider_kind: "host_worker",
-      provider_url: null,
-      secret_ref: null,
-      model_id: null,
+      provider_url: "https://persisted.example.test/v1",
+      secret_ref: "keychain:persisted:garden",
+      model_id: "persisted-model",
       enabled: false
     });
-    // Make the env disagree with the persisted row.
-    await writeFile(harness.paths.envPath, "ALAYA_GARDEN_PROVIDER_KIND=local_heuristics\n", "utf8");
+
+    // Update .env independently of SQLite: .env overrides persisted row per key,
+    // while process.env still wins over .env for OFFICIAL_API_GARDEN_MODEL.
+    await writeFile(
+      harness.paths.envPath,
+      [
+        "ALAYA_GARDEN_PROVIDER_KIND=official_api",
+        "ALAYA_OFFICIAL_GARDEN_SECRET_REF=file:/tmp/updated-garden-secret",
+        "OFFICIAL_API_GARDEN_MODEL=file-garden-model"
+      ].join("\n"),
+      "utf8"
+    );
 
     await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
       config_version: 1,
-      provider_kind: "host_worker"
+      provider_kind: "official_api",
+      secret_ref: "file:/tmp/updated-garden-secret",
+      model_id: "process-garden-model",
+      provider_url: "https://persisted.example.test/v1",
+      enabled: true
     });
+    await expect(harness.service.getGardenCredentialProvenance()).resolves.toEqual({ kind: "file" });
+
+    // process.env overrides .env and persisted row for secret_ref too.
+    env.ALAYA_OFFICIAL_GARDEN_SECRET_REF = "env:PROCESS_GARDEN_KEY";
+    await expect(harness.service.getRuntimeGardenComputeConfig()).resolves.toMatchObject({
+      secret_ref: "env:PROCESS_GARDEN_KEY"
+    });
+    await expect(harness.service.getGardenCredentialProvenance()).resolves.toEqual({ kind: "env" });
   });
 
   it("normalizes env secret mode in daemon service, writes only file refs publicly, and keeps plaintext out of audit/env", async () => {

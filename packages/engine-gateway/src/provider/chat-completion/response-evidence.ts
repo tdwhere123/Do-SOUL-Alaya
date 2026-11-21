@@ -13,8 +13,8 @@ export function decodeProviderResponseBytes(bytes: Uint8Array): string {
 
 /**
  * Retain at most maxRetainedBytes. Length and digest cover every byte actually
- * read. maxReadBytes, when set, cancels once that many bytes have been received;
- * it does not drop the remainder of the chunk that crossed the cap.
+ * read. maxReadBytes, when set, cancels once more than that many bytes have
+ * been received; it does not drop the remainder of the chunk that crossed the cap.
  */
 export async function readProviderResponseWithEvidence(
   response: Response,
@@ -59,7 +59,7 @@ export async function readProviderResponseWithEvidence(
         retained.push(Buffer.from(prefix));
         retainedLength += prefix.byteLength;
       }
-      if (maxReadBytes !== undefined && byteLength >= maxReadBytes) {
+      if (maxReadBytes !== undefined && byteLength > maxReadBytes) {
         try {
           await reader.cancel();
         } catch {

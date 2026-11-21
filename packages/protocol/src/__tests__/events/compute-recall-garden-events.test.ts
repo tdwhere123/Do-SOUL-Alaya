@@ -137,6 +137,7 @@ describe("compute-recall-garden events", () => {
       "green_piercing_distribution",
       "provider_call",
       "embedding_supplement",
+      "garden_compute",
       "recall_tuning",
       "green_revoke_noop"
     ]);
@@ -146,6 +147,8 @@ describe("compute-recall-garden events", () => {
     expect(HealthEventKind.PROVIDER_CALL).toBe("provider_call");
     expect(HealthEventKindSchema.parse("embedding_supplement")).toBe("embedding_supplement");
     expect(HealthEventKind.EMBEDDING_SUPPLEMENT).toBe("embedding_supplement");
+    expect(HealthEventKindSchema.parse("garden_compute")).toBe("garden_compute");
+    expect(HealthEventKind.GARDEN_COMPUTE).toBe("garden_compute");
     expect(HealthEventKindSchema.parse("recall_tuning")).toBe("recall_tuning");
     expect(HealthEventKind.RECALL_TUNING).toBe("recall_tuning");
   });

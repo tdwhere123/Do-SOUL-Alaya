@@ -39,6 +39,15 @@ export function buildCoolingKey(
   return `${taskKind}:${targetRef}`;
 }
 
+export function buildCoolingKeys(
+  taskKind: GardenTaskDescriptor["task_kind"],
+  refs: readonly string[],
+  workspaceId: string
+): readonly string[] {
+  const targets = refs.length > 0 ? refs : [workspaceId];
+  return targets.map((ref) => buildCoolingKey(taskKind, ref));
+}
+
 export function parseTaskDescriptorFromRow(
   row: GardenTaskRow & { readonly descriptor?: GardenTaskDescriptor }
 ): GardenTaskDescriptor {

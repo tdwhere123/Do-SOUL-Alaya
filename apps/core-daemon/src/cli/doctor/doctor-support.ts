@@ -158,10 +158,14 @@ export async function inspectStorageGrowth(
   }
 }
 
-export function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {
+export function writeHumanSummary(
+  stream: NodeJS.WritableStream,
+  report: DoctorReport,
+  env: NodeJS.ProcessEnv = processEnvLookup()
+): void {
   writeDoctorCoreSummary(stream, report);
   writeGardenComputeSummary(stream, report);
-  writeRecallGraphSummary(stream, report);
+  writeRecallGraphSummary(stream, report, env);
   writeDoctorAuditSummary(stream, report.audit);
   writeDoctorProfileSummary(stream, report);
   if (report.confirmation_token_isolation === "executor_holds_token") {
@@ -393,7 +397,11 @@ function writeCaptureSummary(stream: NodeJS.WritableStream, capture: GardenCaptu
   }
 }
 
-function writeRecallGraphSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {
+function writeRecallGraphSummary(
+  stream: NodeJS.WritableStream,
+  report: DoctorReport,
+  env: NodeJS.ProcessEnv
+): void {
   stream.write(
     `recall path plasticity lookup: count=${report.recall.path_plasticity_lookup.lookup_count}` +
       ` p99_ms=${report.recall.path_plasticity_lookup.duration_p99_ms ?? "n/a"}` +
@@ -415,7 +423,7 @@ function writeRecallGraphSummary(stream: NodeJS.WritableStream, report: DoctorRe
     stream.write(
       `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`
     );
-    writeLocalOnnxHostSingleFlightHint(stream);
+    writeLocalOnnxHostSingleFlightHint(stream, env);
   }
   if (report.provider.query_embedding_warmup !== null) {
     stream.write(
@@ -433,12 +441,15 @@ function writeRecallGraphSummary(stream: NodeJS.WritableStream, report: DoctorRe
   }
 }
 
-function writeLocalOnnxHostSingleFlightHint(stream: NodeJS.WritableStream): void {
-  const posture = resolveEffectiveEmbeddingPosture((key) => processEnvLookup()[key]);
+function writeLocalOnnxHostSingleFlightHint(
+  stream: NodeJS.WritableStream,
+  env: NodeJS.ProcessEnv
+): void {
+  const posture = resolveEffectiveEmbeddingPosture((key) => env[key]);
   if (posture.providerKind !== "local_onnx") {
     return;
   }
-  if (localOnnxHostSingleFlightEnabled(processEnvLookup())) {
+  if (localOnnxHostSingleFlightEnabled(env)) {
     stream.write("local ONNX host single-flight: enabled\n");
     return;
   }

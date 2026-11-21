@@ -17,6 +17,7 @@ const healthEventKindValues = [
   "green_piercing_distribution",
   "provider_call",
   "embedding_supplement",
+  "garden_compute",
   "recall_tuning",
   "green_revoke_noop"
 ] as const;
@@ -32,6 +33,7 @@ export const HealthEventKind = {
   GREEN_PIERCING_DISTRIBUTION: "green_piercing_distribution",
   PROVIDER_CALL: "provider_call",
   EMBEDDING_SUPPLEMENT: "embedding_supplement",
+  GARDEN_COMPUTE: "garden_compute",
   RECALL_TUNING: "recall_tuning",
   // invariant: emitted when GreenService.revokeStatement matches zero rows
   // under the workspace+state predicate. The associated SOUL_GREEN_REVOKED
