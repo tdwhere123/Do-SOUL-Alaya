@@ -25,9 +25,12 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       findByIdScoped: vi.fn(async () => ({ object_id: "mem-1", confidence: 0.6 }))
     };
     const mcpMemoryToolHandler = {
-      call: vi.fn(async () => ({
+      call: vi.fn(async (input?: { toolName?: string }) => ({
         ok: true,
-        output: { proposal_id: "proposal-1", status: "created" }
+        output:
+          input?.toolName === "soul.list_pending_proposals"
+            ? { proposals: [] }
+            : { proposal_id: "proposal-1", status: "created" }
       }))
     };
     registerProposalRoutes(app, proposalRouteServices({

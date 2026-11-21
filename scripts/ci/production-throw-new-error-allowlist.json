@@ -80,7 +80,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/cli/extraction-authority/args.ts": {
-    "max": 12,
+    "max": 11,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/cli/extraction-authority/command.ts": {
@@ -96,7 +96,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/cli/extraction-fill/batch-flags.ts": {
-    "max": 4,
+    "max": 3,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/cli/extraction-fill/command-core.ts": {
@@ -436,7 +436,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/harness/strict-treatment-config.ts": {
-    "max": 5,
+    "max": 3,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/harness/token/token-economy.ts": {
@@ -640,7 +640,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/authority/sample-scope.ts": {
-    "max": 7,
+    "max": 6,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/authority/target-root-binding.ts": {
@@ -836,7 +836,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/batch-fill.ts": {
-    "max": 21,
+    "max": 20,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/batch/executor.ts": {
@@ -848,11 +848,11 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/batch/import.ts": {
-    "max": 3,
+    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/batch/native-codec.ts": {
-    "max": 8,
+    "max": 6,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/batch/output-inventory.ts": {
@@ -924,7 +924,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/semantic-fill-attempt-ledger.ts": {
-    "max": 14,
+    "max": 4,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/semantic-fill-authority.ts": {
@@ -932,11 +932,11 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/semantic-fill-receipt-ledger-bind.ts": {
-    "max": 7,
+    "max": 6,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/fill/semantic-fill-receipt.ts": {
-    "max": 17,
+    "max": 15,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/extraction/transport-route.ts": {
@@ -1324,7 +1324,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/pager.ts": {
-    "max": 6,
+    "max": 5,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/bench-runner/src/runs/snapshot/recall-eval/workspace-slice/rebuild-fts.ts": {
@@ -1404,7 +1404,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/ai/daemon-embedding-runtime-config.ts": {
-    "max": 4,
+    "max": 3,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/ai/daemon-embedding-runtime.ts": {
@@ -1464,7 +1464,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/garden/bulk-enrich/bulk-enrich-runtime-runner.ts": {
-    "max": 2,
+    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/garden/runtime/runtime.ts": {
@@ -1516,7 +1516,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/daemon/support/daemon-env.ts": {
-    "max": 7,
+    "max": 6,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/daemon/support/path-formation-order.ts": {
@@ -1572,7 +1572,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/recall-read-worker/payload-readers.ts": {
-    "max": 7,
+    "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/recall-read-worker/prepared-delivery.ts": {
@@ -1584,11 +1584,11 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/recall/recall-read-worker-client.ts": {
-    "max": 7,
+    "max": 5,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/recall/recall-read-worker.ts": {
-    "max": 3,
+    "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/recall/worker-actual-cost.ts": {
@@ -1600,7 +1600,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/server-options.ts": {
-    "max": 3,
+    "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/startup/database.ts": {
@@ -1692,7 +1692,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/core/src/embedding-recall/openai-client.ts": {
-    "max": 11,
+    "max": 10,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/core/src/embedding-recall/pool-scoring.ts": {
@@ -1732,7 +1732,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/core/src/memory/signal-service-grounding-defer.ts": {
-    "max": 5,
+    "max": 4,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/core/src/recall/conditional-field/engine/path-composition-seed.ts": {
@@ -1784,7 +1784,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/core/src/recall/runtime/recall-service-runner.ts": {
-    "max": 2,
+    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/core/src/recall/runtime/request-governance.ts": {
@@ -1808,7 +1808,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/core/src/relations/relation-assertions/relation-assertion-service.ts": {
-    "max": 15,
+    "max": 9,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/core/src/relations/relation-assertions/relation-assertion-transition-contract.ts": {
@@ -1892,7 +1892,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/protocol/src/config/env-value.ts": {
-    "max": 8,
+    "max": 7,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/protocol/src/config/provider-url.ts": {
@@ -2044,7 +2044,7 @@
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/soul/src/garden/ingestion/official-api/source-interpretation-receive.ts": {
-    "max": 10,
+    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "packages/soul/src/garden/ingestion/official-api/system-prompt.ts": {
