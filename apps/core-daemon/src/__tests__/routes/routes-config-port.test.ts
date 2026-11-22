@@ -160,7 +160,7 @@ describe("routes-config port batch", () => {
       entity_type: "workspace_config",
       entity_id: "workspace:ws-budget:manifestation_budget",
       workspace_id: "ws-budget",
-      caused_by: "inspector",
+      caused_by: "http-config",
       payload_json: {
         entry_id: "audit-1",
         event_kind: HealthEventKind.RECALL_TUNING,
@@ -221,7 +221,7 @@ describe("routes-config port batch", () => {
       event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
       entity_type: "runtime_config",
       entity_id: "runtime:embedding-supplement",
-      caused_by: "inspector",
+      caused_by: "http-config",
       payload_json: {
         event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
         change_summary: {
@@ -276,9 +276,9 @@ describe("routes-config port batch", () => {
       event_type: GardenEventType.SOUL_HEALTH_JOURNAL_RECORDED,
       entity_type: "runtime_config",
       entity_id: "runtime:garden-compute",
-      caused_by: "inspector",
+      caused_by: "http-config",
       payload_json: {
-        event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+        event_kind: HealthEventKind.GARDEN_COMPUTE,
         change_summary: {
           fields_changed: ["provider_kind", "provider_url", "secret_ref", "model_id", "enabled"],
           secret_ref_kind: "env",

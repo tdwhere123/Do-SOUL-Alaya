@@ -41,13 +41,14 @@ interface ActivePolicyEvaluation {
   readonly activePolicies: readonly ZeroDayPolicy[];
 }
 
-interface CachedPolicyEvaluation extends ActivePolicyEvaluation {
+interface CachedLoadedPolicies {
+  readonly policies: readonly ZeroDayPolicy[];
   readonly expiresAtMs: number;
 }
 
 export class ZeroDaySecurityLayer {
   private readonly initializedWorkspaceIds = new Map<string, number>();
-  private cachedPolicyEvaluation: CachedPolicyEvaluation | null = null;
+  private cachedLoadedPolicies: CachedLoadedPolicies | null = null;
   private readonly statusEvaluationObservers = new Set<ZeroDaySecurityStatusEvaluationObserver>();
 
   public constructor(private readonly deps: ZeroDaySecurityLayerDependencies) {}
@@ -158,20 +159,35 @@ export class ZeroDaySecurityLayer {
   }
 
   private async readActivePolicyEvaluation(): Promise<ActivePolicyEvaluation> {
-    const clock = readClockSnapshot(this.deps.now);
-    const cachedEvaluation = this.cachedPolicyEvaluation;
+    const initialClock = readClockSnapshot(this.deps.now);
+    const { policies, evaluationClock } = await this.readLoadedPolicies(initialClock);
+    const parsedNow = parseNow(evaluationClock.iso);
 
-    if (cachedEvaluation !== null && cachedEvaluation.expiresAtMs > clock.epochMs) {
-      return cachedEvaluation;
+    return {
+      now: parsedNow,
+      activePolicies: policies.filter((policy) => isActive(policy, parsedNow))
+    };
+  }
+
+  private async readLoadedPolicies(
+    initialClock: ReturnType<typeof readClockSnapshot>
+  ): Promise<{
+    readonly policies: readonly ZeroDayPolicy[];
+    readonly evaluationClock: ReturnType<typeof readClockSnapshot>;
+  }> {
+    const cached = this.cachedLoadedPolicies;
+    if (cached !== null && cached.expiresAtMs > initialClock.epochMs) {
+      return { policies: cached.policies, evaluationClock: initialClock };
     }
 
-    const evaluatedPolicies = await evaluateActivePolicies(this.deps.loadPolicies, clock.iso);
-    this.cachedPolicyEvaluation = {
-      ...evaluatedPolicies,
-      expiresAtMs: clock.epochMs + this.readPolicyEvaluationCacheTtlMs()
+    const loadedPolicies = parsePolicies(await this.deps.loadPolicies());
+    const postLoadClock = readClockSnapshot(this.deps.now);
+    this.cachedLoadedPolicies = {
+      policies: loadedPolicies,
+      expiresAtMs: postLoadClock.epochMs + this.readPolicyEvaluationCacheTtlMs()
     };
 
-    return evaluatedPolicies;
+    return { policies: loadedPolicies, evaluationClock: postLoadClock };
   }
 
   private readPolicyEvaluationCacheTtlMs(): number {
@@ -262,19 +278,6 @@ function parseNow(now: string): string {
       cause: error instanceof Error ? error : undefined
     });
   }
-}
-
-async function evaluateActivePolicies(
-  loadPolicies: () => Promise<readonly ZeroDayPolicy[]>,
-  now: string
-): Promise<ActivePolicyEvaluation> {
-  const allPolicies = parsePolicies(await loadPolicies());
-  const parsedNow = parseNow(now);
-
-  return {
-    now: parsedNow,
-    activePolicies: allPolicies.filter((policy) => isActive(policy, parsedNow))
-  };
 }
 
 function createSecurityStatus(

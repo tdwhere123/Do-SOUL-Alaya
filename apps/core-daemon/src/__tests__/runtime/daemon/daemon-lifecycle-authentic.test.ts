@@ -112,7 +112,6 @@ describe("daemon HTTP shutdown authenticity", () => {
       },
       securityStatusService: { close: vi.fn() },
       daemonMcpRuntimeRegistry: { close: vi.fn(async () => undefined) },
-      globalMemoryRecallInvalidationSubscription: null,
       database,
       requestProtection: {
         allowedOrigin: "http://localhost:5173",

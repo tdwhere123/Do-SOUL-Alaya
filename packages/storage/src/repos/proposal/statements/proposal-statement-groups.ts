@@ -1,5 +1,6 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import {
+  MEMORY_ENTRY_PROPOSAL_UPDATE_SQL,
   prepareMemoryEntryEvidenceRefIndexStatements,
   type MemoryEntryEvidenceRefIndexStatements
 } from "../../memory-entry/statements/memory-entry-statement-groups.js";
@@ -37,13 +38,11 @@ export interface ProposalReviewerStatements {
 }
 
 export interface ProposalResolutionStatements {
-  readonly updateResolutionStatement: SqliteStatement;
-  readonly updateResolutionWithIdentityStatement: SqliteStatement;
   readonly updatePendingResolutionStatement: SqliteStatement;
   readonly updatePendingResolutionWithIdentityStatement: SqliteStatement;
 }
 
-export interface ProposalMemoryApplyCoreStatements {
+interface ProposalMemoryApplyCoreStatements {
   readonly findMemoryEntryByIdStatement: SqliteStatement;
   readonly updateMemoryEntryStatement: SqliteStatement;
   readonly findRevokableGreenStatusStatement: SqliteStatement;
@@ -185,16 +184,6 @@ const PROPOSAL_REVIEWER_SQL: SqlDefinitionMap<ProposalReviewerStatements> = {
 };
 
 const PROPOSAL_RESOLUTION_SQL: SqlDefinitionMap<ProposalResolutionStatements> = {
-  updateResolutionStatement: `
-      UPDATE proposals
-      SET resolution_state = ?, last_updated_at = ?
-      WHERE proposal_id = ?
-    `,
-  updateResolutionWithIdentityStatement: `
-      UPDATE proposals
-      SET resolution_state = ?, last_updated_at = ?, reviewer_identity = ?
-      WHERE proposal_id = ?
-    `,
   updatePendingResolutionStatement: `
       UPDATE proposals
       SET resolution_state = ?, last_updated_at = ?
@@ -214,18 +203,7 @@ const PROPOSAL_MEMORY_APPLY_SQL: SqlDefinitionMap<ProposalMemoryApplyCoreStateme
       WHERE object_id = ?
       LIMIT 1
     `,
-  updateMemoryEntryStatement: `
-      UPDATE memory_entries
-      SET
-        content = COALESCE(?, content),
-        domain_tags = COALESCE(?, domain_tags),
-        evidence_refs = COALESCE(?, evidence_refs),
-        storage_tier = COALESCE(?, storage_tier),
-        confidence = COALESCE(?, confidence),
-        retention_state = COALESCE(?, retention_state),
-        updated_at = ?
-      WHERE object_id = ?
-    `,
+  updateMemoryEntryStatement: MEMORY_ENTRY_PROPOSAL_UPDATE_SQL,
   findRevokableGreenStatusStatement: `
       SELECT object_id
       FROM green_statuses

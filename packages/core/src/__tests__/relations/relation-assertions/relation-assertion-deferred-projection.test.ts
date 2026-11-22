@@ -28,6 +28,7 @@ import { EventPublisher } from "../../../runtime/event-publisher.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 
 const databases = new Set<StorageDatabase>();
+const defaultScope = { workspaceId: "workspace-1", runId: "run-1" };
 const observedAt = "2026-07-17T01:02:03.000Z";
 const evidenceIds: Readonly<Record<string, string>> = Object.freeze({
   first: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
@@ -96,22 +97,50 @@ describe("RelationAssertionService deferred projection", () => {
     expect(await harness.relationRepo.findActiveProjectionByWorkspace("workspace-1"))
       .toHaveLength(1);
   });
+
+  it("retires the shared projection on workspace deletion and rebuilds for the surviving workspace", async () => {
+    const scopeA = { workspaceId: "workspace-a", runId: "run-a" };
+    const scopeB = { workspaceId: "workspace-b", runId: "run-b" };
+    const harness = await createHarness(scopeA);
+    const { database, relationRepo, service } = harness;
+    await createWorkspaceRun(database, scopeB);
+    await service.admitDeferredProjection(await prepareAdmission(harness, "first", scopeA));
+    await service.admitDeferredProjection(await prepareAdmission(harness, "second", scopeB));
+
+    const { projectionGeneration } = await service.verifyAndRebuild();
+    expect(service.readActiveProjectionGeneration()).toBe(projectionGeneration);
+    await expect(relationRepo.findActiveProjectionByWorkspace(scopeA.workspaceId)).resolves.toHaveLength(1);
+    await expect(relationRepo.findActiveProjectionByWorkspace(scopeB.workspaceId)).resolves.toHaveLength(1);
+
+    new SqliteWorkspaceRepo(database).delete(scopeA.workspaceId);
+
+    expect(service.readActiveProjectionGeneration()).toBeNull();
+    await expect(relationRepo.findActiveProjectionByWorkspace(scopeB.workspaceId))
+      .rejects.toThrow(/requires a refresh/u);
+    expect(database.connection.prepare(
+      "SELECT 1 FROM temporal_projection_generations WHERE generation = ?"
+    ).get(projectionGeneration)).toBeUndefined();
+
+    const rebuilt = await service.verifyAndRebuild();
+    expect(rebuilt.activeProjectionCount).toBe(1);
+    expect(service.readActiveProjectionGeneration()).toBe(rebuilt.projectionGeneration);
+    await expect(relationRepo.findActiveProjectionByWorkspace(scopeB.workspaceId))
+      .resolves.toMatchObject([{ workspace_id: scopeB.workspaceId }]);
+  });
 });
 
-async function createHarness() {
-  const database = initDatabase({ filename: ":memory:" });
-  databases.add(database);
+async function createWorkspaceRun(database: StorageDatabase, { workspaceId, runId }: typeof defaultScope) {
   await new SqliteWorkspaceRepo(database).create({
-    workspace_id: "workspace-1",
+    workspace_id: workspaceId,
     name: "deferred projection test",
-    root_path: "/tmp/relation-assertion-deferred-projection-test",
+    root_path: `/tmp/relation-assertion-deferred-projection-test-${workspaceId}`,
     workspace_kind: WorkspaceKind.LOCAL_REPO,
     default_engine_binding: null,
     workspace_state: WorkspaceState.ACTIVE
   });
   await new SqliteRunRepo(database).create({
-    run_id: "run-1",
-    workspace_id: "workspace-1",
+    run_id: runId,
+    workspace_id: workspaceId,
     title: "deferred projection test",
     goal: null,
     run_mode: RunMode.CHAT,
@@ -120,6 +149,12 @@ async function createHarness() {
     run_state: RunState.IDLE,
     current_surface_id: null
   });
+}
+
+async function createHarness(scope = defaultScope) {
+  const database = initDatabase({ filename: ":memory:" });
+  databases.add(database);
+  await createWorkspaceRun(database, scope);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const relationRepo = new SqliteRelationAssertionRepo(database);
   const { repo, calls: projectionCalls } = trackedProjectionRepo(relationRepo);
@@ -145,27 +180,29 @@ async function createHarness() {
 
 async function prepareAdmission(
   harness: Awaited<ReturnType<typeof createHarness>>,
-  suffix: string
+  suffix: string,
+  scope = defaultScope
 ): Promise<RelationAssertionAdmissionRequest> {
   const sourceEvent = await harness.eventLogRepo.append({
     event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
     entity_type: "candidate_memory_signal",
     entity_id: `signal-${suffix}`,
-    workspace_id: "workspace-1",
-    run_id: "run-1",
+    workspace_id: scope.workspaceId,
+    run_id: scope.runId,
     caused_by: "garden",
     payload_json: { source: "test", suffix }
   });
   const evidenceId = evidenceIds[suffix];
   if (evidenceId === undefined) throw new Error(`Missing evidence fixture for ${suffix}.`);
-  await createAnchoredEvidence(harness, sourceEvent.event_id, evidenceId);
-  return admissionRequest(sourceEvent, evidenceId, suffix);
+  await createAnchoredEvidence(harness, sourceEvent.event_id, evidenceId, scope);
+  return admissionRequest(sourceEvent, evidenceId, suffix, scope);
 }
 
 async function createAnchoredEvidence(
   harness: Awaited<ReturnType<typeof createHarness>>,
   sourceEventId: string,
-  evidenceId: string
+  evidenceId: string,
+  scope: typeof defaultScope
 ): Promise<void> {
   await harness.evidenceRepo.create({
     object_id: evidenceId,
@@ -187,8 +224,8 @@ async function createAnchoredEvidence(
     gist: "source evidence",
     excerpt: "source evidence excerpt",
     source_hash: null,
-    run_id: "run-1",
-    workspace_id: "workspace-1",
+    run_id: scope.runId,
+    workspace_id: scope.workspaceId,
     surface_id: null
   } satisfies EvidenceCapsule);
 }
@@ -196,14 +233,14 @@ async function createAnchoredEvidence(
 function admissionRequest(
   sourceEvent: Readonly<EventLogEntry>,
   evidenceId: string,
-  suffix: string
+  suffix: string,
+  scope: typeof defaultScope
 ): RelationAssertionAdmissionRequest {
   const parameters = { relation_kind: "supports" };
   const decision = { source_event_ids: [sourceEvent.event_id] };
   return {
     assertionId: `assertion-${suffix}`,
-    workspaceId: "workspace-1",
-    runId: "run-1",
+    ...scope,
     causedBy: "garden",
     evidenceReceipts: [{
       evidence_id: evidenceId,

@@ -56,12 +56,6 @@ export function resolvePreferenceAwareSourceGrounding(
     : { resolution: standard };
 }
 
-export function groundPreferenceProfileFromSource(
-  input: PreferenceProfileSourceInput
-): OfficialApiPreferenceProfileDraft | undefined {
-  return resolvePreferenceAwareSourceGrounding(input).preferenceProfile;
-}
-
 export function preferenceProfileGroundingRemovalReason(
   proposal: unknown,
   grounded: unknown

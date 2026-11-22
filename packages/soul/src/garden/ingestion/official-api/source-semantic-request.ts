@@ -37,7 +37,6 @@ import {
 import {
   sourceSemanticCorrespondenceFlatResponseJsonSchema, sourceSemanticCorrespondenceFlatSystemPrompt
 } from "./source-semantic-correspondence-presentation.js";
-export { SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT } from "./source-semantic-query-provenance.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 export { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-guidance.js";
 

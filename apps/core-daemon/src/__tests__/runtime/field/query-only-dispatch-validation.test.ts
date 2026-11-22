@@ -57,13 +57,13 @@ describe("query-only recall-read dispatch validation", () => {
     }
   });
 
-  it("rejects a closed runtime before in-process tier-window dispatch", async () => {
+  it("rejects a closed runtime before in-process dispatch", async () => {
     const { queryOnlyRuntime } = hydration.openQueryOnlyPair();
     queryOnlyRuntime.closed = true;
     await expect(runOperation(queryOnlyRuntime, {
       protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
       id: 1,
-      operation: "memory.findRecallTierWindow",
+      operation: "ready",
       payload: {}
     })).rejects.toThrow("recall read worker database is closed");
   });

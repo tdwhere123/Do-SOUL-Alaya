@@ -50,6 +50,7 @@ export interface GreenServiceGreenStatusRepoPort {
 
 export interface GreenServiceMemoryRepoPort {
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
+  findByIdSync(objectId: string): Readonly<MemoryEntry> | null;
 }
 
 export interface GreenServiceEventLogRepoPort {

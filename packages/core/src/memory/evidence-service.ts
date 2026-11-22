@@ -5,26 +5,18 @@ import {
   SoulEvidenceHealthChangedPayloadSchema,
   TransitionCausedBySchema,
   type EvidenceCapsule,
-  type EvidenceFactFrameFormationCapture,
-  type EvidenceFactFrameFormationProposal,
   type EvidenceSearchProjection,
   type EvidenceHealthState,
   type EventLogEntry,
-  type FactorIncidencePort,
   type FieldContractSha256,
-  type OpenSemanticFactorFormationAdmission,
-  type OpenSemanticFactorFormationCapture,
   type SourceAdmissionPort,
   type SourceInterpretationInvalidation,
   type SourceInterpretationInvalidationResult,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
-import type { OpenSemanticFactorExtractionPort } from
-  "../semantic/open-semantic-factor-extraction-port.js";
 import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
 import { createEvidenceCapsule, SOURCE_PROVENANCE_CAPSULE } from "./evidence-create/create-evidence.js";
-import { createFactorIncidencePort } from "./evidence-create/factor-incidence.js";
 import { fieldContractSha256 } from "../shared/field-hash.js";
 import {
   appendEventLogSynchronously,
@@ -38,7 +30,6 @@ import {
   type FieldFormationStores
 } from "./evidence-create/field-stores.js";
 import { createSourceAdmissionPort } from "./evidence-create/source-admission.js";
-import type { EvidenceFactFrameProposalNormalizer } from "@do-soul/alaya-protocol/node/source-frame";
 import type { SourceWriteGardenIntentPort } from "./source-write-garden-intent.js";
 import { invalidateSourceInterpretation, type SourceInterpretationLifecycleReadContext } from "./source-interpretation-lifecycle.js";
 
@@ -54,6 +45,12 @@ export type EvidenceCapsuleInput = Omit<
   "object_id" | "object_kind" | "schema_version" | "lifecycle_state" | "created_at" | "updated_at"
 > & {
   readonly object_id?: string;
+  readonly enqueueEnrichment?: {
+    readonly runId: string | null;
+    readonly sourceSignalId: string | null;
+  };
+  readonly assertSourceCurrent?: () => void;
+  readonly sourceProvenance?: typeof SOURCE_PROVENANCE_CAPSULE;
 };
 
 export interface EvidenceServiceEventLogRepoPort {
@@ -73,22 +70,14 @@ export interface EvidenceServiceEvidenceCapsuleRepoPort {
   create(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
-    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
-    , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
-      .EvidenceOsfSemanticCompletenessReceipt>,
     sourceProvenance?: boolean
   ): Promise<Readonly<EvidenceCapsule>>;
   createInCurrentTransaction?(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
-    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
-    , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
-      .EvidenceOsfSemanticCompletenessReceipt>,
     sourceProvenance?: boolean
   ): Readonly<EvidenceCapsule>;
-  deleteById(objectId: string): Promise<void>;
+  deleteById(objectId: string, workspaceId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByRunIdPage?(
@@ -152,16 +141,12 @@ export interface EvidenceServiceDependencies {
   readonly runtimeNotifier: EvidenceRuntimeNotifier;
   readonly karmaEmitter?: EvidenceServiceKarmaEmitterPort;
   readonly memoryRefLookup?: EvidenceServiceMemoryRefLookupPort;
-  readonly factFrameProposalNormalizer?:
-    Readonly<EvidenceFactFrameProposalNormalizer> | null;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
   readonly sha256?: FieldContractSha256;
   readonly sourceAdmission?: SourceAdmissionPort;
-  readonly factorIncidence?: FactorIncidencePort;
   readonly fieldStores?: FieldFormationStores;
-  readonly semanticExtractor?: OpenSemanticFactorExtractionPort;
   readonly projectionLifecycle?: Readonly<{
     requestRebuild(workspaceId: string, requestedAt: string): void;
     drainPending(): void;
@@ -175,7 +160,6 @@ export class EvidenceService {
   private readonly sha256: FieldContractSha256;
   private readonly fieldStores: FieldFormationStores;
   private readonly sourceAdmission: SourceAdmissionPort;
-  private readonly factorIncidence: FactorIncidencePort;
 
   public constructor(private readonly dependencies: EvidenceServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
@@ -186,48 +170,31 @@ export class EvidenceService {
       sha256: this.sha256,
       stores: this.fieldStores
     });
-    this.factorIncidence = dependencies.factorIncidence ?? createFactorIncidencePort({
-      sha256: this.sha256,
-      stores: this.fieldStores
-    });
   }
 
   public async create(
     input: EvidenceCapsuleInput,
-    searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
-    factFrameProposal?: Readonly<EvidenceFactFrameFormationProposal>,
-    semanticFactorProposal?: Readonly<OpenSemanticFactorFormationAdmission>,
-    enqueueEnrichment?: {
-      readonly runId: string | null;
-      readonly sourceSignalId: string | null;
-    },
-    assertSourceCurrent?: () => void,
-    sourceFieldFormation?: typeof SOURCE_PROVENANCE_CAPSULE
+    searchProjections: readonly Readonly<EvidenceSearchProjection>[] = []
   ): Promise<Readonly<EvidenceCapsule>> {
+    const { sourceProvenance, assertSourceCurrent, enqueueEnrichment, ...capsuleInput } = input;
     return await createEvidenceCapsule({
-      capsuleInput: input,
-      sourceFieldFormation,
-      ...(assertSourceCurrent === undefined ? {} : { assertSourceCurrent }),
+      capsuleInput,
+      sourceProvenance,
+      assertSourceCurrent,
+      enqueueEnrichment,
       searchProjections,
-      factFrameProposal,
-      semanticFactorProposal,
       evidenceCapsuleRepo: this.dependencies.evidenceCapsuleRepo,
       eventLogRepo: this.dependencies.eventLogRepo,
       runtimeNotifier: this.dependencies.runtimeNotifier,
-      factFrameProposalNormalizer: this.dependencies.factFrameProposalNormalizer,
       warn: this.dependencies.warn,
       generateObjectId: this.generateObjectId,
       now: this.now,
-      sha256: this.sha256,
       sourceAdmission: this.sourceAdmission,
-      factorIncidence: this.factorIncidence,
       fieldStores: this.fieldStores,
-      semanticExtractor: this.dependencies.semanticExtractor,
       projectionLifecycle: this.dependencies.projectionLifecycle,
       ...(this.dependencies.gardenIntentPort === undefined
         ? {}
-        : { gardenIntentPort: this.dependencies.gardenIntentPort }),
-      ...(enqueueEnrichment === undefined ? {} : { enqueueEnrichment })
+        : { gardenIntentPort: this.dependencies.gardenIntentPort })
     });
   }
 

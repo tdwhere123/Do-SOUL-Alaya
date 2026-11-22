@@ -36,7 +36,6 @@ import {
   reconcileHistoryPointers,
   writeHistoryEntry,
   type HistoryFileSidecar,
-  type HistorySidecar,
   type WriteEntryOptions
 } from "./history-entry-write.js";
 import { isHistoryEntrySlug } from "./history-slug.js";
@@ -45,7 +44,6 @@ export {
   HistoryEntryCommittedError,
   isHistoryEntryCommittedError,
   type HistoryFileSidecar,
-  type HistorySidecar,
   type WriteEntryOptions
 };
 

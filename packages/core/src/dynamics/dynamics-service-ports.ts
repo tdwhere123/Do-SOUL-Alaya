@@ -11,11 +11,11 @@ import {
 
 import { CoreError } from "../shared/errors.js";
 
-export const SCORE_CHANGE_EPSILON = 1e-9;
+const SCORE_CHANGE_EPSILON = 1e-9;
 
-export const ACTIVATION_WEIGHT_SUM_EPSILON = 1e-6;
+const ACTIVATION_WEIGHT_SUM_EPSILON = 1e-6;
 
-export const DYNAMICS_MEMORY_SCAN_PAGE_LIMIT = 500;
+const DYNAMICS_MEMORY_SCAN_PAGE_LIMIT = 500;
 
 export interface KarmaTransitionComputation {
   readonly now: string;

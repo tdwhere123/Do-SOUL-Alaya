@@ -10,7 +10,6 @@ import {
   HealthJournalService,
   MemoryService,
   PathRelationProposalService,
-  RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
   SynthesisService,
   type MemoryServiceSynthesisCapsuleLookupPort
 } from "@do-soul/alaya-core";
@@ -113,8 +112,6 @@ function createEvidenceService(
     projectionLifecycle: input.fieldComposition.projectionLifecycle,
     gardenIntentPort,
     runtimeNotifier: input.runtimeNotifier,
-    factFrameProposalNormalizer:
-      RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER,
     karmaEmitter: {
       emitKarmaEvent: async (emitInput) => {
         if (dynamicsServiceRef.current === null) {

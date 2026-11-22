@@ -9,7 +9,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { Hono } from "hono";
 import { CoreError } from "@do-soul/alaya-core";
-import { parseJsonBody } from "../../shared/shared.js";
+import { parseJsonBody, parseRequiredString } from "../../shared/shared.js";
 
 export interface SoulApprovalResolution {
   readonly approval_id: string;
@@ -75,13 +75,9 @@ export function registerSoulRoutes(app: Hono, services: SoulRouteServices): void
 
   if (graphExploreService !== undefined) {
     app.get("/workspaces/:workspaceId/soul/memories/:objectId/graph-neighbors", async (context) => {
-      const memoryId = context.req.param("objectId").trim();
+      const memoryId = parseRequiredString(context.req.param("objectId"), "objectId is required");
       const workspaceId = parseRequiredString(context.req.param("workspaceId"), "workspaceId is required");
       await services.workspaceService.getById(workspaceId);
-
-      if (memoryId.length === 0) {
-        throw new CoreError("VALIDATION", "objectId is required");
-      }
 
       const direction = parseGraphExploreDirection(context.req.query("direction"));
       const edgeTypes = (context.req.queries("edge_types") ?? []).map(parseGraphEdgeTypeQueryValue);
@@ -153,20 +149,6 @@ function parseGraphEdgeTypeQueryValue(value: string): MemoryGraphEdgeTypeValue {
   }
 
   return result.data;
-}
-
-function parseRequiredString(value: string | undefined, message: string): string {
-  if (value === undefined) {
-    throw new CoreError("VALIDATION", message);
-  }
-
-  const trimmed = value.trim();
-
-  if (trimmed.length === 0) {
-    throw new CoreError("VALIDATION", message);
-  }
-
-  return trimmed;
 }
 
 function parseRunIdFromBody(body: unknown): string {

@@ -228,6 +228,7 @@ describe("prepareTemporalCandidate", () => {
       candidate.connection.prepare(
         "UPDATE temporal_schema_state SET status = 'mixed' WHERE state_id = 1"
       ).run();
+      candidate.connection.pragma("wal_checkpoint(TRUNCATE)");
 
       expect(() => selectTemporalProjection(candidate, {
         receiptFilename: fixture.receiptFilename,
@@ -240,6 +241,29 @@ describe("prepareTemporalCandidate", () => {
       });
       expect(sourceFileSet(fixture.sourceFilename)).toEqual(sourceBefore);
     } finally {
+      candidate.close();
+    }
+  });
+
+  it("rejects a post-seal SQLite commit held only in the candidate WAL", async () => {
+    seedLegacySource(fixture.sourceFilename);
+    const prepared = await prepareTemporalCandidate(fixture);
+    const candidate = initDatabase({ filename: fixture.candidateFilename, temporalMode: "candidate" });
+    const writer = new BetterSqlite3(fixture.candidateFilename);
+    try {
+      const wal = `${fixture.candidateFilename}-wal`;
+      expect(fs.statSync(wal, { throwIfNoEntry: false })?.size ?? 0).toBe(0);
+      writer.pragma("wal_autocheckpoint = 0");
+      writer.exec("CREATE TABLE post_seal_mutation (value TEXT)");
+      expect(fs.statSync(wal).size).toBeGreaterThan(0);
+      expect(fileSha256(fixture.candidateFilename)).toBe(prepared.candidate.sha256);
+      expect(() => selectTemporalProjection(candidate, {
+        receiptFilename: fixture.receiptFilename,
+        reason: "select sealed candidate"
+      })).toThrow(/non-empty.*WAL sidecar/);
+      expect(inspectTemporalProjectionSelection(candidate)).toMatchObject({ selected: false, audit: [] });
+    } finally {
+      writer.close();
       candidate.close();
     }
   });

@@ -1,5 +1,6 @@
 import { sourceGoldRootIdentity, sourceIndexNativeRootKey, sourceIndexNavigationLocation, type RecallNavigationWitness, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import type { NativeSourceNomination, ObserverReaders, SourceRootObserverPage } from "../conditional-field/observers/observe-ports.js";
+import { parseSourceStream } from "../conditional-field/observers/source-literal-stream.js";
 import { CoreError } from "../../shared/errors.js";
 
 /** A frozen nomination inventory is a read frontier, never a new discovery cursor. */
@@ -48,9 +49,15 @@ export function nativeSourceReaders(readers: ObserverReaders, captured: NativeSo
       const empty: SourceRootObserverPage = { rows: [], nativeVisits: 0, nativeBytes: 0,
         rowsRead: 0, bytesRead: 0, truncated: false, committedThrough: input.afterCursor };
       if (readers.sourceRoot === undefined) return { ...empty, unavailable: true };
-      const offset = input.afterCursor === null ? 0 : Number(input.afterCursor);
+      const pin = parseSourceStream(input.afterCursor);
+      const offset = pin === undefined ? frozenNominationOffset(input.afterCursor) : Number(pin.afterCursor) - 1;
       if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("Invalid frozen source nomination cursor");
       const target = roots === undefined ? nominations?.[offset]?.source.target : roots[offset];
+      if (pin !== undefined && (target === undefined || pin.kind !== target.root_kind || pin.rootId !== target.root_id
+        || pin.revision !== target.source_version || pin.digest !== target.content_digest
+        || !Number.isSafeInteger(pin.offset) || pin.offset < 0)) {
+        throw new TypeError("Invalid frozen source stream pin");
+      }
       if (target === undefined) return empty;
       const key = roots === undefined ? sourceIndexNativeRootKey(nominations![offset]!.source) : sourceGoldRootIdentity(target);
       const navigation = witnesses.get(key);
@@ -59,7 +66,7 @@ export function nativeSourceReaders(readers: ObserverReaders, captured: NativeSo
       }
       const page = readers.sourceRoot({ purpose: "observation", workspaceId: input.workspaceId, rootKind: target.root_kind,
         rootId: target.root_id, revision: target.source_version, digest: target.content_digest,
-        evidenceObjectId: target.evidence_object_id, offset: 0,
+        evidenceObjectId: target.evidence_object_id, offset: pin?.offset ?? 0,
         byteLimit: input.byteLimit, nativeByteLimit: input.nativeByteLimit, workLimit: input.workLimit });
       const retry = page.resourceLimited === true && page.row === null;
       return { rows: page.row === null ? [] : [{ ...page.row, navigation }],
@@ -67,8 +74,16 @@ export function nativeSourceReaders(readers: ObserverReaders, captured: NativeSo
         nativeBytes: page.bytesRead + (page.metadataBytes ?? 0), rowsRead: page.rowsRead,
         bytesRead: page.bytesRead, metadataBytes: page.metadataBytes,
         unavailable: page.unavailable, resourceLimited: retry,
-        truncated: retry || offset + 1 < rootCount,
+        truncated: retry || page.row?.content_complete === false || offset + 1 < rootCount,
         committedThrough: retry ? input.afterCursor : String(offset + 1) };
     }
   };
+}
+
+function frozenNominationOffset(afterCursor: string | null): number {
+  if (afterCursor === null) return 0;
+  if (!/^(?:0|[1-9]\d*)$/u.test(afterCursor)) throw new TypeError("Invalid frozen source nomination cursor");
+  const offset = Number(afterCursor);
+  if (!Number.isSafeInteger(offset)) throw new TypeError("Invalid frozen source nomination cursor");
+  return offset;
 }

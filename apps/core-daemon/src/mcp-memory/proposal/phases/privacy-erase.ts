@@ -13,13 +13,14 @@ export type AcceptedPrivacyEraseApply = Readonly<{
   readonly kind: "privacy_erase";
   readonly transactionScope: object;
   readonly applySynchronousResolutionMutation: (
-    storedReviewEvents: readonly EventLogEntry[]
+    storedReviewEvents: readonly EventLogEntry[], reviewerIdentity: string
   ) => readonly ProposalResolutionEventInput[];
 }>;
 
 export function prepareAcceptedPrivacyErase(input: Readonly<{
   readonly deps: McpMemoryProposalWorkflowDependencies;
   readonly proposalId: string;
+  readonly proposalRuntimeId: string;
   readonly targetObjectKind: string | null | undefined;
   readonly targetObjectId: string;
   readonly proposedChanges: Readonly<MemoryEntryMutableFields> | null | undefined;
@@ -41,13 +42,16 @@ export function prepareAcceptedPrivacyErase(input: Readonly<{
   return {
     kind: "privacy_erase",
     transactionScope: privacyErasePort.transactionScope,
-    applySynchronousResolutionMutation: (storedReviewEvents) => [
+    applySynchronousResolutionMutation: (storedReviewEvents, reviewerIdentity) => [
       ...authorizePrivacyErase({
         store: effectStore.store,
         lookup: effectStore.lookup,
         storedReviewEvents,
         proposalId: input.proposalId,
+        proposalRuntimeId: input.proposalRuntimeId,
         workspaceId: input.context.workspaceId,
+        reviewerIdentity,
+        runId: input.context.runId,
         targetObjectId: input.targetObjectId,
         reviewedAt: barrier.erased_at,
         createError: input.createError

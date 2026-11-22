@@ -1,5 +1,6 @@
 import {
   GovernanceResolutionPayloadSchema,
+  MemoryGovernanceEventType,
   ProofEffectWitnessSchema,
   canonicalEffectClaimFact,
   canonicalEffectMemoryFact,
@@ -152,6 +153,7 @@ export class SqliteFieldProofEffectRepo implements FieldProofEffectRepo {
       witness.kind === "actor_authority" && witness.authority_event_id === null)) {
       throw new StorageError("VALIDATION_FAILED", "actor proof lacks a durable authority event");
     }
+    if (row.action === "erase") this.verifyPrivacyReviewAuthority(row, witnesses);
     const sourceWitnesses = witnesses.filter(hasSourceWitness);
     if (sourceWitnesses.length > 0) {
       const matched = parseOptionalRow(
@@ -177,6 +179,29 @@ export class SqliteFieldProofEffectRepo implements FieldProofEffectRepo {
       }
       if (row.action === "correct") this.verifyCorrectionReceipts(row, witnesses, facts.targetFact);
     }
+  }
+
+  private verifyPrivacyReviewAuthority(
+    row: FieldProofEffectRow, witnesses: readonly ProofEffectWitness[]
+  ): void {
+    const authority = witnesses.find((witness) => witness.kind === "actor_authority");
+    const confirmation = witnesses.find((witness) => witness.kind === "confirmation");
+    const eventId = authority?.authority_event_id;
+    const approved = eventId != null && confirmation?.authority_event_id === eventId &&
+      row.scope === row.workspace_id &&
+      this.database.connection.prepare(`
+        SELECT 1 FROM event_log AS review JOIN proposals AS proposal
+          ON proposal.proposal_id = review.entity_id AND proposal.workspace_id = review.workspace_id
+        WHERE review.event_id = ? AND review.workspace_id = ? AND review.entity_id = ?
+          AND review.event_type = ? AND review.entity_type = 'proposal'
+          AND review.run_id IS ? AND review.caused_by = ?
+          AND json_extract(review.payload_json, '$.to_state') = 'accepted'
+          AND proposal.resolution_state = 'accepted' AND proposal.reviewer_identity = review.caused_by
+          AND proposal.proposal_operation = 'privacy_erase' AND proposal.target_object_kind = 'source_record'
+          AND proposal.derived_from = ?
+      `).get(eventId, row.workspace_id, row.delivery_id, MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED,
+        row.run_id, row.actor_id, row.target) !== undefined;
+    if (!approved) throw new StorageError("VALIDATION_FAILED", "Privacy erase lacks bound reviewer authority.");
   }
 
   private readDecisionFacts(

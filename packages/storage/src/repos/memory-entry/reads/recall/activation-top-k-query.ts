@@ -5,7 +5,7 @@ import type { RecallActivationTopKQuery } from "../../types.js";
 import type { RecallActivationTopKStatements } from "../../statements/recall/activation-top-k-statements.js";
 import { parseRows } from "../../../shared/parse-row.js";
 
-export const MAX_RECALL_ACTIVATION_TOP_K = 102_400;
+const MAX_RECALL_ACTIVATION_TOP_K = 102_400;
 
 export function findRecallActivationTopK(
   statements: RecallActivationTopKStatements,

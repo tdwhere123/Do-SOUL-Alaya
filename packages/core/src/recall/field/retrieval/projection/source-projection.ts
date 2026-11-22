@@ -25,9 +25,7 @@ export function projectSourceFormationSnapshot(input: Readonly<{
       format: CONDITIONAL_SOURCE_FRONTIER_OPERATOR_ID,
       records: sortByIdentity(records),
       bindings,
-      spans: sortByIdentity(input.stores.listSpans(input.workspaceId)),
-      factors: sortByIdentity(input.stores.listFactors(input.workspaceId)),
-      incidences: sortByIdentity(input.stores.listIncidences(input.workspaceId))
+      spans: sortByIdentity(input.stores.listSpans(input.workspaceId))
     })
   });
 }

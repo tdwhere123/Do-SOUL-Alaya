@@ -6,7 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { DraftMemoryObjectKey } from "../types.js";
 
-export function formMemoryObjectKey(draft: Readonly<DraftMemoryObjectKey>): Readonly<MemoryObjectKey> | null {
+function formMemoryObjectKey(draft: Readonly<DraftMemoryObjectKey>): Readonly<MemoryObjectKey> | null {
   const normalized = normalizeMemoryObjectKeySurface(draft.surface);
   const parsed = MemoryObjectKeySchema.safeParse({
     ...draft,

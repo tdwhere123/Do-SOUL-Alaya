@@ -1,7 +1,12 @@
 import { resolveRequestRun } from "../../runtime/request-token-binding.js";
 import type { Hono } from "hono";
 import { CoreError, type RunService, type SignalService } from "@do-soul/alaya-core";
-import { parseJsonBody, parseListPagination, writeListPaginationHeaders } from "../shared/shared.js";
+import {
+  parseJsonBody,
+  parseListPagination,
+  resolveListAndCount,
+  writeListPaginationHeaders
+} from "../shared/shared.js";
 import { EmitCandidateSignalResponseSchema, SignalSource } from "@do-soul/alaya-protocol";
 import { materializeCandidateSignal } from "@do-soul/alaya-soul";
 
@@ -56,18 +61,4 @@ export function registerSignalRoutes(app: Hono, services: SignalRouteServices): 
       201
     );
   });
-}
-
-async function resolveListAndCount<T>(
-  listPromise: Promise<readonly T[]>,
-  countPromise: Promise<number>
-): Promise<readonly [readonly T[], number]> {
-  const [listResult, countResult] = await Promise.allSettled([listPromise, countPromise]);
-  if (listResult.status === "rejected") {
-    throw listResult.reason;
-  }
-  if (countResult.status === "rejected") {
-    throw countResult.reason;
-  }
-  return [listResult.value, countResult.value] as const;
 }

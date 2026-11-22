@@ -1,8 +1,12 @@
 import fs from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type BetterSqlite3 from "better-sqlite3";
 import BetterSqlite3Ctor from "better-sqlite3";
+import { StorageDatabase } from "../../sqlite/db.js";
+import { migrateLegacyPathRelationsToTemporalCandidate } from "../../sqlite/temporal-cutover-gate.js";
+import { removeTempDirectorySync } from "../temp-directory.js";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -79,4 +83,62 @@ export function insertMemoryEntryRow(
     ) VALUES (?, '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', 'test',
       'fact', 'compiler', 'explicit', 'project', ?, ?, 'run-1')`
   ).run(objectId, content, workspaceId);
+}
+
+export function createMigrationHarness() {
+  const rawDatabases = new Set<BetterSqlite3.Database>();
+  const storageDatabases = new Set<StorageDatabase>();
+  const directories: string[] = [];
+
+  return {
+    trackRaw<T extends BetterSqlite3.Database>(database: T): T {
+      rawDatabases.add(database);
+      return database;
+    },
+    trackStorage<T extends StorageDatabase>(database: T): T {
+      storageDatabases.add(database);
+      return database;
+    },
+    untrackStorage(database: StorageDatabase): void {
+      storageDatabases.delete(database);
+    },
+    createTempDir(prefix: string): string {
+      const directory = fs.mkdtempSync(path.join(tmpdir(), prefix));
+      directories.push(directory);
+      return directory;
+    },
+    seedLegacyFileDatabase(
+      prefix: string,
+      maxVersion: number,
+      appliedAt = "2026-09-01T00:00:00.000Z",
+      filenameBase = "alaya.db"
+    ): { readonly directory: string; readonly filename: string; readonly database: StorageDatabase } {
+      const directory = fs.mkdtempSync(path.join(tmpdir(), prefix));
+      directories.push(directory);
+      const filename = path.join(directory, filenameBase);
+      const database = new StorageDatabase(filename, new BetterSqlite3Ctor(filename));
+      storageDatabases.add(database);
+      applyBaselineSql(database.connection, maxVersion);
+      migrateLegacyPathRelationsToTemporalCandidate(database.connection, { selectionRequired: false });
+      database.connection.exec("CREATE TABLE schema_version(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
+      const mark = database.connection.prepare("INSERT INTO schema_version VALUES (?, ?)");
+      for (let version = 1; version <= maxVersion; version += 1) {
+        mark.run(version, appliedAt);
+      }
+      return { directory, filename, database };
+    },
+    cleanup(): void {
+      for (const database of rawDatabases) {
+        if (database.open) database.close();
+      }
+      rawDatabases.clear();
+      for (const database of storageDatabases) {
+        if (!database.isClosed()) database.close({ optimize: false });
+      }
+      storageDatabases.clear();
+      for (const directory of directories.splice(0)) {
+        removeTempDirectorySync(directory);
+      }
+    }
+  };
 }

@@ -51,17 +51,3 @@ export function withLoggerCorrelation(
   }
   return enriched;
 }
-
-export function bindLoggerCorrelation(
-  logger: LoggerPort,
-  ids: LoggerCorrelationIds
-): LoggerPort {
-  return Object.freeze({
-    trace: (message, meta) => logger.trace(message, withLoggerCorrelation(meta, ids)),
-    debug: (message, meta) => logger.debug(message, withLoggerCorrelation(meta, ids)),
-    info: (message, meta) => logger.info(message, withLoggerCorrelation(meta, ids)),
-    warn: (message, meta) => logger.warn(message, withLoggerCorrelation(meta, ids)),
-    error: (message, meta) => logger.error(message, withLoggerCorrelation(meta, ids)),
-    fatal: (message, meta) => logger.fatal(message, withLoggerCorrelation(meta, ids))
-  });
-}

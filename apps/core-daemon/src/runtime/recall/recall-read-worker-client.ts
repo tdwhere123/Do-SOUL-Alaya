@@ -2,20 +2,14 @@ import type { Worker } from "node:worker_threads";
 import { SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, indexEntryCacheKey,
   unavailableSourceQueryPreparation, admitSourceSemanticWorkerResultFamily,
   type InformationIndex,
-  type SourceSemanticWorkerResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
+  type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPort,
   ConditionalFieldExecutionReceipt,
   ConditionalFieldRecallPortResult,
   RecallReadSnapshotPort,
-  RecallServiceActiveConstraintsPort,
-  RecallServiceEvidenceSearchPort,
-  RecallServiceMemoryRepoPort,
-  RecallServicePathExpansionPort,
-  RecallServicePathPlasticityPort,
-  RecallServiceSynthesisSearchPort
+  RecallServiceActiveConstraintsPort
 } from "@do-soul/alaya-core";
-import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
 import type { RecallTemporalProjectionEnsurer } from "./recall-path-readers.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
 import type { RecallReadWorkerOperation } from "../recall-read-worker/protocol.js";
@@ -46,22 +40,12 @@ import {
   resolveDefaultWorkerUrl
 } from "../recall-read-worker/client-config.js";
 import { encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
-import { readRecallTierWindowOverIpc } from "../recall-read-worker/tier-window-client.js";
-import {
-  createWorkerMemoryRepo,
-  type WorkerTierWindowResult
-} from "../recall-read-worker/memory-client.js";
 import { createDeliverySettlement } from "../recall-read-worker/delivery-settlement.js";
 import { RecallReadWorkerLifecycle, type SuccessConsumption } from "./recall-read-worker-lifecycle.js";
 import { RecallDeliveryRoutes } from "./recall-delivery-routes.js";
 import { semanticLeaseExpiry, sourceSemanticLifetimeNow } from "../recall-read-worker/source-semantic-leases.js";
 
 export interface RecallReadWorkerClient {
-  readonly memoryRepo: RecallServiceMemoryRepoPort;
-  readonly evidenceSearchPort: RecallServiceEvidenceSearchPort;
-  readonly synthesisSearchPort: RecallServiceSynthesisSearchPort;
-  readonly pathExpansionPort: RecallServicePathExpansionPort;
-  readonly pathPlasticityPort: RecallServicePathPlasticityPort;
   readonly activeConstraintsPort: RecallServiceActiveConstraintsPort;
   readonly readSnapshot: RecallReadSnapshotPort;
   readonly conditionalFieldPort: ConditionalFieldRecallPort;
@@ -117,92 +101,6 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private readonly prepareSourceQuery?: PrepareSourceQuery;
   private readyPromise: Promise<void> | null = null;
   public readonly readSnapshot: RecallReadSnapshotPort;
-
-  public readonly memoryRepo: RecallServiceMemoryRepoPort = createWorkerMemoryRepo({
-    request: async (operation, payload) => await this.request(operation, payload),
-    readTierWindow: async (query) =>
-      await readRecallTierWindowOverIpc(query, async (pageQuery, consumePage) =>
-        await this.dispatch<WorkerTierWindowResult>(
-          "memory.findRecallTierWindow",
-          pageQuery,
-          consumePage
-        )
-      )
-  });
-
-  public readonly evidenceSearchPort: RecallServiceEvidenceSearchPort = {
-    searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
-      await this.request("evidence.searchByKeyword", { workspaceId, queryText, limit }),
-    searchByKeywordField: async (workspaceId, queryText, limit, refinementDepths) =>
-      await this.request("evidence.searchByKeywordField", {
-        workspaceId, queryText, limit,
-        ...(refinementDepths === undefined ? {} : { refinementDepths })
-      }),
-    searchManyByKeywordField: async (workspaceId, queries) =>
-      await this.request("evidence.searchManyByKeywordField", { workspaceId, queries }),
-    findByIds: async (workspaceId, evidenceObjectIds) =>
-      await this.request("evidence.findByIds", { workspaceId, evidenceObjectIds }),
-    findRecallQualifiedByIds: async (workspaceId, matches) =>
-      await this.request("evidence.findRecallQualifiedByIds", { workspaceId, matches }),
-    findRecallQualifiedFactKeysByIds: async (workspaceId, evidenceObjectIds) =>
-      await this.request("evidence.findRecallQualifiedFactKeysByIds", {
-        workspaceId,
-        evidenceObjectIds
-      }),
-    findSourceAnchorsByIds: async (workspaceId, evidenceObjectIds) =>
-      await this.request("evidence.findSourceAnchorsByIds", { workspaceId, evidenceObjectIds })
-  };
-
-  public readonly synthesisSearchPort: RecallServiceSynthesisSearchPort = {
-    searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
-      await this.request("synthesis.searchByKeyword", { workspaceId, queryText, limit }),
-    searchByKeywordField: async (workspaceId, queryText, limit, refinementDepths) =>
-      await this.request("synthesis.searchByKeywordField", {
-        workspaceId, queryText, limit,
-        ...(refinementDepths === undefined ? {} : { refinementDepths })
-      }),
-    searchManyByKeywordField: async (workspaceId, queries) =>
-      await this.request("synthesis.searchManyByKeywordField", { workspaceId, queries }),
-    findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
-      await this.request("synthesis.findByIds", { workspaceId, objectIds })
-  };
-
-  public readonly pathExpansionPort: RecallServicePathExpansionPort = {
-    findByAnchors: async (
-      workspaceId: string,
-      anchorRefs: readonly PathAnchorRef[],
-      options?: RecallPathProjectionReadOptions
-    ) =>
-      await this.request("path.findByAnchors", {
-        workspaceId,
-        anchorRefs,
-        ...this.pathReadOptions(options)
-      }),
-    findByTimeConcernWindowDigests: async (
-      workspaceId: string,
-      windowDigests: readonly string[],
-      options?: RecallPathProjectionReadOptions
-    ) =>
-      await this.request("path.findByTimeConcernWindowDigests", {
-        workspaceId,
-        windowDigests,
-        ...this.pathReadOptions(options)
-      })
-  };
-
-  public readonly pathPlasticityPort: RecallServicePathPlasticityPort = {
-    getStrengthByMemoryId: async (
-      workspaceId: string,
-      memoryIds: readonly string[],
-      options?: RecallPathProjectionReadOptions
-    ) => {
-      const entries = await this.request<readonly (readonly [string, number])[]>(
-        "pathPlasticity.getStrengthByMemoryId",
-        { workspaceId, memoryIds, ...this.pathReadOptions(options) }
-      );
-      return new Map(entries);
-    }
-  };
 
   public readonly activeConstraintsPort: RecallServiceActiveConstraintsPort = {
     readBounded: async (params) => await this.request("constraints.readBounded", params),
@@ -411,15 +309,6 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     payload: unknown
   ): Promise<T> {
     return await this.dispatch<T>(operation, payload);
-  }
-
-  private pathReadOptions(
-    options: RecallPathProjectionReadOptions | undefined
-  ): Readonly<{ readonly asOf?: string }> {
-    if (this.pathReadBind !== "temporal" || options?.asOf === undefined) {
-      return Object.freeze({});
-    }
-    return Object.freeze({ asOf: options.asOf });
   }
 
   private async dispatch<T>(

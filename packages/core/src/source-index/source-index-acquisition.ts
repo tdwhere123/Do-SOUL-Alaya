@@ -258,11 +258,11 @@ class AcquisitionQuery {
     }
     const lexical = this.repository.readLexicalCandidates(this.input.workspace_id, this.input.navigation_text,
       this.input.allowance.max_attempts, this.meter.remaining());
-    this.lexicalCandidates = collapseStatementCandidates(lexical.candidates, this.meter);
+    this.absorb(lexical.resources);
     this.lexical = { completion: lexical.completion, reason: lexical.reason,
       index_coverage: lexical.index_coverage, limitations: lexical.limitations, tokenization: lexical.tokenization };
     if (lexical.resource_refusal) this.resourceRefusals.push(lexical.resource_refusal);
-    this.absorb(lexical.resources);
+    this.lexicalCandidates = collapseStatementCandidates(lexical.candidates, this.meter);
     observeLexicalCandidates(this.lexicalCandidates, fact => this.observe("lexical_candidate", fact));
   }
 
@@ -630,7 +630,6 @@ class AcquisitionQuery {
       this.stage = "admission";
       try {
         const admission = this.admit(source, vector === null ? null : this.vectorBinding);
-        this.absorb(admission.resources);
         if (admission.status !== "ready") {
           this.counts.rejected++;
           if (admission.status === "resource_limited") {
@@ -689,9 +688,10 @@ class AcquisitionQuery {
     const previous = decided.get(source.root_key);
     if (previous !== undefined) {
       this.meter.charge(1, 0, "source admission reuse");
-      return { ...previous, resources: { work: 0, native_bytes: 0, memory_bytes: 0, sql_internal_work: "unknown" } };
+      return previous;
     }
     const admission = this.repository.admitQueryCandidate(source, binding, this.meter.remaining());
+    this.absorb(admission.resources);
     if (admission.status !== "resource_limited") {
       this.meter.charge(0, 64, "source admission reuse retention");
       decided.set(source.root_key, admission);
@@ -782,8 +782,9 @@ class AcquisitionQuery {
   }
 
   private absorb(resources: SourceIndexQueryResources): void {
-    this.meter.charge(resources.work, resources.memory_bytes, "source index bounded native phase");
     this.nativeBytes += resources.native_bytes;
+    this.meter.charge(resources.work, 0, "source index bounded native phase");
+    this.meter.charge(0, resources.memory_bytes, "source index bounded native phase");
   }
 }
 

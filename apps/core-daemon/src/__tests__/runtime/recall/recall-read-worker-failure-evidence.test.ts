@@ -76,7 +76,8 @@ describe("accepted worker rejection private evidence", () => {
         expect(classifyError(error)).toBe(kind === "core" ? "CONFLICT" : "INTERNAL");
         expect(sanitizeError(error)).not.toContain("private");
         await h.lifecycle.readSnapshot.rollback();
-        await expect(h.lifecycle.request("memory.findByWorkspaceId", {})).resolves.toEqual([]);
+        await expect(h.lifecycle.request("constraints.findActive", { workspaceId: "workspace-1", cap: 8 }))
+          .resolves.toEqual({ constraints: [], total_count: 0 });
         expect(h.lifecycle.isAvailable(worker)).toBe(true);
         expect(h.unavailable).not.toHaveBeenCalled();
         expect(warn).toHaveBeenCalledTimes(1);
@@ -194,8 +195,8 @@ describe("accepted worker rejection private evidence", () => {
         expect(warn.mock.calls[1]![1].failure).toMatchObject({ error: { name: "ZodError", message: nonCore.message, stack: nonCore.stack },
           details_status: "absent", core_details_status: "absent" });
         await h.lifecycle.readSnapshot.rollback();
-        await expect(h.lifecycle.request("memory.findByWorkspaceId", { workspaceId: "workspace-1", tier: "hot", page: { limit: 1, offset: 0 } }))
-          .resolves.toEqual([]);
+        await expect(h.lifecycle.request("constraints.findActive", { workspaceId: "workspace-1", cap: 8 }))
+          .resolves.toEqual({ constraints: [], total_count: 0 });
         expect(h.lifecycle.isAvailable(worker)).toBe(true);
         expect(h.unavailable).not.toHaveBeenCalled();
         expect(warn).toHaveBeenCalledTimes(2);

@@ -39,7 +39,7 @@ const PUBLIC_ERROR_WORKFLOW_MESSAGES = [
   "Edge proposal service is not available.",
   "Memory update proposal requires proposed_changes.",
   "reviewer binding not configured",
-  "Review requires a human reviewer surface (Inspector/alaya review); attached agents cannot review.",
+  "Review requires a human reviewer surface (HTTP reviewer / alaya review); attached agents cannot review.",
   "Invalid reviewer token.",
   "Reviewer identity does not match server-bound reviewer.",
   "Proposal is assigned to a different reviewer.",

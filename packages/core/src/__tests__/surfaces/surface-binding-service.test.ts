@@ -211,7 +211,11 @@ describe("SurfaceBindingService", () => {
     });
     const service = new SurfaceBindingService(dependencies);
 
-    const updated = await service.transitionBindingState(BINDING_ID_1, BindingState.STALE, "anchor_degradation", "reviewer-1");
+    await expect(service.transitionBindingState(
+      BINDING_ID_1, "foreign-workspace", BindingState.STALE, "anchor_degradation", "reviewer-1"
+    )).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(order).toEqual([]);
+    const updated = await service.transitionBindingState(BINDING_ID_1, "workspace-1", BindingState.STALE, "anchor_degradation", "reviewer-1");
 
     expect(order).toEqual(["event_publish", "binding_update", "event_propagate"]);
     expect(updated.binding.binding_state).toBe(BindingState.STALE);
@@ -268,6 +272,7 @@ describe("SurfaceBindingService", () => {
 
     const updatedDuringMutation = await service.transitionBindingState(
       BINDING_ID_1,
+      "workspace-1",
       BindingState.STALE,
       "anchor_degradation",
       "user"
@@ -320,7 +325,7 @@ describe("SurfaceBindingService", () => {
     const service = new SurfaceBindingService(dependencies);
 
     await expect(
-      service.transitionBindingState(BINDING_ID_1, BindingState.ACTIVE, "re_attach", "user")
+      service.transitionBindingState(BINDING_ID_1, "workspace-1", BindingState.ACTIVE, "re_attach", "user")
     ).rejects.toMatchObject({ code: "VALIDATION" });
   });
 

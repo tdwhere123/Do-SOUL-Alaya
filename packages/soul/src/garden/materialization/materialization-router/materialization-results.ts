@@ -2,7 +2,6 @@ import { readErrorMessage, AlayaError, CommittedObjectError } from "@do-soul/ala
 import type {
   MaterializationCreatedObject,
   MaterializationFailureResult,
-  MaterializationResult,
   MaterializationResultFields,
   MaterializationSuccessResult
 } from "./contracts.js";
@@ -43,10 +42,4 @@ export function readPartialFailureCreatedObjects(
   // reports failure — callers must reconcile orphans explicitly.
   if (error instanceof MaterializationPartialFailureError) return error.createdObjects;
   return error instanceof CommittedObjectError ? [error.object] : [];
-}
-
-export function isMaterializationFailure(
-  result: MaterializationResult
-): result is MaterializationFailureResult {
-  return result.success === false;
 }

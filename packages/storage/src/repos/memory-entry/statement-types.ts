@@ -1,4 +1,4 @@
-export interface SqliteRunResult {
+interface SqliteRunResult {
   readonly changes: number;
 }
 

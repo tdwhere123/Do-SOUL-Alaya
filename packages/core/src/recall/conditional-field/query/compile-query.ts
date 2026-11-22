@@ -42,12 +42,9 @@ import { admitQueryProposal } from "./query-proposal-admission.js";
 import type { QueryProposalProducerRegistry } from "./query-proposal-producer-registry.js";
 
 export {
-  authorizedScopesMismatch,
   continuationViewMismatch,
   digestOriginalQuery,
-  identityFor,
-  interpretationIdentity,
-  proposalBindsOriginalQuery
+  interpretationIdentity
 } from "./compile-query-identity.js";
 export {
   collectRecoverableBindings,
@@ -59,9 +56,7 @@ export {
   FROZEN_SOURCE_PREDICATE_NAMES,
   UNSUPPORTED_POLICY_QUERY_ID
 } from "./source-predicates.js";
-export type { OpenRelationCapture } from "./ordinary-language.js";
 export {
-  ANCHOR_EVENT_VARIABLE,
   SERVICE_VARIABLE,
   UNBOUND_BINDING_CONTEXT,
   USES_SERVICE_RELATION,
@@ -79,7 +74,7 @@ type CompileCommon = Readonly<{
   readonly proposal_registry?: QueryProposalProducerRegistry;
 }>;
 
-export type TypedQueryCompileInput = CompileCommon & Readonly<{
+type TypedQueryCompileInput = CompileCommon & Readonly<{
   readonly source: "typed";
   readonly program: QueryProgram;
   readonly holes?: readonly QueryHole[];

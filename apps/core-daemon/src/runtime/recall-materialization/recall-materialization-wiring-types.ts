@@ -104,6 +104,4 @@ export type CreateRecallMaterializationWiringInput = {
   readonly pathFailureHealthInboxPort: PathFailureHealthInboxPort;
   readonly evidenceService: EvidenceService;
   readonly fieldComposition: import("../field/field-composition.js").DaemonFieldComposition;
-  readonly openSemanticFactorExtractionPort?: import("@do-soul/alaya-core")
-    .OpenSemanticFactorExtractionPort;
 };

@@ -20,6 +20,7 @@ import {
 import { StorageError } from "../shared/errors.js";
 import { markTemporalDatabaseEstablished } from "./temporal-file-publication.js";
 import {
+  assertEmptySqliteWal, readSealedSqliteDatabaseDigest,
   readSqliteDatabaseFileWitnessSet, SQLITE_DATABASE_FILE_WITNESS_ROLES,
   type SqliteDatabaseFileWitness
 } from "./sqlite-database-file-witness.js";
@@ -89,6 +90,7 @@ export function selectTemporalProjection(
 ): TemporalProjectionSelectionState {
   const receipt = readPreparedTemporalCandidateReceipt(input.receiptFilename);
   const candidateFilename = assertCandidateDatabase(database, receipt);
+  assertEmptySqliteWal(candidateFilename);
   assertTemporalCandidateDatabaseReady(candidateFilename, knownMigrationVersion());
   const reason = parseRequiredText(input.reason, "selection reason");
   const selectedAt = parseIsoTimestamp(input.selectedAt ?? new Date().toISOString(), "selected at");
@@ -99,9 +101,12 @@ export function selectTemporalProjection(
     if (state.selected) {
       throw new StorageError("CONFLICT", "Temporal projection is already selected; inspect or roll back it first.");
     }
-    assertCandidateSeal(candidateFilename, receipt);
+    if (readSealedSqliteDatabaseDigest(candidateFilename) !== receipt.candidateSha256) {
+      throw new StorageError("CONFLICT", "Temporal candidate no longer matches its prepared receipt seal.");
+    }
     assertSourceUnchanged(receipt);
     assertCandidateQuarantineReconciles(database.connection, receipt);
+    assertEmptySqliteWal(candidateFilename);
 
     // Durable before the selection commit: a lost selected file cannot become
     // an implicit fresh database. This marker never grants runtime admission.
@@ -236,15 +241,6 @@ function assertCandidateDatabase(
     throw new StorageError("CONFLICT", "Temporal selection database does not match the prepared candidate receipt.");
   }
   return candidateFilename;
-}
-
-function assertCandidateSeal(
-  candidateFilename: string,
-  receipt: PreparedTemporalCandidateReceipt
-): void {
-  if (fileSha256(candidateFilename) !== receipt.candidateSha256) {
-    throw new StorageError("CONFLICT", "Temporal candidate no longer matches its prepared receipt seal.");
-  }
 }
 
 function assertSourceUnchanged(receipt: PreparedTemporalCandidateReceipt): void {

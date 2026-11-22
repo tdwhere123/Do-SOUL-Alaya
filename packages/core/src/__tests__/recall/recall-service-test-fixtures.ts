@@ -166,6 +166,22 @@ export function createPathRelation(overrides: {
   };
 }
 
+export function createRecallDatabaseRegistry(): {
+  readonly register: (database: import("@do-soul/alaya-storage").StorageDatabase) => void;
+  readonly closeAll: () => void;
+} {
+  const databases = new Set<import("@do-soul/alaya-storage").StorageDatabase>();
+  return {
+    register: (database) => {
+      databases.add(database);
+    },
+    closeAll: () => {
+      for (const database of databases) database.close();
+      databases.clear();
+    }
+  };
+}
+
 export function createDependencies(): {
   readonly dependencies: RecallServiceDependencies & RecallServiceFieldDeps;
 } {

@@ -1,6 +1,4 @@
-import type { Context } from "hono";
 import { CoreError } from "@do-soul/alaya-core";
-import { isRequestBodyTooLargeError, throwInvalidRequestBody } from "../../shared/shared.js";
 
 const MAX_PENDING_LIST_LIMIT = 500;
 
@@ -25,21 +23,6 @@ export function parseProposalListState(value: string | undefined): "all" | "pend
     return trimmed;
   }
   throw new CoreError("VALIDATION", "Invalid state query parameter");
-}
-
-export async function readJsonObject(context: Context): Promise<Record<string, unknown> | null> {
-  try {
-    const parsed: unknown = await context.req.json();
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch (error) {
-    if (isRequestBodyTooLargeError(error)) {
-      throwInvalidRequestBody(error);
-    }
-    return null;
-  }
 }
 
 export function clamp01(value: number): number {

@@ -77,6 +77,53 @@ describe("GardenScheduler", () => {  it("keeps tier-1 cooling active when the sc
   });
 
 
+  it("cools workspace-level tier-1 passes when target_object_refs and objects_affected are both empty", async () => {
+    let now = "2026-03-27T00:00:00.000Z";
+    const { scheduler } = createScheduler({
+      coolingPeriodMs: 60_000,
+      now: () => now
+    });
+
+    scheduler.enqueue(
+      createTask({
+        task_id: "task-green-ws-1",
+        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+        required_tier: GardenTier.TIER_1,
+        workspace_id: "ws-cool",
+        target_object_refs: []
+      })
+    );
+    await expect(scheduler.dispatchNext(GardenRole.AUDITOR)).resolves.toMatchObject({
+      task_id: "task-green-ws-1"
+    });
+    await scheduler.reportCompletion(
+      createResult({
+        task_id: "task-green-ws-1",
+        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+        role: GardenRole.AUDITOR,
+        tier: GardenTier.TIER_1,
+        workspace_id: "ws-cool",
+        objects_affected: []
+      })
+    );
+
+    scheduler.enqueue(
+      createTask({
+        task_id: "task-green-ws-2",
+        task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+        required_tier: GardenTier.TIER_1,
+        workspace_id: "ws-cool",
+        target_object_refs: []
+      })
+    );
+    await expect(scheduler.dispatchNext(GardenRole.AUDITOR)).resolves.toBeNull();
+
+    now = "2026-03-27T00:02:00.000Z";
+    await expect(scheduler.dispatchNext(GardenRole.AUDITOR)).resolves.toMatchObject({
+      task_id: "task-green-ws-2"
+    });
+  });
+
   it("prunes expired cooling entries on a later scheduler call", async () => {
     let now = "2026-03-27T00:00:00.000Z";
     const { scheduler } = createScheduler({

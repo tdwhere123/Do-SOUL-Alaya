@@ -1,9 +1,5 @@
 import {
-  GreenGovernanceEventType,
-  MemoryGovernanceEventType,
   RevokeReason,
-  SoulGreenPiercedPayloadSchema,
-  SoulMemoryUpdatedPayloadSchema,
   type EventLogEntry,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
@@ -13,8 +9,7 @@ import { parseMemoryEntryRow, type MemoryEntryRow } from "../../memory-entry/map
 import { insertEventLogEntry } from "../../runtime/writes/event-log-writer.js";
 import {
   parseAcceptedMemoryUpdateInput,
-  shouldRevokeGreenForEvidenceRewrite,
-  toUpdatedFieldNames
+  shouldRevokeGreenForEvidenceRewrite
 } from "../mappers/acceptance.js";
 import type { RevokableGreenStatusRow } from "../mappers/rows.js";
 import type { SqliteProposalWorkflowContext } from "./accept-workflows.js";
@@ -60,23 +55,21 @@ export function applyAcceptedMemoryUpdate(
   readonly memory: Readonly<MemoryEntry>;
   readonly events: readonly EventLogEntry[];
 }> {
-  const memoryEvent = insertMemoryUpdatedEvent(ctx, existingMemory, memoryUpdate);
   const revokableGreenStatus = findGreenRevocationTarget(ctx, existingMemory, memoryUpdate);
+  const events = [insertEventLogEntry(ctx.eventLogWriter, memoryUpdate.buildMemoryEvent(existingMemory))];
 
   applyMemoryUpdate(ctx, memoryUpdate);
-  const greenEvent =
-    revokableGreenStatus === undefined
-      ? undefined
-      : insertAndApplyGreenRevocation(ctx, updatedAt, existingMemory, memoryUpdate, revokableGreenStatus);
+  if (revokableGreenStatus !== undefined) {
+    events.push(insertEventLogEntry(ctx.eventLogWriter,
+      memoryUpdate.buildGreenRevocationEvent(existingMemory, revokableGreenStatus.object_id)));
+    applyGreenRevocation(ctx, updatedAt, existingMemory, revokableGreenStatus);
+  }
   const updatedMemory = loadUpdatedMemory(ctx, memoryUpdate.target_object_id);
   if (memoryUpdate.proposed_changes.evidence_refs !== undefined) {
     syncMemoryEntryEvidenceRefIndex(ctx, updatedMemory);
   }
 
-  return {
-    memory: updatedMemory,
-    events: greenEvent === undefined ? [memoryEvent] : [memoryEvent, greenEvent]
-  };
+  return { memory: updatedMemory, events };
 }
 
 export function assertMemoryExistsInWorkspace(
@@ -88,27 +81,6 @@ export function assertMemoryExistsInWorkspace(
   assertMemoryWorkspace(memory, memoryId, workspaceId);
 }
 
-function insertMemoryUpdatedEvent(
-  ctx: SqliteProposalWorkflowContext,
-  existingMemory: Readonly<MemoryEntry>,
-  memoryUpdate: ParsedAcceptedMemoryUpdate
-): EventLogEntry {
-  return insertEventLogEntry(ctx.eventLogWriter, {
-    event_type: MemoryGovernanceEventType.SOUL_MEMORY_UPDATED,
-    entity_type: "memory_entry",
-    entity_id: existingMemory.object_id,
-    workspace_id: existingMemory.workspace_id,
-    run_id: existingMemory.run_id,
-    caused_by: memoryUpdate.caused_by,
-    payload_json: SoulMemoryUpdatedPayloadSchema.parse({
-      object_id: existingMemory.object_id,
-      object_kind: existingMemory.object_kind,
-      workspace_id: existingMemory.workspace_id,
-      run_id: existingMemory.run_id,
-      updated_fields: toUpdatedFieldNames(memoryUpdate.proposed_changes)
-    })
-  });
-}
 
 function findGreenRevocationTarget(
   ctx: SqliteProposalWorkflowContext,
@@ -152,20 +124,12 @@ function applyMemoryUpdate(
   }
 }
 
-function insertAndApplyGreenRevocation(
+function applyGreenRevocation(
   ctx: SqliteProposalWorkflowContext,
   updatedAt: string,
   existingMemory: Readonly<MemoryEntry>,
-  memoryUpdate: ParsedAcceptedMemoryUpdate,
   revokableGreenStatus: RevokableGreenStatusRow
-): EventLogEntry {
-  const greenEvent = insertGreenPiercedEvent(
-    ctx,
-    updatedAt,
-    existingMemory,
-    memoryUpdate,
-    revokableGreenStatus
-  );
+): void {
   const greenResult = ctx.revokeGreenStatusStatement.run(
     RevokeReason.MAPPING_REVOKED,
     updatedAt,
@@ -180,32 +144,8 @@ function insertAndApplyGreenRevocation(
       `Green status ${revokableGreenStatus.object_id} was not revokable during memory update.`
     );
   }
-  return greenEvent;
 }
 
-function insertGreenPiercedEvent(
-  ctx: SqliteProposalWorkflowContext,
-  updatedAt: string,
-  existingMemory: Readonly<MemoryEntry>,
-  memoryUpdate: ParsedAcceptedMemoryUpdate,
-  revokableGreenStatus: RevokableGreenStatusRow
-): EventLogEntry {
-  return insertEventLogEntry(ctx.eventLogWriter, {
-    event_type: GreenGovernanceEventType.SOUL_GREEN_PIERCED,
-    entity_type: "green_status",
-    entity_id: revokableGreenStatus.object_id,
-    workspace_id: existingMemory.workspace_id,
-    run_id: existingMemory.run_id,
-    caused_by: memoryUpdate.caused_by,
-    payload_json: SoulGreenPiercedPayloadSchema.parse({
-      object_id: revokableGreenStatus.object_id,
-      target_object_id: existingMemory.object_id,
-      revoke_reason: RevokeReason.MAPPING_REVOKED,
-      workspace_id: existingMemory.workspace_id,
-      occurred_at: updatedAt
-    })
-  });
-}
 
 function loadMemoryById(
   ctx: SqliteProposalWorkflowContext,

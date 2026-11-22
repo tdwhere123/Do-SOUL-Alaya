@@ -29,10 +29,6 @@ const CONTENT_STRENGTH_BANDS: Readonly<Record<string, { readonly floor: number; 
     coheres_with: { floor: 0.25, ceiling: 0.55 }
   });
 
-export function hasContentStrengthBand(relationKind: string): boolean {
-  return Object.prototype.hasOwnProperty.call(CONTENT_STRENGTH_BANDS, relationKind);
-}
-
 // Map a [0,1] content score onto the kind's band linearly; both strength and
 // recall_bias magnitude share the band so the recall scorer's two positive terms
 // (plasticity_state.strength*0.55 + effect_vector.recall_bias*0.25) both move.

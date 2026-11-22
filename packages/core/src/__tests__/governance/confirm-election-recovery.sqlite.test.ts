@@ -76,6 +76,36 @@ function independentStorage(filename: string): Awaited<ReturnType<typeof createR
   return { database, eventLogRepo: new SqliteEventLogRepo(database), claimFormRepo: new SqliteClaimFormRepo(database) };
 }
 
+it("rejects a draft rejection when another SQLite connection confirms the claim first", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "alaya-claim-reject-"));
+  const filename = join(directory, "authority.sqlite");
+  const rejector = await createRuntime(undefined, filename);
+  const confirmer = await createRuntime(undefined, filename, undefined, undefined, false, independentStorage(filename));
+  try {
+    rejector.claimFormRepo.create(createClaimForm({ object_id: CANDIDATE }));
+    rejector.database.connection.exec(`
+      CREATE TRIGGER refuse_slot BEFORE INSERT ON slots
+      BEGIN SELECT RAISE(ABORT, 'slot unavailable'); END;
+    `);
+    const transition = rejector.claimService.transitionLifecycle.bind(rejector.claimService);
+    vi.spyOn(rejector.claimService, "transitionLifecycle").mockImplementationOnce(async (...args) => {
+      await expect(confirmer.resolution.resolve(request))
+        .resolves.toMatchObject({ status: "applied", electionStatus: "failed" });
+      return await transition(...args);
+    });
+
+    await expect(rejector.resolution.resolve({ ...request, resolution: "reject" }))
+      .rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await confirmer.claimFormRepo.findById(CANDIDATE)).toMatchObject({ claim_status: "active" });
+    const events = await confirmer.eventLogRepo.queryByEntityAll("soul_resolution", CANDIDATE);
+    expect(events.map((event) => event.event_type)).toEqual(["soul.resolution.confirm_applied"]);
+  } finally {
+    rejector.database.close();
+    confirmer.database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 it("persists a newly materialized claim as draft through the real ClaimService", async () => {
   const runtime = await createRuntime();
   try {
@@ -295,7 +325,7 @@ it("does not create a slot for a claim archived while its election is awaiting a
     });
     const confirming = first.resolution.resolve(request);
     await inElection;
-    await other.claimService.transitionLifecycle(CANDIDATE, "archived", "review rejected", "user", { skipSlotElection: true });
+    await other.claimService.transitionLifecycle(CANDIDATE, "archived", "review rejected", "user", { expectedFromStatus: "active" });
     resume();
     await expect(confirming).resolves.toMatchObject({ status: "applied", electionStatus: "failed" });
     expect((await other.claimFormRepo.findById(CANDIDATE))?.claim_status).toBe("archived");
@@ -337,7 +367,11 @@ it("does not record election completion after an already-elected claim is archiv
     });
     const retry = first.resolution.resolve(request);
     await inElection;
-    await other.claimService.transitionLifecycle(CANDIDATE, "archived", "review rejected", "user", { skipSlotElection: true });
+    const elected = await other.claimFormRepo.findById(CANDIDATE);
+    expect(elected).not.toBeNull();
+    await other.claimService.transitionLifecycle(CANDIDATE, "archived", "review rejected", "user", {
+      expectedFromStatus: elected!.claim_status
+    });
     resume();
     await expect(retry).resolves.toMatchObject({ status: "applied", electionStatus: "pending" });
     const events = await other.eventLogRepo.queryByEntityAll("soul_resolution", CANDIDATE);

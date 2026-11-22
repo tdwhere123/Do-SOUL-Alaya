@@ -82,7 +82,7 @@ describe("Janitor GC task kinds", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  it("runs tombstone gc through its port and respects batch size", async () => {
+  it("reports the unbound disposition sweep and preserves physical GC up to the batch size", async () => {
     const tombstoneGcPort = {
       findTombstonedMemories: vi.fn(
         async () =>
@@ -111,6 +111,7 @@ describe("Janitor GC task kinds", () => {
     const result = await janitor.run(createTask("tombstone_gc"));
 
     expect(tombstoneGcPort.hardDelete).toHaveBeenCalledTimes(JANITOR_CONSTANTS.BATCH_SIZE);
+    expect(result).toMatchObject({ success: true, outcome: "completed", error_message: null });
     expect(result.objects_affected).toHaveLength(JANITOR_CONSTANTS.BATCH_SIZE);
     expect(result.audit_entries).toEqual([
       "[SKIPPED] tombstone_gc: disposition sweep port not wired",
@@ -152,21 +153,24 @@ describe("Janitor GC task kinds", () => {
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
-  it("reports performed disposition work when physical GC is intentionally deferred", async () => {
+  it.each([
+    { outcome: "skipped", memoryIds: [] },
+    { outcome: "completed", memoryIds: ["memory-1"] }
+  ])("reports $outcome for deferred GC with disposition tombstones $memoryIds", async ({ outcome, memoryIds }) => {
     const scheduler = { reportCompletion: vi.fn(async () => undefined) };
     const janitor = new Janitor({
       cleanupPort: { findExpiredObjects: vi.fn(async () => []), removeExpiredObjects: vi.fn(() => undefined) },
       tieringPort: { findHotDemotionCandidates: vi.fn(async () => []), demoteToCold: vi.fn(() => []) },
       dispositionSweepPort: {
-        findDormantDispositionCandidates: vi.fn(async () => [
-          { memory_id: "memory-1", disposition: "judged_useless" as const, disposition_ref: null }
-        ]),
+        findDormantDispositionCandidates: vi.fn(async () => memoryIds.map((memory_id) => ({
+          memory_id, disposition: "judged_useless" as const, disposition_ref: null
+        }))),
         autonomousTombstone: vi.fn(async () => ({ status: "tombstoned" }) as const)
       },
       tombstoneGcDeferredReason: "temporal_assertion_provenance_required", scheduler
     } as ConstructorParameters<typeof Janitor>[0]);
     const result = await janitor.run(createTask(GardenTaskKind.TOMBSTONE_GC));
-    expect(result).toMatchObject({ success: true, outcome: "completed", objects_affected: ["memory-1"] });
+    expect(result).toMatchObject({ success: true, outcome, objects_affected: memoryIds });
     expect(result.audit_entries).toContain("[DEFERRED] tombstone_gc: temporal_assertion_provenance_required");
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });

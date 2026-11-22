@@ -3,11 +3,11 @@ import {
   type CausalUsageReceipt
 } from "@do-soul/alaya-protocol";
 
-export const USAGE_STRENGTH_CAP = 1;
+const USAGE_STRENGTH_CAP = 1;
 export const USAGE_MASS_CAP = 32;
 export const DEFAULT_USAGE_DECAY_PER_MS = Math.log(2) / (30 * 24 * 60 * 60 * 1000);
 
-export type PlasticityChannel = "usage" | "inhibitory";
+type PlasticityChannel = "usage" | "inhibitory";
 export type PlasticityCreditKind = CausalUsageKind | "top_k";
 
 export type PlasticityCredit = Readonly<{
@@ -30,7 +30,7 @@ export const USAGE_ADAPTATION_NECESSITY_MECHANISMS = Object.freeze([
 ] as const);
 
 export type UsageAdaptationMechanism = (typeof USAGE_ADAPTATION_NECESSITY_MECHANISMS)[number];
-export type UsageAdaptationDisposition = "NOT_REQUIRED" | "BENEFIT_NOT_ESTABLISHED";
+type UsageAdaptationDisposition = "NOT_REQUIRED" | "BENEFIT_NOT_ESTABLISHED";
 
 export type UsageAdaptationNecessityRow = Readonly<{
   readonly mechanism: UsageAdaptationMechanism;
@@ -117,7 +117,7 @@ export function usageWeightFor(kind: PlasticityCreditKind): number {
   return kind === "causal" ? 1 : 0;
 }
 
-export function projectUsageMass(
+function projectUsageMass(
   credits: readonly PlasticityCredit[],
   asOf: string,
   decayPerMs: number = DEFAULT_USAGE_DECAY_PER_MS
@@ -134,7 +134,7 @@ export function projectUsageMass(
   return Math.min(USAGE_MASS_CAP, Math.max(0, mass));
 }
 
-export function projectUsageStrength(
+function projectUsageStrength(
   mass: number,
   uMax: number = USAGE_STRENGTH_CAP
 ): number {

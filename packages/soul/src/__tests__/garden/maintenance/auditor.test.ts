@@ -188,8 +188,12 @@ describe("Auditor", () => {  it("exposes the auditor role and tier", () => {
     const eventTypes = allEntries.map((entry) => (entry as { readonly event_type: string }).event_type);
     expect(eventTypes).toContain("soul.green.renewed");
     expect(eventTypes).toContain("soul.green.grace_requested");
-    expect(greenMaintenancePort.renewGreenPassiveStable).toHaveBeenCalledWith("g1", "task-1");
-    expect(greenMaintenancePort.requestActiveVerification).toHaveBeenCalledWith("g2", "task-1");
+    expect(greenMaintenancePort.renewGreenPassiveStable).toHaveBeenCalledWith(
+      createExpiringGreenStatus("g1", MemoryDimension.PREFERENCE), "workspace-1"
+    );
+    expect(greenMaintenancePort.requestActiveVerification).toHaveBeenCalledWith(
+      createExpiringGreenStatus("g2", MemoryDimension.FACT), "workspace-1"
+    );
   });
 
 
@@ -289,8 +293,12 @@ describe("Auditor", () => {  it("exposes the auditor role and tier", () => {
       "workspace-1",
       AUDITOR_CONSTANTS.EXPIRY_LOOKAHEAD_MS
     );
-    expect(greenMaintenancePort.renewGreenPassiveStable).toHaveBeenNthCalledWith(1, "green-1", "task-1");
-    expect(greenMaintenancePort.renewGreenPassiveStable).toHaveBeenNthCalledWith(2, "green-2", "task-1");
+    expect(greenMaintenancePort.renewGreenPassiveStable).toHaveBeenNthCalledWith(
+      1, createExpiringGreenStatus("green-1", MemoryDimension.PREFERENCE), "workspace-1"
+    );
+    expect(greenMaintenancePort.renewGreenPassiveStable).toHaveBeenNthCalledWith(
+      2, createExpiringGreenStatus("green-2", MemoryDimension.EPISODE), "workspace-1"
+    );
     expect(greenMaintenancePort.requestActiveVerification).not.toHaveBeenCalled();
     expect(result.objects_affected).toEqual(["green-1", "green-2"]);
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
@@ -310,18 +318,18 @@ describe("Auditor", () => {  it("exposes the auditor role and tier", () => {
 
     expect(greenMaintenancePort.requestActiveVerification).toHaveBeenNthCalledWith(
       1,
-      "green-fact",
-      "task-1"
+      createExpiringGreenStatus("green-fact", MemoryDimension.FACT),
+      "workspace-1"
     );
     expect(greenMaintenancePort.requestActiveVerification).toHaveBeenNthCalledWith(
       2,
-      "green-constraint",
-      "task-1"
+      createExpiringGreenStatus("green-constraint", MemoryDimension.CONSTRAINT),
+      "workspace-1"
     );
     expect(greenMaintenancePort.requestActiveVerification).toHaveBeenNthCalledWith(
       3,
-      "green-procedure",
-      "task-1"
+      createExpiringGreenStatus("green-procedure", MemoryDimension.PROCEDURE),
+      "workspace-1"
     );
     expect(greenMaintenancePort.renewGreenPassiveStable).not.toHaveBeenCalled();
     expect(result.objects_affected).toEqual(["green-fact", "green-constraint", "green-procedure"]);
@@ -389,8 +397,8 @@ function createAuditor(options: {
   };
   const greenMaintenancePort = {
     findExpiringGreenStatuses: vi.fn(async () => options.expiringStatuses ?? []),
-    renewGreenPassiveStable: vi.fn(async () => undefined),
-    requestActiveVerification: vi.fn(async () => undefined),
+    renewGreenPassiveStable: vi.fn(() => true),
+    requestActiveVerification: vi.fn(() => true),
     revokeGreen: vi.fn(() => ({ affected: options.revokeAffected ?? 1 }))
   };
   const bootstrappingPort = {
@@ -464,6 +472,8 @@ function createExpiringGreenStatus(
     green_status_id: greenStatusId,
     memory_entry_id: `${greenStatusId}-memory`,
     dimension,
+    green_state: "eligible",
+    last_transition_at: "2026-03-24T00:00:00.000Z",
     valid_until: "2026-03-28T00:00:00.000Z"
   };
 }

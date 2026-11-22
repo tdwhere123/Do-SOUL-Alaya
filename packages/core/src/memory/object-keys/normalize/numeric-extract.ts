@@ -5,7 +5,8 @@ export interface NumericSurfaceHit {
   readonly value: number;
 }
 
-const DIGIT = /\b(0|[1-9]\d?)\b/gu;
+const NUMBER_TOKEN = /(?<![\w.+−-])[+−-]?(?:\d+(?:[.,]\d+)*|\.\d+)(?!\w|[.,]\d)/gu;
+const UNSIGNED_CARDINAL = /^(?:0|[1-9]\d?)$/u;
 const CJK_NUMERAL = /(?<![零〇一二两三四五六七八九十百千万萬亿億兆])(?:两|[零〇一二三四五六七八九十]{1,3})(?![零〇一二两三四五六七八九十百千万萬亿億兆])/gu;
 
 const ENGLISH_BY_SURFACE = buildEnglishSurfaceMap();
@@ -19,7 +20,7 @@ const ENGLISH_PATTERN = new RegExp(
 
 export function extractNumericSurfaces(text: string): readonly NumericSurfaceHit[] {
   return Object.freeze([
-    ...matchPattern(text, DIGIT, Number),
+    ...matchPattern(text, NUMBER_TOKEN, surface => UNSIGNED_CARDINAL.test(surface) ? Number(surface) : null),
     ...matchPattern(text, ENGLISH_PATTERN, parseEnglish),
     ...matchPattern(text, CJK_NUMERAL, parseCjk)
   ]);

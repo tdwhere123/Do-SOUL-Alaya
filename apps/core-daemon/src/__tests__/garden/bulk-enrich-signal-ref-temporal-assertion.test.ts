@@ -19,7 +19,7 @@ import {
   type CandidateMemorySignal,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { EventPublisher, EvidenceService, SignalService } from "@do-soul/alaya-core";
+import { EventPublisher, EvidenceService, RelationAssertionService, SignalService } from "@do-soul/alaya-core";
 import {
   InMemoryHandoffGapHandler,
   MaterializationRouter,
@@ -173,11 +173,12 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         pathFailureHealthInboxPort: { recordPathRelationFailure: async () => undefined },
         pathRelationRepo,
         proposalRepo: new SqliteProposalRepo(database),
-        relationAssertionRepo,
         evidenceCapsuleRepo,
         runtimeNotifier,
         warn: vi.fn()
-      } as unknown as Parameters<typeof createPathRelationRuntime>[0]);
+      } as unknown as Parameters<typeof createPathRelationRuntime>[0], new RelationAssertionService({
+        repo: relationAssertionRepo, eventPublisher, eventHistory: eventLogRepo
+      }));
       pathRelationEvictionTimer = temporalRuntime.pathRelationEvictionTimer;
       const materializationRouter = createReplayRouter(
         evidenceService,
@@ -336,8 +337,9 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
         create: (relation: unknown) => relation, findByBackingObjectId: async () => null, findActiveByWorkspace: async () => [] },
         coUsageCounterRepo: new SqliteCoUsageCounterRepo(database), eventLogRepo, eventPublisher, memoryEntryRepo,
         pathFailureHealthInboxPort: { recordPathRelationFailure: async () => undefined }, pathRelationRepo,
-        proposalRepo: new SqliteProposalRepo(database), relationAssertionRepo: new SqliteRelationAssertionRepo(database),
-        evidenceCapsuleRepo, runtimeNotifier, warn: vi.fn() } as unknown as Parameters<typeof createPathRelationRuntime>[0]);
+        proposalRepo: new SqliteProposalRepo(database),
+        evidenceCapsuleRepo, runtimeNotifier, warn: vi.fn() } as unknown as Parameters<typeof createPathRelationRuntime>[0],
+      new RelationAssertionService({ repo: new SqliteRelationAssertionRepo(database), eventPublisher, eventHistory: eventLogRepo }));
       timer = temporal.pathRelationEvictionTimer;
       const evidenceService = new EvidenceService({ evidenceCapsuleRepo, eventLogRepo, runtimeNotifier });
       const replay = createGardenSignalRefReplayPort({ eventLogRepo, signalLookup: signalRepo, evidenceCapsuleLookup: evidenceCapsuleRepo,

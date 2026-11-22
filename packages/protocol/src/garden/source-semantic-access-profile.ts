@@ -12,7 +12,7 @@ import { SourceSemanticAcquisitionSchema, SourceSemanticQueryPreparationSchema,
 export const SOURCE_SEMANTIC_PROFILED_ACCESS_CONTRACT = "source-semantic-access-v3" as const;
 export const SOURCE_SEMANTIC_PROFILED_LIBRARY_RESULT_VERSION = "source-semantic-library-v7" as const;
 export const SOURCE_SEMANTIC_PROFILED_LIBRARY_PROTOCOL_VERSION = 9 as const;
-export const SourceSemanticEffectiveOrderSchema = z.enum([
+const SourceSemanticEffectiveOrderSchema = z.enum([
   "query-conditioned-v1", "canonical-v1", "native-route-round-robin-v1"
 ]);
 export const SourceSemanticAcquisitionPolicySchema = z.enum([

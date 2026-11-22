@@ -26,7 +26,7 @@ export const HistoricalMemoryCaptureCandidateSchema = z.object({
 }).strict().readonly();
 export type HistoricalMemoryCaptureCandidate = z.infer<typeof HistoricalMemoryCaptureCandidateSchema>;
 
-export const HistoricalMemoryCaptureMaterialSchema = z.object({
+const HistoricalMemoryCaptureMaterialSchema = z.object({
   kind: z.literal("historical_memory_capture"), schema_version: z.literal(1),
   workspace_id: BoundedIdSchema, capsule_id: BoundedIdSchema,
   capsule_revision: z.number().int().nonnegative(), capsule_digest: FieldContractDigestSchema,

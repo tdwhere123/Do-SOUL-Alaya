@@ -19,6 +19,7 @@ import {
 
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 import { CoreError } from "../shared/errors.js";
+import { isExpired } from "../shared/time.js";
 import { bindEventPublisher } from "../runtime/event-publisher.js";
 
 import { GreenGrantGuard } from "./green-grant-guard.js";
@@ -104,7 +105,7 @@ export class GreenService {
       boundScopeClass: params.boundScopeClass ?? null
     });
 
-    return await this.eventPublisher().decideAppendThenApply(() => {
+    const granted = await this.eventPublisher().decideAppendThenApply(() => {
       const existing = this.dependencies.greenStatusRepo.findByTargetObjectIdSync(targetObjectId);
       this.assertStatusWorkspace(existing, workspaceId);
       const timestamp = this.now();
@@ -146,8 +147,16 @@ export class GreenService {
           occurred_at: timestamp
         })
       };
-      return { eventInputs: [eventInput], apply: () => this.dependencies.greenStatusRepo.upsert(status) };
+      return {
+        eventInputs: [eventInput],
+        apply: () => {
+          const persisted = this.dependencies.greenStatusRepo.upsert(status);
+          this.consecutiveNoGo.delete(targetObjectId);
+          return persisted;
+        }
+      };
     });
+    return granted;
   }
 
   public async pierce(params: {
@@ -158,48 +167,44 @@ export class GreenService {
   }): Promise<Readonly<GreenStatus> | null> {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
-    const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
-    this.assertStatusWorkspace(existing, workspaceId);
-
-    if (existing === null) {
-      return null;
-    }
-
-    if (
-      params.runId !== undefined &&
-      (await this.dependencies.leaseService?.isHeld(params.runId)) === true &&
-      LOW_SIGNAL_REASONS.has(params.reason)
-    ) {
-      return existing;
-    }
-
-    const memory = await this.guard.getMemoryOrThrow(targetObjectId, workspaceId);
-    const timestamp = this.now();
-    const next = GreenStatusSchema.parse({
-      ...existing,
-      updated_at: timestamp,
-      green_state: GreenState.REVOKED,
-      revoke_reason: params.reason,
-      last_transition_at: timestamp
-    });
-    const eventInput = {
-      event_type: GreenGovernanceEventType.SOUL_GREEN_PIERCED,
-      entity_type: "green_status",
-      entity_id: next.object_id,
-      workspace_id: workspaceId,
-      run_id: params.runId ?? memory.run_id,
-      caused_by: "system",
-      payload_json: SoulGreenPiercedPayloadSchema.parse({
-        object_id: next.object_id,
-        target_object_id: targetObjectId,
+    const held = params.runId !== undefined && LOW_SIGNAL_REASONS.has(params.reason) &&
+      (await this.dependencies.leaseService?.isHeld(params.runId)) === true;
+    return await this.eventPublisher().decideAppendThenApply<Readonly<GreenStatus> | null>(() => {
+      const existing = this.dependencies.greenStatusRepo.findByTargetObjectIdSync(targetObjectId);
+      this.assertStatusWorkspace(existing, workspaceId);
+      if (existing === null || held) return { eventInputs: [], apply: () => existing };
+      const timestamp = this.now();
+      if (
+        params.reason === RevokeReason.REVIEW_OVERDUE &&
+        (existing.green_state !== GreenState.GRACE || !isExpired(existing.valid_until, timestamp))
+      ) {
+        return { eventInputs: [], apply: () => existing };
+      }
+      const memory = this.guard.getMemoryOrThrowSync(targetObjectId, workspaceId);
+      const next = GreenStatusSchema.parse({
+        ...existing,
+        updated_at: timestamp,
+        green_state: GreenState.REVOKED,
         revoke_reason: params.reason,
+        last_transition_at: timestamp
+      });
+      const eventInput = {
+        event_type: GreenGovernanceEventType.SOUL_GREEN_PIERCED,
+        entity_type: "green_status",
+        entity_id: next.object_id,
         workspace_id: workspaceId,
-        occurred_at: timestamp
-      })
-    };
-    return await this.eventPublisher().appendManyWithMutation([eventInput], () =>
-      this.dependencies.greenStatusRepo.upsert(next)
-    );
+        run_id: params.runId ?? memory.run_id,
+        caused_by: "system",
+        payload_json: SoulGreenPiercedPayloadSchema.parse({
+          object_id: next.object_id,
+          target_object_id: targetObjectId,
+          revoke_reason: params.reason,
+          workspace_id: workspaceId,
+          occurred_at: timestamp
+        })
+      };
+      return { eventInputs: [eventInput], apply: () => this.dependencies.greenStatusRepo.upsert(next) };
+    });
   }
 
   public async setGrace(params: {
@@ -214,43 +219,43 @@ export class GreenService {
     parseNonEmptyString(params.until, "until");
     const runId = params.runId === undefined ? null : parseNonEmptyString(params.runId, "runId");
     const reason = params.reason ?? "manual";
-    const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
-    this.assertStatusWorkspace(existing, workspaceId);
-
-    if (existing === null) {
-      return null;
-    }
-
-    const timestamp = this.now();
-    const next = GreenStatusSchema.parse({
-      ...existing,
-      updated_at: timestamp,
-      green_state: GreenState.GRACE,
-      revoke_reason: RevokeReason.NONE,
-      valid_until: params.until,
-      last_transition_at: timestamp
-    });
-    const eventInput = {
-      event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_ENTERED,
-      entity_type: "green_status",
-      entity_id: next.object_id,
-      workspace_id: workspaceId,
-      run_id: runId,
-      caused_by: "system",
-      payload_json: SoulGreenGraceEnteredPayloadSchema.parse({
-        object_id: next.object_id,
-        target_object_id: targetObjectId,
+    return await this.eventPublisher().decideAppendThenApply<Readonly<GreenStatus> | null>(() => {
+      const existing = this.dependencies.greenStatusRepo.findByTargetObjectIdSync(targetObjectId);
+      this.assertStatusWorkspace(existing, workspaceId);
+      const timestamp = this.now();
+      if (existing === null || existing.green_state === GreenState.REVOKED ||
+          (reason === "valid_until_expired" &&
+            (existing.green_state !== GreenState.ELIGIBLE || !isExpired(existing.valid_until, timestamp)))) {
+        return { eventInputs: [], apply: () => null };
+      }
+      const next = GreenStatusSchema.parse({
+        ...existing,
+        updated_at: timestamp,
+        green_state: GreenState.GRACE,
+        revoke_reason: RevokeReason.NONE,
         valid_until: params.until,
-        prior_green_state: existing.green_state,
-        prior_valid_until: existing.valid_until,
-        reason,
+        last_transition_at: timestamp
+      });
+      const eventInput = {
+        event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_ENTERED,
+        entity_type: "green_status",
+        entity_id: next.object_id,
         workspace_id: workspaceId,
-        occurred_at: timestamp
-      })
-    };
-    return await this.eventPublisher().appendManyWithMutation([eventInput], () =>
-      this.dependencies.greenStatusRepo.upsert(next)
-    );
+        run_id: runId,
+        caused_by: "system",
+        payload_json: SoulGreenGraceEnteredPayloadSchema.parse({
+          object_id: next.object_id,
+          target_object_id: targetObjectId,
+          valid_until: params.until,
+          prior_green_state: existing.green_state,
+          prior_valid_until: existing.valid_until,
+          reason,
+          workspace_id: workspaceId,
+          occurred_at: timestamp
+        })
+      };
+      return { eventInputs: [eventInput], apply: () => this.dependencies.greenStatusRepo.upsert(next) };
+    });
   }
 
   public async reevaluate(params: {

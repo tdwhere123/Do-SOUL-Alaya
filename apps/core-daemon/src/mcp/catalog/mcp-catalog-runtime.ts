@@ -1,16 +1,9 @@
 import {
-  type ConversationRuntimeContext,
-  type ConversationToolCatalog,
   type McpServerInfo,
   type ToolProviderToolSpec,
   type ToolSpec
 } from "@do-soul/alaya-protocol";
-import { resolveMcpToolTimeoutMs, withTimeout } from "@do-soul/alaya-engine-gateway";
-import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
-import { executeConversationToolOrThrow } from "../tool-runtime/tool-runtime.js";
-import { isBuiltinConversationToolId } from "../server/builtin-conversation-tool-specs.js";
 import {
-  classifyDaemonMcpListFailure,
   MCP_EXTERNAL_ERROR_MESSAGES,
   type DaemonMcpListFailureCode,
   type DaemonMcpRuntimeHealth,
@@ -21,53 +14,9 @@ import type {
   DaemonMcpCatalogToolEntry,
   WarnLogger
 } from "./mcp-catalog-parsing.js";
-import type { DaemonMcpCatalog } from "./mcp-catalog.js";
-
 type DaemonMcpToolRuntimeExecutor = (input: {
   readonly rawInput: unknown;
-  readonly writableRoots: readonly string[];
-  readonly abortSignal?: AbortSignal;
-}) => Promise< unknown>;
-
-export type DaemonConversationToolRuntimeCatalog = Readonly<{
-  hasTool(toolId: string): boolean;
-  executeTool(input: {
-    readonly toolId: string;
-    readonly rawInput: unknown;
-    readonly runtimeContext: Readonly<ConversationRuntimeContext>;
-    readonly writableRoots: readonly string[];
-    readonly abortSignal?: AbortSignal;
-  }): Promise< unknown>;
-}>;
-
-export function createDaemonConversationToolRuntimeCatalog(input: {
-  readonly conversationToolCatalog: Pick<ConversationToolCatalog, "hasToolName">;
-  readonly daemonMcpCatalog: Pick<DaemonMcpCatalog, "executeTool">;
-}): DaemonConversationToolRuntimeCatalog {
-  return Object.freeze({
-    hasTool: (toolId: string) => input.conversationToolCatalog.hasToolName(toolId),
-    executeTool: async (executionInput) => {
-      if (!input.conversationToolCatalog.hasToolName(executionInput.toolId)) {
-        return {
-          ok: false,
-          code: "MCP_EXTERNAL_UNBOUND",
-          message: `External conversation tool ${executionInput.toolId} is not registered in the daemon catalog.`
-        };
-      }
-
-      if (isBuiltinConversationToolId(executionInput.toolId)) {
-        return await executeCatalogBuiltinConversationTool(
-          executionInput.toolId,
-          executionInput.rawInput,
-          executionInput.writableRoots,
-          executionInput.abortSignal
-        );
-      }
-
-      return await input.daemonMcpCatalog.executeTool(executionInput);
-    }
-  });
-}
+}) => Promise<unknown>;
 
 export function buildDaemonMcpCatalogState(input: {
   readonly isServerAllowed: (serverName: string) => boolean;
@@ -109,12 +58,8 @@ export function buildDaemonMcpCatalogState(input: {
     });
     const executableTools: Readonly<ToolProviderToolSpec>[] = [];
     for (const tool of tools) {
-      const executor = createDaemonMcpToolRuntimeExecutor({
-        serverName,
-        tool,
-        runtimeRegistry: input.runtimeRegistry
-      });
-      if (executor === null) {
+      const toolName = tool.runtimeToolName;
+      if (toolName === null) {
         input.warn("skipping MCP tool without daemon runtime binding", {
           serverName,
           toolId: tool.spec.tool_id
@@ -130,7 +75,8 @@ export function buildDaemonMcpCatalogState(input: {
           input.isServerAllowed(serverName) &&
           hasActiveRuntimeServer(input.runtimeRegistry, serverName)
       );
-      toolExecutors.set(tool.spec.tool_id, executor);
+      toolExecutors.set(tool.spec.tool_id, ({ rawInput }) =>
+        input.runtimeRegistry.callTool({ serverName, toolName, input: rawInput }));
     }
 
     executableToolCatalog.set(serverName, Object.freeze(executableTools));
@@ -166,9 +112,14 @@ function resolveDaemonMcpCatalogEntries(input: {
   const rawToolByName = new Map(
     rawTools.map((tool) => [tool.spec.name, tool] as const)
   );
+  const rawToolByToolId = new Map(
+    rawTools.map((tool) => [tool.spec.tool_id, tool] as const)
+  );
   return Object.freeze(
     liveTools.map((tool) => {
-      const override = rawToolByName.get(tool.name);
+      const override =
+        rawToolByName.get(tool.name) ??
+        rawToolByToolId.get(deriveDaemonMcpToolId(input.serverName, tool.name));
       if (override !== undefined) {
         return override;
       }
@@ -179,10 +130,7 @@ function resolveDaemonMcpCatalogEntries(input: {
           name: tool.name,
           description: tool.description
         }),
-        runtimeBinding: Object.freeze({
-          bindingKind: "mcp_tool" as const,
-          toolName: tool.name
-        })
+        runtimeToolName: tool.name
       });
     })
   );
@@ -205,67 +153,16 @@ function normalizeDaemonMcpToolIdSegment(value: string): string {
     .toLowerCase();
 }
 
-function createDaemonMcpToolRuntimeExecutor(input: {
-  readonly serverName: string;
-  readonly tool: Readonly<DaemonMcpCatalogToolEntry>;
-  readonly runtimeRegistry: DaemonMcpRuntimeRegistry;
-}): DaemonMcpToolRuntimeExecutor | null {
-  if (
-    input.tool.runtimeBinding !== null &&
-    input.tool.runtimeBinding.bindingKind === "builtin_tool"
-  ) {
-    if (!hasActiveRuntimeServer(input.runtimeRegistry, input.serverName)) {
-      return null;
-    }
-    const binding = input.tool.runtimeBinding;
-    return async ({ rawInput, writableRoots, abortSignal }) => {
-      const listed = await listBoundServerTools(input.runtimeRegistry, input.serverName, input.tool.spec.tool_id);
-      if (!listed.ok) {
-        return listed;
-      }
-
-      if (!listed.tools.some((tool) => tool.name === input.tool.spec.name)) {
-        return {
-          ok: false,
-          code: "MCP_EXTERNAL_UNBOUND",
-          message: `External MCP tool ${input.tool.spec.tool_id} is no longer exposed by daemon runtime server ${input.serverName}.`
-        };
-      }
-
-      return await executeCatalogBuiltinConversationTool(
-        binding.builtinToolId,
-        rawInput,
-        writableRoots,
-        abortSignal
-      );
-    };
-  }
-
-  const runtimeBinding = input.tool.runtimeBinding;
-  if (runtimeBinding !== null && runtimeBinding.bindingKind !== "mcp_tool") {
-    return null;
-  }
-
-  return async ({ rawInput }) =>
-    await input.runtimeRegistry.callTool({
-      serverName: input.serverName,
-      toolName: runtimeBinding?.toolName ?? input.tool.spec.name,
-      input: rawInput
-    });
-}
-
 export async function executeExternalMcpTool(input: {
   readonly toolId: string;
   readonly rawInput: unknown;
   readonly toolAvailability: ReadonlyMap<string, () => boolean>;
-  readonly writableRoots: readonly string[];
-  readonly abortSignal?: AbortSignal;
   readonly toolExecutors: ReadonlyMap<string, DaemonMcpToolRuntimeExecutor>;
   readonly readLastError?: (toolId: string) => Readonly<{
     readonly code: DaemonMcpListFailureCode;
     readonly message: string;
   }> | null;
-}): Promise< unknown> {
+}): Promise<unknown> {
   const availabilityCheck = input.toolAvailability.get(input.toolId);
   const runtimeExecutor = input.toolExecutors.get(input.toolId);
   if (availabilityCheck?.() !== true || runtimeExecutor === undefined) {
@@ -285,29 +182,8 @@ export async function executeExternalMcpTool(input: {
   }
 
   return await runtimeExecutor({
-    rawInput: input.rawInput,
-    writableRoots: input.writableRoots,
-    abortSignal: input.abortSignal
+    rawInput: input.rawInput
   });
-}
-
-async function executeCatalogBuiltinConversationTool(
-  toolId: string,
-  rawInput: unknown,
-  writableRoots: readonly string[],
-  abortSignal?: AbortSignal
-): Promise<unknown> {
-  const execute = async (signal: AbortSignal) =>
-    await executeConversationToolOrThrow(toolId, rawInput, writableRoots, {
-      abortSignal: signal
-    });
-  if (abortSignal !== undefined) {
-    return await execute(abortSignal);
-  }
-  return await withTimeout(
-    (signal) => execute(signal),
-    resolveMcpToolTimeoutMs(processEnvLookup().ALAYA_MCP_TOOL_TIMEOUT_MS)
-  );
 }
 
 export function readCatalogToolLastError(
@@ -319,27 +195,6 @@ export function readCatalogToolLastError(
   }
   return runtimeRegistry.getHealth().servers.find((server) => server.server_name === serverName)
     ?.last_error ?? null;
-}
-
-async function listBoundServerTools(
-  runtimeRegistry: DaemonMcpRuntimeRegistry,
-  serverName: string,
-  toolId: string
-): Promise<
-  | Readonly<{ readonly ok: true; readonly tools: readonly { readonly name: string }[] }>
-  | Readonly<{ readonly ok: false; readonly code: string; readonly message: string }>
-> {
-  try {
-    return { ok: true, tools: await runtimeRegistry.listServerTools(serverName) };
-  } catch (error) {
-    const code = classifyDaemonMcpListFailure(error);
-    const failure = code === "MCP_EXTERNAL_TIMEOUT" ? "timed out" : "transport failed";
-    return {
-      ok: false,
-      code,
-      message: `External MCP tool ${toolId} failed because listing tools from daemon runtime server ${serverName} ${failure}.`
-    };
-  }
 }
 
 export function readDaemonMcpCatalogHealth(

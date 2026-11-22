@@ -5,8 +5,7 @@ import { canonicalJson, sourceIndexGenerationId, sourceIndexConfigurationId, sou
   sourceIndexLexicalGenerationId, type SourceIndexLexicalState, type SourceIndexLexicalGeneration,
   type SourceIndexTarget } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
-import { SqliteSourceIndexRepository, StorageDatabase } from "@do-soul/alaya-storage";
-import { sourceIndexMeasurementCapability } from "./index-qualification.js";
+import { SqliteSourceIndexRepository, StorageDatabase, readSourceIndexSnapshotFact } from "@do-soul/alaya-storage";
 
 const ROOT_LIMIT = 16;
 const PENDING_BUDGET = Object.freeze({ work: 1, native_bytes: 8 });
@@ -39,10 +38,9 @@ export function captureSourceIndexProgress(filename: string, workspace: string, 
     connection.pragma("query_only = ON");
     const database = new StorageDatabase(filename, connection);
     const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
-    const measurement = sourceIndexMeasurementCapability();
     const metadata = () => connection!.transaction((): Metadata => {
       result.cost.metadata_transactions++;
-      const fact = measurement.readSnapshot(database, workspace);
+      const fact = readSourceIndexSnapshotFact(database, workspace);
       const id = fact.selection === null ? null : sourceIndexGenerationId(fact.selection, fact.source_epoch, fieldContractSha256);
       const generation = id === null ? null : repository.generation(workspace, id);
       const targets = generation === null ? [] : repository.listTargets(workspace, generation.generation_id, null, ROOT_LIMIT);

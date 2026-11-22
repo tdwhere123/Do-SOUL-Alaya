@@ -12,20 +12,19 @@ import type {
   LexicalRawRankLaneId
 } from "./lexical-lane-universe.js";
 
-export type { LexicalRawRankLaneId } from "./lexical-lane-universe.js";
 
 export const LEXICAL_RAW_RANK_RECEIPT_SCHEMA_VERSION = 1 as const;
 export const LEXICAL_RAW_RANK_RECEIPT_ID = "alaya.recall.x0.lexical-raw-rank.v1";
 export const LEXICAL_RAW_RANK_PRODUCER_ID =
   "alaya.storage.mergeKeywordSearchRows.v1";
 
-export type LexicalRawKeyKind = "matched_token_count" | "bm25_raw_rank";
-export type LexicalLaneListStatus = "empty" | "complete" | "truncated";
-export type LexicalUnseenFrontier =
+type LexicalRawKeyKind = "matched_token_count" | "bm25_raw_rank";
+type LexicalLaneListStatus = "empty" | "complete" | "truncated";
+type LexicalUnseenFrontier =
   | number
   | Readonly<{ readonly status: "unavailable"; readonly reason: "producer_order_not_monotone" }>;
 
-export interface LexicalLaneRowReceipt {
+interface LexicalLaneRowReceipt {
   readonly candidate_key: string;
   readonly raw_group_key: number;
   readonly lane_index: number;
@@ -33,7 +32,7 @@ export interface LexicalLaneRowReceipt {
   readonly observation_state: "observed";
 }
 
-export interface LexicalLaneCapture {
+interface LexicalLaneCapture {
   readonly lane_id: LexicalRawRankLaneId;
   readonly raw_key_kind: LexicalRawKeyKind;
   readonly source_priority: 0 | 1 | 2;
@@ -46,14 +45,14 @@ export interface LexicalLaneCapture {
   readonly evaluated_universe?: LexicalLaneEvaluatedUniverseWitness;
 }
 
-export interface LexicalLaneHit {
+interface LexicalLaneHit {
   readonly lane_id: LexicalRawRankLaneId;
   readonly raw_group_key: number;
   readonly grouped_ordinal: number;
   readonly lane_index: number;
 }
 
-export interface LexicalCandidateMergeProvenance {
+interface LexicalCandidateMergeProvenance {
   readonly candidate_key: string;
   readonly lane_hits: readonly LexicalLaneHit[];
   readonly admitted: boolean;
@@ -63,7 +62,7 @@ export interface LexicalCandidateMergeProvenance {
   readonly discarded_lane_ids: readonly LexicalRawRankLaneId[];
 }
 
-export interface LexicalPostMergeRow {
+interface LexicalPostMergeRow {
   readonly candidate_key: string;
   readonly normalized_rank: number;
   readonly trigram_rank?: number;

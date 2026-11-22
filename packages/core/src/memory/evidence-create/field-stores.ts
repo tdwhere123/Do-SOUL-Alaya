@@ -1,11 +1,8 @@
 import {
-  sameFactorDescriptorFields,
   sourceProjectionDependenciesAvailable,
   sameSourceRecordFields,
   type AddressableSourceSpan,
   type DerivationJobReceipt,
-  type FactorDescriptor,
-  type FactorIncidence,
   type SourceRecordIdentity,
   type SourceStatementArtifact
 } from "@do-soul/alaya-protocol";
@@ -40,17 +37,11 @@ export interface FieldFormationStores {
   putHostCaptureResourceLimit(workspaceId: string, recordId: string): void;
   getSpan(workspaceId: string, spanId: string): AddressableSourceSpan | null;
   putSpan(span: AddressableSourceSpan): AddressableSourceSpan;
-  getDescriptor(workspaceId: string, factorId: string): FactorDescriptor | null;
-  putDescriptor(factor: FactorDescriptor): FactorDescriptor;
-  getIncidence(workspaceId: string, incidenceId: string): FactorIncidence | null;
-  putIncidence(incidence: FactorIncidence): FactorIncidence;
   getJob(workspaceId: string, jobId: string): DerivationJobReceipt | null;
   putJob(job: DerivationJobReceipt): DerivationJobReceipt;
   listRecords(workspaceId: string): readonly SourceRecordIdentity[];
   listStoredRecords(workspaceId: string): readonly StoredSourceRecord[];
   listSpans(workspaceId: string): readonly AddressableSourceSpan[];
-  listFactors(workspaceId: string): readonly FactorDescriptor[];
-  listIncidences(workspaceId: string): readonly FactorIncidence[];
   listRecordEvidenceBindings(workspaceId: string): readonly SourceRecordEvidenceBinding[];
 }
 
@@ -69,7 +60,7 @@ export type StoredSourceRecord = Readonly<{
   readonly content_bytes: string;
 }>;
 
-export type SourceRecordEvidenceBinding = Readonly<{
+type SourceRecordEvidenceBinding = Readonly<{
   readonly workspace_id: string;
   readonly record_id: string;
   readonly evidence_object_id: string;
@@ -84,45 +75,26 @@ export function createInMemoryFieldStores(): FieldFormationStores {
     statementMemoryBindings: new Map<string, string>(),
     hostCaptureLimits: new Map<string, true>(),
     spans: new Map<string, AddressableSourceSpan>(),
-    factors: new Map<string, FactorDescriptor>(),
-    incidences: new Map<string, FactorIncidence>(),
     jobs: new Map<string, DerivationJobReceipt>(),
     evidenceBindings: new Map<string, SourceRecordEvidenceBinding>()
   });
 }
 
-function bindFieldStores(maps: Readonly<{
+type FieldMaps = Readonly<{
   readonly records: Map<string, SourceRecordIdentity>;
   readonly recordBodies: Map<string, string>;
   readonly spans: Map<string, AddressableSourceSpan>;
-  readonly factors: Map<string, FactorDescriptor>;
-  readonly incidences: Map<string, FactorIncidence>;
   readonly jobs: Map<string, DerivationJobReceipt>;
   readonly evidenceBindings: Map<string, SourceRecordEvidenceBinding>;
   readonly hostInventories: Map<string, string>;
   readonly statementArtifacts: Map<string, SourceStatementArtifact>;
   readonly statementMemoryBindings: Map<string, string>;
   readonly hostCaptureLimits: Map<string, true>;
-}>): FieldFormationStores {
-  let atomicDepth = 0;
-  const runAtomic = <T>(work: () => T): T => {
-    atomicDepth += 1;
-    try { return runInMemoryAtomic(maps, work); }
-    finally { atomicDepth -= 1; }
-  };
+}>;
+
+function bindFieldStores(maps: FieldMaps): FieldFormationStores {
   return {
-    runAtomic,
-    runAtomicWithOutcome<T>(work: () => T): FieldAtomicOutcome<T> {
-      if (atomicDepth !== 0) {
-        return { status: "not_committed", cause: new CoreError("CONFLICT", "source replacement requires a top-level transaction") };
-      }
-      try {
-        return { status: "committed", result: runAtomic(work), projection: "ready" };
-      } catch (cause) {
-        // runInMemoryAtomic restores every owned map before rethrowing.
-        return { status: "not_committed", cause };
-      }
-    },
+    ...bindInMemoryTransactions(maps),
     getRecord: (workspaceId, recordId) => maps.records.get(key(workspaceId, recordId)) ?? null,
     getCurrentRecord: (workspaceId, sourceId) => currentRecord(maps.records, workspaceId, sourceId),
     getStoredRecord: (workspaceId, recordId) => storedRecord(maps, workspaceId, recordId),
@@ -145,7 +117,14 @@ function bindFieldStores(maps: Readonly<{
       sameSpan,
       "source span"
     ),
-    ...bindFactorStores(maps),
+    getJob: (workspaceId, jobId) => maps.jobs.get(key(workspaceId, jobId)) ?? null,
+    putJob: (job) => putSame(
+      maps.jobs,
+      key(job.workspace_id, job.identity),
+      job,
+      sameJob,
+      "derivation job"
+    ),
     listRecords: (workspaceId) => listFor(maps.records, workspaceId),
     listStoredRecords: (workspaceId) => listFor(maps.records, workspaceId).flatMap((record) => {
       const stored = storedRecord(maps, workspaceId, record.identity);
@@ -154,10 +133,31 @@ function bindFieldStores(maps: Readonly<{
       return [stored];
     }),
     listSpans: (workspaceId) => listFor(maps.spans, workspaceId),
-    listFactors: (workspaceId) => listFor(maps.factors, workspaceId),
-    listIncidences: (workspaceId) => listFor(maps.incidences, workspaceId),
     listRecordEvidenceBindings: (workspaceId) =>
       listFor(maps.evidenceBindings, workspaceId)
+  };
+}
+
+function bindInMemoryTransactions(maps: FieldMaps): Pick<FieldFormationStores, "runAtomic" | "runAtomicWithOutcome"> {
+  let atomicDepth = 0;
+  const runAtomic = <T>(work: () => T): T => {
+    atomicDepth += 1;
+    try { return runInMemoryAtomic(maps, work); }
+    finally { atomicDepth -= 1; }
+  };
+  return {
+    runAtomic,
+    runAtomicWithOutcome<T>(work: () => T): FieldAtomicOutcome<T> {
+      if (atomicDepth !== 0) {
+        return { status: "not_committed", cause: new CoreError("CONFLICT", "source replacement requires a top-level transaction") };
+      }
+      try {
+        return { status: "committed", result: runAtomic(work), projection: "ready" };
+      } catch (cause) {
+        // runInMemoryAtomic restores every owned map before rethrowing.
+        return { status: "not_committed", cause };
+      }
+    }
   };
 }
 
@@ -241,15 +241,7 @@ function currentRecord(records: ReadonlyMap<string, SourceRecordIdentity>, works
 }
 
 function runInMemoryAtomic<T>(
-  maps: Readonly<{
-    readonly records: Map<string, SourceRecordIdentity>;
-    readonly recordBodies: Map<string, string>;
-    readonly spans: Map<string, AddressableSourceSpan>;
-    readonly factors: Map<string, FactorDescriptor>;
-    readonly incidences: Map<string, FactorIncidence>;
-    readonly jobs: Map<string, DerivationJobReceipt>;
-    readonly evidenceBindings: Map<string, SourceRecordEvidenceBinding>;
-  }>,
+  maps: FieldMaps,
   work: () => T
 ): T {
   const stores = Object.values(maps) as Map<string, unknown>[];
@@ -263,44 +255,6 @@ function runInMemoryAtomic<T>(
     });
     throw error;
   }
-}
-
-function bindFactorStores(maps: Readonly<{
-  readonly factors: Map<string, FactorDescriptor>;
-  readonly incidences: Map<string, FactorIncidence>;
-  readonly jobs: Map<string, DerivationJobReceipt>;
-}>): Pick<
-  FieldFormationStores,
-  "getDescriptor" | "putDescriptor" | "getIncidence" | "putIncidence" | "getJob" | "putJob"
-> {
-  return {
-    getDescriptor: (workspaceId, factorId) =>
-      maps.factors.get(key(workspaceId, factorId)) ?? null,
-    putDescriptor: (factor) => putSame(
-      maps.factors,
-      key(factor.workspace_id, factor.identity),
-      factor,
-      sameFactor,
-      "factor"
-    ),
-    getIncidence: (workspaceId, incidenceId) =>
-      maps.incidences.get(key(workspaceId, incidenceId)) ?? null,
-    putIncidence: (incidence) => putSame(
-      maps.incidences,
-      key(incidence.workspace_id, incidence.identity),
-      incidence,
-      sameIncidence,
-      "incidence"
-    ),
-    getJob: (workspaceId, jobId) => maps.jobs.get(key(workspaceId, jobId)) ?? null,
-    putJob: (job) => putSame(
-      maps.jobs,
-      key(job.workspace_id, job.identity),
-      job,
-      sameJob,
-      "derivation job"
-    )
-  };
 }
 
 function key(workspaceId: string, identity: string): string {
@@ -338,18 +292,6 @@ function sameSpan(existing: AddressableSourceSpan, incoming: AddressableSourceSp
     existing.end_offset === incoming.end_offset &&
     existing.purpose === incoming.purpose &&
     existing.producer_version === incoming.producer_version;
-}
-
-function sameFactor(existing: FactorDescriptor, incoming: FactorDescriptor): boolean {
-  return existing.identity === incoming.identity &&
-    sameFactorDescriptorFields(existing, incoming);
-}
-
-function sameIncidence(existing: FactorIncidence, incoming: FactorIncidence): boolean {
-  return existing.span_id === incoming.span_id &&
-    existing.factor_id === incoming.factor_id &&
-    existing.scope === incoming.scope &&
-    existing.operator_id === incoming.operator_id;
 }
 
 function sameJob(existing: DerivationJobReceipt, incoming: DerivationJobReceipt): boolean {

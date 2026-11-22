@@ -55,12 +55,6 @@ async function prepareRecallEvalWorkingDb(input: {
   }
   return rebuildEvidenceSearchProjectionsOnWorkingCopy({
     workingDbPath: input.restoredDbPath,
-    ...(input.options.backfillMissingFactFrameFormations === true
-      ? { backfillMissingFactFrameFormations: true }
-      : {}),
-    ...(input.options.factFrameRetrofitLedgerPath === undefined
-      ? {}
-      : { factFrameRetrofitLedgerPath: input.options.factFrameRetrofitLedgerPath }),
     ...(input.sourceExtractionSystemPromptSha256 === undefined
       ? {}
       : { sourceExtractionSystemPromptSha256: input.sourceExtractionSystemPromptSha256 })

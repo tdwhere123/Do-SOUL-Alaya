@@ -252,8 +252,7 @@ describe("daemon conversation tool catalog", () => {
           name: "filesystem.read_file",
           description: "Read file through filesystem MCP.",
           daemon_binding: {
-            binding_kind: "builtin_tool",
-            builtin_tool_id: "tools.read_file"
+            binding_kind: "mcp_tool"
           }
         }
       ]
@@ -303,8 +302,7 @@ describe("daemon conversation tool catalog", () => {
       await expect(
         catalog.executeTool({
           toolId: "mcp__filesystem__read_file",
-          rawInput: { path: "README.md" },
-          writableRoots: ["/workspace/project"]
+          rawInput: { path: "README.md" }
         })
       ).resolves.toEqual({
         ok: false,
@@ -325,7 +323,7 @@ describe("daemon conversation tool catalog", () => {
     }
   });
 
-  it("fails closed when a builtin-bound tool loses runtime liveness after enrollment", async () => {
+  it("matches live-discovered unprefixed tool names against retired builtin overrides by derived tool_id", async () => {
     const originalAllowedServers = process.env.ALAYA_ALLOWED_MCP_SERVERS;
     const originalToolCatalog = process.env.ALAYA_MCP_TOOL_CATALOG_JSON;
     process.env.ALAYA_ALLOWED_MCP_SERVERS = "filesystem";
@@ -334,7 +332,7 @@ describe("daemon conversation tool catalog", () => {
         {
           tool_id: "mcp__filesystem__read_file",
           name: "filesystem.read_file",
-          description: "Read file through filesystem MCP.",
+          description: "Retired builtin override.",
           daemon_binding: {
             binding_kind: "builtin_tool",
             builtin_tool_id: "tools.read_file"
@@ -344,54 +342,35 @@ describe("daemon conversation tool catalog", () => {
     });
 
     try {
-      const runtimeRegistry = {
-        refresh: vi.fn(async () => undefined),
-        listServerInfos: vi.fn(() => [
-          {
-            server_name: "filesystem",
-            transport_type: "stdio" as const,
-            status: "active" as const,
-            registered_at: "2026-04-21T00:00:00.000Z"
-          }
-        ]),
-        getServerTools: vi.fn(() => []),
-        listServerTools: vi.fn(async () => {
-          throw new Error("filesystem offline");
-        }),
-        callTool: vi.fn(async () => ({ content: [] })),
-        close: vi.fn(async () => undefined),
-        getHealth: vi.fn(() => ({
-          servers: [
-            {
-              server_name: "filesystem",
-              status: "active" as const,
-              last_error: null
-            }
-          ]
-        }))
+      const server = {
+        server_name: "filesystem",
+        transport_type: "stdio" as const,
+        status: "active" as const,
+        registered_at: "2026-04-21T00:00:00.000Z"
       };
-
       const catalog = createDaemonMcpCatalogFromEnv({
-        now: () => "2026-04-21T00:00:00.000Z",
-        runtimeRegistry: runtimeRegistry as Parameters<typeof createDaemonMcpCatalogFromEnv>[0]["runtimeRegistry"]
+        now: () => server.registered_at,
+        runtimeRegistry: {
+          refresh: vi.fn(async () => undefined),
+          listServerInfos: () => [server],
+          getServerTools: () => [{ name: "read_file", description: "Read file" }],
+          listServerTools: vi.fn(async () => []),
+          callTool: vi.fn(async () => ({ content: [] })),
+          close: vi.fn(async () => undefined),
+          getHealth: () => ({ servers: [] })
+        },
+        warn: vi.fn()
       });
 
-      expect(catalog.hasTool("mcp__filesystem__read_file")).toBe(true);
-      await expect(
-        catalog.executeTool({
-          toolId: "mcp__filesystem__read_file",
-          rawInput: { path: "README.md" },
-          writableRoots: ["/workspace/project"]
-        })
-      ).resolves.toEqual({
-        ok: false,
-        code: "MCP_EXTERNAL_TRANSPORT",
-        message:
-          "External MCP tool mcp__filesystem__read_file failed because listing tools from daemon runtime server filesystem transport failed."
-      });
+      expect(catalog.listEnrolledToolIds()).toEqual([]);
+      expect(catalog.hasTool("mcp__filesystem__read_file")).toBe(false);
+      await expect(catalog.listServerTools(server)).resolves.toEqual([]);
+      await expect(catalog.executeTool({ toolId: "mcp__filesystem__read_file", rawInput: {} }))
+        .resolves.toMatchObject({ ok: false, code: "MCP_EXTERNAL_UNBOUND" });
     } finally {
       restoreProcessEnv("ALAYA_ALLOWED_MCP_SERVERS", originalAllowedServers);
       restoreProcessEnv("ALAYA_MCP_TOOL_CATALOG_JSON", originalToolCatalog);
     }
   });
+
 });

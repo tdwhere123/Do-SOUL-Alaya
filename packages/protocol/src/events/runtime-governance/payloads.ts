@@ -84,48 +84,6 @@ export {
 
 const Sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
 
-const runtimeGovernanceEventTypeValues = [
-  "canonicalization.applied",
-  "canonicalization.alias_resolved",
-  "stance.policy_evaluated",
-  "stance.resolution_changed",
-  "relation.assertion_admitted",
-  "relation.assertion_resolved",
-  "path.relation_created",
-  "path.relation_rejected",
-  "path.relation_legitimacy_updated",
-  "path.relation_reinforced",
-  "path.relation_weakened",
-  "path.relation_redirected",
-  "path.relation_retired",
-  "path.relation_dormant",
-  "path.relation_revived",
-  "path.relation_merged",
-  "path.consolidation_completed",
-  "path.consolidation_fused",
-  "surface.drift_detected",
-  "surface.drift_lease_acquired",
-  "surface.drift_lease_released",
-  "surface.drift_lease_release_failed",
-  "surface.drift_alert",
-  "path.graph.snapshot_created",
-  "output.shaping_applied",
-  "output.command_compressed",
-  "manifestation.budget_evaluated",
-  "manifestation.escalation_decided",
-  "security.passthrough_status_changed",
-  "security.passthrough_initialization_failed",
-  "extension.descriptor_registered",
-  "extension.descriptor_registration_reverted",
-  "extension.descriptor_registration_compensation_failed",
-  "extension.tool_discovered",
-  "extension.governance_checked",
-  "compute.provider_routed",
-  "bootstrapping.paths_planted",
-  "runtime.side_effect_failed",
-  "constitutional.fragment_registered"
-] as const;
-
 const runtimeSideEffectFailureSeverityValues = ["warning", "error"] as const;
 
 export const RuntimeGovernanceEventType = {
@@ -184,7 +142,7 @@ export const RuntimeGovernanceEventType = {
   CONSTITUTIONAL_FRAGMENT_REGISTERED: "constitutional.fragment_registered"
 } as const;
 
-export const RuntimeGovernanceEventTypeSchema = z.enum(runtimeGovernanceEventTypeValues);
+export const RuntimeGovernanceEventTypeSchema = z.enum(Object.values(RuntimeGovernanceEventType));
 
 export const CanonicalizationAppliedPayloadSchema = z.union([
   z.object({
@@ -480,4 +438,4 @@ export const runtimeGovernancePayloadSchemas = {
     RuntimeSideEffectFailedPayloadSchema,
   [RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED]:
     ConstitutionalFragmentRegisteredPayloadSchema
-} as const;
+} as const satisfies Record<z.infer<typeof RuntimeGovernanceEventTypeSchema>, z.ZodType>;

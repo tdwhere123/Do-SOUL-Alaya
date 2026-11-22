@@ -2,8 +2,6 @@ import {
   AddressableSourceSpanSchema,
   DerivationJobReceiptSchema,
   FACTOR_INCIDENCE_OPERATOR_ID,
-  FactorDescriptorSchema,
-  FactorIncidenceSchema,
   FieldProjectionGenerationSchema,
   fieldProjectionGenerationContract,
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
@@ -11,15 +9,11 @@ import {
   fieldReceiptContractFields,
   type AddressableSourceSpan,
   type DerivationJobReceipt,
-  type FactorDescriptor,
-  type FactorIncidence,
   type FieldProjectionGeneration,
   type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
 import type {
   FieldDerivationJobRow,
-  FieldFactorDescriptorRow,
-  FieldFactorIncidenceRow,
   FieldProjectionGenerationRow,
   FieldSourceRecordRow,
   FieldSourceSpanRow
@@ -65,39 +59,6 @@ export function sourceSpanFromRow(row: FieldSourceSpanRow): AddressableSourceSpa
     end_offset: row.end_offset,
     purpose: row.purpose,
     producer_version: row.producer_version,
-    recorded_at: row.recorded_at
-  });
-}
-
-export function factorFromRow(row: FieldFactorDescriptorRow): FactorDescriptor {
-  return FactorDescriptorSchema.parse({
-    ...fieldReceiptContractFields({
-      identity: row.factor_id,
-      producer: FACTOR_INCIDENCE_OPERATOR_ID,
-      consumer: "projection_generation"
-    }),
-    schema_version: 1,
-    workspace_id: row.workspace_id,
-    family: row.family,
-    canonical_payload: row.canonical_payload,
-    operator_id: row.operator_id,
-    recorded_at: row.recorded_at
-  });
-}
-
-export function incidenceFromRow(row: FieldFactorIncidenceRow): FactorIncidence {
-  return FactorIncidenceSchema.parse({
-    ...fieldReceiptContractFields({
-      identity: row.incidence_id,
-      producer: FACTOR_INCIDENCE_OPERATOR_ID,
-      consumer: "projection_generation"
-    }),
-    schema_version: 1,
-    workspace_id: row.workspace_id,
-    span_id: row.span_id,
-    factor_id: row.factor_id,
-    scope: row.scope,
-    operator_id: row.operator_id,
     recorded_at: row.recorded_at
   });
 }

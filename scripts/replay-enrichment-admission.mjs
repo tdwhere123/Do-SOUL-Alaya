@@ -21,7 +21,7 @@ if (execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim())
 mkdirSync(outputDirectory, { recursive: true });
 const reportPath = join(outputDirectory, `replay-files-${resultSha}-${Date.now()}.json`);
 const files = [
-  "apps/core-daemon/src/__tests__/runtime/recall/retained-admission-replay.test.ts",
+  "apps/bench-runner/src/__tests__/runs/extraction/retained-admission-replay.test.ts",
   "apps/core-daemon/src/__tests__/runtime/recall/source-discovery-admitted-public-entry.test.ts",
   "apps/core-daemon/src/__tests__/runtime/recall/source-discovery-public-consumption.test.ts"];
 const result = spawnSync("pnpm", ["exec", "vitest", "run", ...files,

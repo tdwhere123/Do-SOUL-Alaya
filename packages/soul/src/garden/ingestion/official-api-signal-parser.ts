@@ -33,9 +33,6 @@ import {
 } from "./official-api/kind-projection-draft.js";
 
 export const OFFICIAL_API_SIGNAL_LIMIT = 64;
-export {
-  OPEN_SEMANTIC_OBSERVATION_OBJECT_KIND
-} from "./official-api/object-kind-contract.js";
 // Raw cache identity and parser projection identity evolve independently.
 export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v12";
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
@@ -150,23 +147,16 @@ const OpenOfficialApiSignalEntrySchema = z.object({
   ...OfficialApiSignalEntrySharedShape
 }).loose().readonly();
 
-export type { OfficialApiTemporalProjectionDraft } from "../extraction/temporal/projection-draft.js";
 export type {
-  OfficialApiSemanticFactorGraphFields,
-  OfficialApiSemanticFactorGraphProjectionAudit,
-  OfficialApiSemanticFactorGraphProjectionReason
+  OfficialApiSemanticFactorGraphProjectionAudit
 } from "./official-api/semantic-factor-projection.js";
 export {
-  inspectOfficialApiSemanticFactorGraphProjection,
   parseOfficialApiSemanticFactorGraphProjectionAudit,
   projectOfficialApiSemanticFactorGraph
 } from "./official-api/semantic-factor-projection.js";
 export {
   inspectRawOfficialApiSignalElements,
   salvageRawSignalElements
-} from "./official-api/raw-signal-envelope.js";
-export type {
-  RawOfficialApiSignalElementInspection
 } from "./official-api/raw-signal-envelope.js";
 
 export interface OfficialApiPreferenceProfileDraft {
@@ -209,7 +199,7 @@ export interface OfficialApiSignalParseOptions {
   readonly requireSemanticFactorGraph?: boolean;
 }
 
-export type OfficialApiSignalEnvelopeRecoveryKind = "none" | "salvage";
+type OfficialApiSignalEnvelopeRecoveryKind = "none" | "salvage";
 
 export interface OfficialApiSignalParseReceipt {
   readonly drafts: readonly OfficialApiSignalDraft[];

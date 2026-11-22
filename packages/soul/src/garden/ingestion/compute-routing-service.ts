@@ -95,7 +95,7 @@ export class ComputeRoutingService {
   }
 }
 
-export function toModelRef(
+function toModelRef(
   decision: Readonly<ComputeRoutingDecision>
 ): Readonly<ExecutionStanceModelRef> {
   return {

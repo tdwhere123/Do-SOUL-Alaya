@@ -1,7 +1,5 @@
 import { PassThrough } from "node:stream";
-
 import { describe, expect, it, vi } from "vitest";
-
 import {
   ControlPlaneObjectKind,
   ProposalOptionKind,
@@ -16,32 +14,18 @@ import {
   type RecallPolicy,
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
-
 import { createApp } from "../../../runtime/app.js";
-
 import { proposalRouteServices } from "../../support/route-service-stubs.js";
-
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../../cli/bridge.js";
-
 import { createReviewCommand } from "../../../cli/review/review.js";
-
 import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
-
 import { createMcpMemoryProposalWorkflow } from "../../../mcp-memory/proposal/proposal-workflow.js";
-
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,
   type McpMemoryToolHandler,
   type McpMemoryToolHandlerDependencies
 } from "../../../mcp-memory/tool/tool-handler.js";
-
-import { createInspectorApp } from "../../../../../inspector/src/runtime/app.js";
-import {
-  INSPECTOR_SESSION_COOKIE,
-  INSPECTOR_VITEST_SESSION_ID
-} from "../../../../../inspector/src/launch/launch-session-store.js";
-
 import {
   reviewerArgs,
   ReviewParitySurfaces,
@@ -54,14 +38,15 @@ import {
   createParityMemoryEntry,
   _UsedTypes
 } from "./proposal-review-parity-fixture.js";
+import type { ProposalRouteServices } from "../../../routes/governance/proposals/proposals.js";
 
-describe("proposal review inspector cli parity", () => {
+describe("proposal review mcp http cli parity", () => {
 
-  it("returns the same review response shape through MCP, Inspector HTTP, and CLI", async () => {
+  it("returns the same review response shape through MCP, daemon HTTP, and CLI", async () => {
     const mcpResult = await callAlayaMcpMemoryTool(
       {
         memoryToolHandler: createReviewHandler(),
-        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "inspector", sessionId: "review-parity-mcp-session" })
+        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "http-reviewer", sessionId: "review-parity-mcp-session" })
       },
       "soul.review_memory_proposal",
       reviewerArgs
@@ -88,52 +73,22 @@ describe("proposal review inspector cli parity", () => {
       }
     });
 
-    const forwardedInspectorRequests: Array<{
-      readonly url: string;
-      readonly requestToken: string | null;
-      readonly desktop: string | null;
-      readonly body: string | null;
-    }> = [];
-    const inspectorApp = createInspectorApp({
-      token: "inspector-token",
-      workspaceId: "ws1",
-      daemonUrl: "http://daemon.local",
-      env: {
-        ALAYA_REQUEST_TOKEN: "daemon-request-token",
-        ALAYA_REVIEWER_TOKEN: "review-token",
-        ALAYA_REVIEWER_IDENTITY: "user:server-reviewer"
-      },
-      fetchImpl: async (input, init) => {
-        const url = new URL(String(input));
-        const headers = new Headers(init?.headers);
-        forwardedInspectorRequests.push({
-          url: String(input),
-          requestToken: headers.get("x-request-token"),
-          desktop: headers.get("x-alaya-desktop"),
-          body: init?.body === undefined ? null : String(init.body)
-        });
-
-        return await daemonApp.request(`${url.pathname}${url.search}`, {
-          method: init?.method,
-          headers,
-          body: init?.body
-        });
-      }
-    });
-    const inspectorResponse = await inspectorApp.request("/api/proposals/ws1/prop-1/review", {
+    const httpResponse = await daemonApp.request("/workspaces/ws1/proposals/prop-1/review", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        cookie: `${INSPECTOR_SESSION_COOKIE}=${INSPECTOR_VITEST_SESSION_ID}`
+        "x-request-token": "daemon-request-token",
+        "x-alaya-desktop": "1"
       },
       body: JSON.stringify({
         verdict: reviewerArgs.verdict,
         reason: reviewerArgs.reason,
-        reviewer_identity: "user:payload-override"
+        reviewer_identity: reviewerArgs.reviewer_identity,
+        reviewer_token: reviewerArgs.reviewer_token
       })
     });
-    expect(inspectorResponse.status).toBe(200);
-    const inspectorPayload = (await inspectorResponse.json()) as { readonly data: unknown };
+    expect(httpResponse.status).toBe(200);
+    const httpPayload = (await httpResponse.json()) as { readonly data: unknown };
 
     const cliCommand = createReviewCommand({
       handler: createReviewHandler(),
@@ -151,24 +106,11 @@ describe("proposal review inspector cli parity", () => {
       proposal_id: "prop-1",
       resolution_state: ProposalResolutionState.ACCEPTED
     });
-    expect(inspectorPayload.data).toEqual(mcpOutput);
+    expect(httpPayload.data).toEqual(mcpOutput);
     expect(cliResult.json).toEqual(mcpOutput);
-    expect(forwardedInspectorRequests).toEqual([
-      {
-        url: "http://daemon.local/workspaces/ws1/proposals/prop-1/review",
-        requestToken: "daemon-request-token",
-        desktop: "1",
-        body: JSON.stringify({
-          verdict: reviewerArgs.verdict,
-          reason: reviewerArgs.reason,
-          reviewer_identity: reviewerArgs.reviewer_identity,
-          reviewer_token: reviewerArgs.reviewer_token
-        })
-      }
-    ]);
   });
 
-  it("rejects an Inspector review with 400 when no reviewer binding is configured and writes no review event", async () => {
+  it("rejects a review with no reviewer binding and writes no review event", async () => {
     const proposal = createProposal();
     const appendSpy = vi.fn(async () => {
       throw new Error("append must not be called when the reviewer binding is missing");
@@ -180,8 +122,8 @@ describe("proposal review inspector cli parity", () => {
     const workflow = createMcpMemoryProposalWorkflow({
       now: () => "2026-04-30T00:00:00.000Z",
       generateObjectId: () => "prop-1",
-      // No reviewerIdentityBinding: the Inspector surface asserts identity over
-      // the network and must be rejected rather than forging the audit trail.
+      // No reviewerIdentityBinding: a network review surface must be rejected
+      // rather than forging the audit trail.
       eventLogRepo: { append: appendSpy, queryByEntity: async () => [] },
       proposalRepo: {
         create: async () => proposal,
@@ -218,8 +160,8 @@ describe("proposal review inspector cli parity", () => {
         {
           workspaceId: "ws1",
           runId: null,
-          agentTarget: "inspector",
-          sessionId: "inspector-no-binding-review"
+          agentTarget: "http-reviewer",
+          sessionId: "http-reviewer-no-binding-review"
         }
       )
     ).rejects.toMatchObject({ code: "VALIDATION", message: "reviewer binding not configured" });
@@ -227,5 +169,78 @@ describe("proposal review inspector cli parity", () => {
     expect(appendSpy).not.toHaveBeenCalled();
     expect(notifySpy).not.toHaveBeenCalled();
     expect(updateSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("proposal review error parity", () => {
+
+  it("returns identical NOT_FOUND envelope across MCP, daemon HTTP, and CLI when proposal_id is unknown", async () => {
+    const { mcp, http, cli } = await runReviewParityScenario(() =>
+      createErrorReviewHandler({ kind: "proposal_not_found" })
+    );
+
+    expect(mcp.ok).toBe(false);
+    expect(mcp.error.code).toBe("NOT_FOUND");
+    const expectedMessage = "Proposal not found.";
+    expect(mcp.error.message).toBe(expectedMessage);
+
+    expect(http.body.error?.code).toBe(mcp.error.code);
+    expect(http.body.error?.message).toBe(mcp.error.message);
+    expect([404, 400]).toContain(http.status);
+
+    expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
+    expect(cli.stderr).toContain("NOT_FOUND");
+    expect(cli.stderr).toContain(expectedMessage);
+  });
+
+  it("returns identical VALIDATION envelope when the proposal is already accepted", async () => {
+    const { mcp, http, cli } = await runReviewParityScenario(() =>
+      createErrorReviewHandler({ kind: "already_resolved" })
+    );
+
+    expect(mcp.ok).toBe(false);
+    expect(mcp.error.code).toBe("VALIDATION");
+    expect(mcp.error.message).toContain("already accepted");
+
+    expect(http.body.error?.code).toBe(mcp.error.code);
+    expect(http.body.error?.message).toBe(mcp.error.message);
+
+    expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
+    expect(cli.stderr).toContain("VALIDATION");
+    expect(cli.stderr).toContain("already accepted");
+  });
+
+  it("returns identical NOT_FOUND envelope when the target memory is missing in the workspace", async () => {
+    const { mcp, http, cli } = await runReviewParityScenario(() =>
+      createErrorReviewHandler({ kind: "target_memory_missing" })
+    );
+
+    expect(mcp.ok).toBe(false);
+    expect(mcp.error.code).toBe("NOT_FOUND");
+    expect(mcp.error.message).toContain("Target memory object not found");
+
+    expect(http.body.error?.code).toBe(mcp.error.code);
+    expect(http.body.error?.message).toBe(mcp.error.message);
+
+    expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
+    expect(cli.stderr).toContain("NOT_FOUND");
+  });
+
+  it("returns identical VALIDATION envelope when validateUpdate rejects (e.g. archived memory)", async () => {
+    const message = "Cannot update archived memory entry mem-1.";
+    const { mcp, http, cli } = await runReviewParityScenario(() =>
+      createErrorReviewHandler({ kind: "validate_update_rejected", message })
+    );
+
+    expect(mcp.ok).toBe(false);
+    expect(mcp.error.code).toBe("VALIDATION");
+    expect(mcp.error.message).toBe("Invalid request.");
+
+    expect(http.body.error?.code).toBe(mcp.error.code);
+    expect(http.body.error?.message).toBe(mcp.error.message);
+
+    expect(cli.exitCode).not.toBe(ALAYA_SYSEXITS.OK);
+    expect(cli.stderr).toContain("VALIDATION");
+    expect(cli.stderr).toContain("Invalid request.");
   });
 });

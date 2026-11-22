@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { EventLogEntrySchema, type EventLogEntry } from "@do-soul/alaya-protocol";
+import type { EventLogEntry } from "@do-soul/alaya-protocol";
 import type { SqliteConnection } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
 import { EVENT_LOG_APPEND_SYNC_SQL } from "../event-log/statements/append-sql.js";
+import { parseEventLogEntry } from "../event-log/mappers/event-log-rows.js";
+import { assertEventLogWriteScope } from "../event-log/writes/synchronous-transaction.js";
 
 export type EventLogDraftInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
@@ -15,6 +17,7 @@ interface EventLogNextRevisionStatement {
 }
 
 interface EventLogWriter {
+  readonly connection: SqliteConnection;
   readonly appendStatement: EventLogInsertStatement;
   readonly nextRevisionStatement: EventLogNextRevisionStatement;
 }
@@ -29,6 +32,7 @@ export function getEventLogWriter(connection: SqliteConnection): EventLogWriter 
   }
 
   const writer: EventLogWriter = {
+    connection,
     appendStatement: connection.prepare(EVENT_LOG_APPEND_SYNC_SQL),
     nextRevisionStatement: connection.prepare(`
       SELECT MAX(revision) AS max_revision
@@ -45,6 +49,10 @@ export function insertEventLogEntry(
   writer: EventLogWriter,
   event: EventLogDraftInput
 ): EventLogEntry {
+  assertEventLogWriteScope();
+  if (!writer.connection.inTransaction) {
+    throw new StorageError("VALIDATION_FAILED", "EventLog append requires an active transaction.");
+  }
   const entry = parseEventLogEntry({
     ...event,
     event_id: randomUUID(),
@@ -81,13 +89,5 @@ function getNextRevision(writer: EventLogWriter, entityType: string, entityId: s
     return (row?.max_revision ?? -1) + 1;
   } catch (error) {
     throw new StorageError("QUERY_FAILED", "Failed to compute next event log revision.", error);
-  }
-}
-
-function parseEventLogEntry(entry: EventLogEntry): EventLogEntry {
-  try {
-    return EventLogEntrySchema.parse(entry);
-  } catch (error) {
-    throw new StorageError("VALIDATION_FAILED", "Failed to validate event log entry.", error);
   }
 }

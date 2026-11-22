@@ -12,7 +12,7 @@ import {
   OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT
 } from "./query-compiler.js";
 
-export const SOURCE_BOUND_F3_CAPABILITIES = [
+const SOURCE_BOUND_F3_CAPABILITIES = [
   "f0_f2_only",
   "identities_only",
   "identities_and_topology"
@@ -21,7 +21,7 @@ export const SOURCE_BOUND_F3_CAPABILITIES = [
 export type SourceBoundF3Capability = (typeof SOURCE_BOUND_F3_CAPABILITIES)[number];
 
 export const SELECTED_SOURCE_BOUND_F3_CAPABILITY = "identities_only" as const;
-export const SOURCE_BOUND_F3_PROMPT_ASKS = SELECTED_SOURCE_BOUND_F3_CAPABILITY;
+const SOURCE_BOUND_F3_PROMPT_ASKS = SELECTED_SOURCE_BOUND_F3_CAPABILITY;
 
 export const SOURCE_BOUND_F3_FORBIDDEN_WRITES = [
   "RelationAssertion",
@@ -75,6 +75,6 @@ export function sourceBoundF3Seal(): SourceBoundF3Seal {
   };
 }
 
-export function sha256Utf8(value: string): string {
+function sha256Utf8(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }

@@ -123,7 +123,7 @@ export function statementSessionCompletionEnvelope(taskId: string, responses: Re
 export async function receiveStatementSessionResponses(input: Readonly<{
   taskId: string; payload: StatementSessionTaskPayload; sources: Pick<StatementSessionSourcesPort, "root">;
   responses: Responses; now: () => string;
-}>): Promise<Readonly<{ signals: readonly CandidateMemorySignal[]; incomplete: boolean }>> {
+}>): Promise<Readonly<{ signals: readonly CandidateMemorySignal[]; status: SourceStatementReceipt["status"] }>> {
   const { request, located } = readStatementSessionRequest(input.sources, input.payload);
   if (input.responses.some(response => response.chunk_index !== request.chunk_index) || input.responses.length > 1) {
     throw new TypeError("host-worker statement response has a duplicate or unknown chunk");
@@ -135,7 +135,7 @@ export async function receiveStatementSessionResponses(input: Readonly<{
   } });
   return { signals: emitStatementSessionTaskSignals({ taskId: input.taskId, payload: input.payload, request, located,
     // A completion time is not a message occurrence time or a source-observation receipt.
-    receipt, createdAt: input.now(), sourceObservation: () => null }), incomplete: receipt.status !== "complete" };
+    receipt, createdAt: input.now(), sourceObservation: () => null }), status: receipt.status };
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {

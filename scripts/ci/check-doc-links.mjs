@@ -13,7 +13,6 @@ const LIVE_CLI_VERBS = Object.freeze([
   "doctor",
   "export",
   "import",
-  "inspect",
   "install",
   "mcp",
   "review",
@@ -82,7 +81,7 @@ function checkCliVerbs() {
       errors.push(`invariants.md §24 does not list CLI verb ${verb}`);
     }
   }
-  for (const ghost of ["profile", "secrets", "trust-state", "inspector-server", "inspector-frontend"]) {
+  for (const ghost of ["profile", "secrets", "trust-state", "inspect", "inspector-server", "inspector-frontend"]) {
     if (new RegExp(`\\b${ghost}\\b`, "u").test(section)) {
       errors.push(`invariants.md §24 still lists retired CLI verb ${ghost}`);
     }

@@ -63,6 +63,7 @@ export function createGardenRuntimeCore(
     readonly gardenTaskRepo?: SqliteGardenTaskRepo;
     readonly configService?: CreateGardenRuntimeInput["configService"];
     readonly eventPublisher: CreateGardenRuntimeInput["eventPublisher"];
+    readonly eventLogRepo: CreateGardenRuntimeInput["eventLogRepo"];
     readonly localHeuristicsProvider?: CreateGardenRuntimeInput["localHeuristicsProvider"];
     readonly officialApiGardenProvider?: CreateGardenRuntimeInput["officialApiGardenProvider"];
     readonly signalReceiver?: CreateGardenRuntimeInput["signalReceiver"];
@@ -80,6 +81,7 @@ export function createGardenRuntimeCore(
     gardenTaskRepo,
     configService: input.configService,
     eventPublisher: input.eventPublisher,
+    eventLogRepo: input.eventLogRepo,
     localHeuristicsProvider: input.localHeuristicsProvider,
     officialApiGardenProvider: input.officialApiGardenProvider,
     signalReceiver: input.signalReceiver,

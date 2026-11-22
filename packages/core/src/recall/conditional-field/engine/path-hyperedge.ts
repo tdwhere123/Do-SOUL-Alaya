@@ -147,19 +147,32 @@ export function* hyperedgeEffectSteps(
   const emitted = new Set<string>();
   for (const from of input.liveStates) {
     yield { kind: "work" };
-    const roles: { readonly population: readonly PremiseAssignment[]; readonly delta: readonly PremiseAssignment[] }[] = [];
+    const roles: PremiseJoinRoles[] = [];
     for (const premise of program.premises) {
       roles.push(yield* premiseJoinRoles(premise, from, rows, input, deltaIds));
     }
-    // A nested premise must still return proofs the sibling delta did not touch.
-    const focuses = deltaIds === undefined || input.retainPopulation === true ? [undefined] : roles.map((_, index) => index);
-    for (const focus of focuses) {
-      const grouped = roles.map((role, index) => focus !== undefined && index === focus ? role.delta : role.population);
-      if (program.join === "or") yield* orHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
-      else yield* andHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
+    const incremental = deltaIds !== undefined && input.retainPopulation !== true;
+    if (program.join === "or") {
+      const grouped = roles.map(role => incremental ? role.delta : role.population);
+      yield* orHyperedgeEffects(from, grouped, toProgramStates, input, emitted);
+    } else if (!incremental) {
+      yield* andHyperedgeEffects(from, roles.map(role => role.population), toProgramStates, input, emitted);
+    } else {
+      // The first delta role owns the tuple, including tuples with several new premises.
+      for (const [focus, role] of roles.entries()) {
+        if (role.delta.length === 0) continue;
+        const grouped = roles.map((other, index) => index < focus ? other.prior : index === focus ? role.delta : other.population);
+        yield* andHyperedgeEffects(from, grouped, toProgramStates, input, emitted);
+      }
     }
   }
 }
+
+type PremiseJoinRoles = Readonly<{
+  prior: readonly PremiseAssignment[];
+  delta: readonly PremiseAssignment[];
+  population: readonly PremiseAssignment[];
+}>;
 
 function* premiseJoinRoles(
   premise: QueryProgram,
@@ -167,30 +180,23 @@ function* premiseJoinRoles(
   rows: Iterable<AdjacencyRow>,
   input: HyperedgeInput,
   deltaIds: ReadonlySet<string> | undefined
-): PathComputation<{ readonly population: readonly PremiseAssignment[]; readonly delta: readonly PremiseAssignment[] }> {
-  const populationInput = { ...input, joinRows: undefined };
-  if (premise.kind === "relation") {
-    const population = yield* shareCompatibleAssignments(yield* assignmentsForPremise(premise, from, rows, populationInput));
-    if (deltaIds === undefined || input.joinRows === undefined) return { population, delta: population };
-    const delta = yield* shareCompatibleAssignments(yield* assignmentsForPremise(premise, from, input.joinRows, input));
-    return { population, delta };
-  }
+): PathComputation<PremiseJoinRoles> {
   // Share old proofs apart from new ones. An OR across both would mark the old path as new.
   const found = yield* assignmentsForPremise(premise, from, rows,
     deltaIds === undefined ? input : { ...input, retainPopulation: true });
   if (deltaIds === undefined) {
     const population = yield* shareCompatibleAssignments(found);
-    return { population, delta: population };
+    return { prior: population, delta: [], population };
   }
-  const retained: PremiseAssignment[] = [];
+  const prior: PremiseAssignment[] = [];
   const delta: PremiseAssignment[] = [];
   for (const assignment of found) {
     if (assignmentInDelta(assignment, deltaIds, input.promotedIds)) delta.push(assignment);
-    else retained.push(assignment);
+    else prior.push(assignment);
   }
-  const retainedShared = yield* shareCompatibleAssignments(retained);
+  const priorShared = yield* shareCompatibleAssignments(prior);
   const deltaShared = yield* shareCompatibleAssignments(delta);
-  return { population: [...retainedShared, ...deltaShared], delta: deltaShared };
+  return { prior: priorShared, delta: deltaShared, population: [...priorShared, ...deltaShared] };
 }
 
 function* shareCompatibleAssignments(assignments: readonly PremiseAssignment[]): PathComputation<readonly PremiseAssignment[]> {
@@ -547,12 +553,10 @@ function* orHyperedgeEffects(
   grouped: readonly (readonly PremiseAssignment[])[],
   toProgramStates: readonly string[],
   input: HyperedgeInput,
-  deltaIds?: ReadonlySet<string>,
-  emitted?: Set<string>
+  emitted: Set<string>
 ): PathComputation<void> {
   for (const options of grouped) for (const option of options) {
-    if (deltaIds !== undefined && input.retainPopulation !== true && !assignmentInDelta(option, deltaIds, input.promotedIds)) continue;
-    if (emitted !== undefined && !claimHyperedge(emitted, from, [option])) continue;
+    if (!claimHyperedge(emitted, from, [option])) continue;
     yield { kind: "work", retained_bytes: completionReservation([option]) };
     for (const effect of yield* completionEffects(from, [option], option, option.milligrades, "or", toProgramStates, input)) {
       yield { kind: "effect", effect };
@@ -565,15 +569,12 @@ function* andHyperedgeEffects(
   grouped: readonly (readonly PremiseAssignment[])[],
   toProgramStates: readonly string[],
   input: HyperedgeInput,
-  deltaIds?: ReadonlySet<string>,
-  emitted?: Set<string>
+  emitted: Set<string>
 ): PathComputation<void> {
   if (grouped.some((group) => group.length === 0)) return;
   for (const combo of cartesian(grouped)) {
-    if (deltaIds !== undefined && input.retainPopulation !== true
-      && !combo.some((assignment) => assignmentInDelta(assignment, deltaIds, input.promotedIds))) continue;
-    if (emitted !== undefined && !claimHyperedge(emitted, from, combo)) continue;
     yield { kind: "work" };
+    if (!claimHyperedge(emitted, from, combo)) continue;
     const merged = mergeAssignments(combo, input.bindingContexts);
     if (merged === undefined) continue;
     const first = merged[0];
@@ -594,6 +595,7 @@ function assignmentInDelta(
 ): boolean {
   const named = (id: string) => deltaIds.has(id) || promotedIds?.has(id) === true;
   if (named(assignment.leaf_id) || (assignment.instance_id !== undefined && named(assignment.instance_id))) return true;
+  if (assignment.derivation.children.length === 0) return assignment.derivation.leaf_ids.some(named);
   // The shared forest is on every accepting assignment. Only this derivation's children count.
   const nodes = new Map<string, Derivation>();
   for (const row of assignment.derivations) nodes.set(row.derivation_id, row);

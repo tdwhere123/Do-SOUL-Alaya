@@ -261,7 +261,7 @@ async function runNonInteractiveInstall(
   const session = createInstallSession(ctx, deps);
   try {
     await ensurePrivateDirectory(session.paths.configDir);
-    // Same OS-level lock as runtime/Inspector and keychain writers. Never steal
+    // Same OS-level lock as runtime and keychain writers. Never steal
     // an orphaned lock: an interrupted publication needs operator reconciliation.
     return await withRuntimeEmbeddingFileLock(session.paths.envPath, { timeoutMs: 0 }, async () =>
       await runInstallUnderLock(ctx, args, deps, session)

@@ -13,7 +13,8 @@ import {
   type EngineBindingInput,
   type EngineBindingRecord,
   type Workspace,
-  type WorkspaceEngineConfig
+  type WorkspaceEngineConfig,
+  type WorkspaceListScope
 } from "@do-soul/alaya-protocol";
 
 import { CoreError } from "../../shared/errors.js";
@@ -156,12 +157,30 @@ export class WorkspaceService {
     return await this.bootstrapCoordinator.reconcileBootstrapPaths(workspaceId, options);
   }
 
-  public list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]> {
-    return this.dependencies.workspaceRepo.list(page);
+  public async list(
+    page?: WorkspaceListPageOptions,
+    scope: WorkspaceListScope = { kind: "all" }
+  ): Promise<readonly Workspace[]> {
+    if (scope.kind === "allowlist") {
+      if (scope.workspaceIds.length === 0) {
+        return [];
+      }
+      return await this.dependencies.workspaceRepo.list(page, scope);
+    }
+    return await this.dependencies.workspaceRepo.list(page);
   }
 
-  public async count(): Promise<number> {
+  public async count(scope: WorkspaceListScope = { kind: "all" }): Promise<number> {
     const count = this.dependencies.workspaceRepo.count;
+    if (scope.kind === "allowlist") {
+      if (scope.workspaceIds.length === 0) {
+        return 0;
+      }
+      if (count !== undefined) {
+        return await count.call(this.dependencies.workspaceRepo, scope);
+      }
+      return (await this.dependencies.workspaceRepo.list(undefined, scope)).length;
+    }
     if (count !== undefined) {
       return await count.call(this.dependencies.workspaceRepo);
     }

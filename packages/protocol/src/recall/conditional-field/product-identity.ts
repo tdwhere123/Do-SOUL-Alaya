@@ -285,8 +285,9 @@ export function stableCanonicalStringify(value: unknown): string {
   }
   if (typeof value === "object" && value !== null) {
     return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, nested]) => nested !== undefined)
       .sort(([left], [right]) => compareCodeUnits(left, right))
-      .map(([key, nested]) => `${key}:${stableCanonicalStringify(nested)}`)
+      .map(([key, nested]) => `${JSON.stringify(key)}:${stableCanonicalStringify(nested)}`)
       .join(",")}}`;
   }
   const scalar = JSON.stringify(value);

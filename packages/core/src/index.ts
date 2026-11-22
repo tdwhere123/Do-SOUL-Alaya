@@ -1,6 +1,6 @@
 export * from "./runtime/config/index.js";
 export { SourceIndexLifecycle } from "./source-index/source-index-lifecycle.js";
-export { SourceIndexBackfill, type SourceIndexBackfillInput } from "./source-index/source-index-backfill.js";
+export { SourceIndexBackfill } from "./source-index/source-index-backfill.js";
 export { orderNativeRouteAccess } from "./recall/runtime/native-route-opportunity.js";
 export { recallExecutionRetention, recallRetentionBytes, RECALL_RETENTION_TTL_MS } from "./recall/runtime/recall-execution-retention.js";
 export type { NativeRouteLane } from "./recall/runtime/native-route-opportunity.js";
@@ -37,8 +37,6 @@ export { projectSourceDisclosure } from "./recall/runtime/source-disclosure.js";
 export { projectEvidenceRead } from "./memory/evidence-read-projection.js";
 export {
   openWorkspaceSourceTarget,
-  type OpenCurrentSourceTargetResult,
-  type OpenSourceRootRow,
   type SourceTargetOpenPort
 } from "./memory/source-target-open.js";
 export * from "./runtime/dirty-state-panic-service.js";
@@ -65,22 +63,16 @@ export type {
 } from "./embedding-recall/source-embedding-runtime.js";
 export * from "./embedding-recall/local-onnx-host-single-flight.js";
 export {
-  importLocalOnnxTransformers,
-  isLocalOnnxTransformersModuleNotFound,
-  localOnnxTransformersMissingCode,
   probeLocalOnnxTransformersPackage,
   type LocalOnnxTransformersAvailability,
-  type LocalOnnxTransformersProbe,
-  type LocalOnnxTransformersProbeResult,
-  type LocalOnnxTransformersSpecifierResolver
+  type LocalOnnxTransformersProbe
 } from "./embedding-recall/local-onnx.js";
 export * from "./runtime/runs/engine-binding-service.js";
 export * from "./shared/errors.js";
 export { fieldContractSha256, fieldContractSha256Chunks, quoteFieldContractSha256Chunks } from "./shared/field-hash.js";
 export {
   createInMemoryFieldStores,
-  type FieldFormationStores,
-  type SourceRecordEvidenceBinding
+  type FieldFormationStores
 } from "./memory/evidence-create/field-stores.js";
 export {
   createSourceAdmissionPort,
@@ -91,9 +83,6 @@ export { createAuditedSourceAdmission, type AuditedSourceAdmission } from "./mem
 export {
   createAuditedSourceReplacement,
   type AuditedSourceReplacement,
-  type SourceReplacementRequest,
-  type SourceReplacementPredecessor,
-  type SourceReplacementTransition,
   type SourceReplacementOutcome
 } from "./memory/evidence-create/audited-source-replacement.js";
 export { runFieldAtomicWithOutcome, type FieldAtomicOutcome } from "./memory/evidence-create/field-stores.js";
@@ -102,18 +91,12 @@ export { resolveSourceSemanticComparisonProfile, authorizeSemanticScope, authori
 export { readSourceDependencyDelivery } from "./recall/runtime/source-dependency-delivery.js";
 export {
   createSourceObservationPublication,
-  verifySourceObservationPublication,
-  type SourceObservationPublication,
-  type SourceObservationPublicationInput,
-  type SourceObservationPublicationResult
+  verifySourceObservationPublication
 } from "./memory/evidence-create/source-observation-publication.js";
 export { deriveAddressableSpanViews } from "./memory/evidence-create/source-span-views.js";
 export { hydrateUtf8Chunk } from "./memory/evidence-create/source-utf8-hydrate.js";
-export { createProjectionGenerationReceipt } from
-  "./recall/field/retrieval/projection/generation-identity.js";
 export * from "./recall/field/retrieval/projection/generation-lifecycle.js";
 export * from "./recall/field/retrieval/projection/source-projection.js";
-export type { RecallServiceFieldDeps } from "./recall/recall-service.js";
 export * from "./runtime/async-side-effect-auditor.js";
 export * from "./runtime/event-publisher.js";
 export * from "./memory/evidence-service.js";
@@ -122,8 +105,7 @@ export * from "./memory/object-keys/mint/mint.js";
 export * from "./memory/object-keys/write-service.js";
 export * from "./memory/object-keys/retrofit/retrofit.js";
 export * from "./semantic/open-semantic-factor-formation.js";
-export * from "./semantic/open-semantic-factor-extraction-port.js";
-export { RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID, RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER, RuleBasedEvidenceFactFrameNormalizer, type EvidenceFactFrameProposalNormalizer } from "@do-soul/alaya-protocol/node/source-frame";
+export { RULE_BASED_EVIDENCE_FACT_FRAME_NORMALIZER_OPERATOR_ID, RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from "@do-soul/alaya-protocol/node/source-frame";
 export * from "./tooling/extension-registry-service.js";
 export * from "./shared/file-path.js";
 export * from "./recall/runtime/global-memory-recall-port.js";
@@ -196,9 +178,6 @@ export * from "./governance/proposals/session-override-service.js";
 export * from "./shared/actors.js";
 export * from "./shared/clamp.js";
 export * from "./shared/event-utils.js";
-export {
-  KeyedMutex
-} from "@do-soul/alaya-protocol";
 export * from "./tooling/extension-descriptor-parsers.js";
 export * from "./manifestation/load-or-default-with-workspace-guard.js";
 export * from "./shared/recall-policy.js";
@@ -233,34 +212,37 @@ export {
 export { semanticInterpretationEvidenceId } from "./memory/evidence-create/source-semantic-capsule.js";
 export { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "./recall/conditional-field/query/source-semantic-query-admission.js";
 export {
-  SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
-  SourceSemanticQueryProducerRegistry, defaultSourceSemanticQueryProducerRegistry
+  SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID
 } from "./recall/conditional-field/query/source-semantic-query-producer-registry.js";
 export {
-  admitSourceSemanticCorrespondence, SOURCE_SEMANTIC_LOWERING_VERSION
+  admitSourceSemanticCorrespondence
 } from "./recall/conditional-field/query/source-semantic-correspondence-admission.js";
 export {
   SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
-  SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION,
-  SourceSemanticCorrespondenceProducerRegistry, defaultSourceSemanticCorrespondenceProducerRegistry
+  SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION
 } from "./recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
-export { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
-export { createSourceFeedbackSession, captureSourceFeedbackTerminalCause, type SourceFeedbackSessionInput, type SourceFeedbackSession,
-  type SourceFeedbackAction, type SourceFeedbackSettlement, type SourceFeedbackTerminalCause } from "./recall/runtime/source-feedback-session.js";
+export { executeSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
+export { createSourceFeedbackSession, captureSourceFeedbackTerminalCause, type SourceFeedbackSessionInput } from "./recall/runtime/source-feedback-session.js";
 // Named private Node consumers: daemon source-feedback execution and bench cache-only preparation.
 export type { SourceFeedbackCorrespondenceAction, SourceFeedbackCorrespondenceResult,
   SourceFeedbackCorrespondenceHost } from "./recall/runtime/source-feedback-correspondence.js";
 export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-semantic-library-proof.js";
+export type { SourceSemanticLibraryPackage } from "./recall/runtime/source-semantic-library-selection.js";
 export { projectSourceSemanticQuerySupport } from "@do-soul/alaya-protocol";
-export { sourceSemanticSupportExtent, sourceSemanticSupportWindow } from "./memory/evidence-create/source-semantic-support-window.js";
+export { sourceSemanticSupportExtent } from "./memory/evidence-create/source-semantic-support-window.js";
 export { encodeIndexResults, encodeRecallPageResponse, frameEncodedIndex, type RecallPageSourceMetadata } from "./recall/runtime/recall-page-encoding.js";
 export { RecallEnvelopeFraming } from "./recall/runtime/recall-envelope-framing.js";
 export { framingInterruption as recallFramingInterruption, pageResourceRefusal as recallPageResourceRefusal } from "./recall/runtime/recall-page-fit.js";
-export { selectSourceSemanticLibraryPage, improveSourceSemanticLibraryPage,
-  type SourceSemanticLibraryPackage } from "./recall/runtime/source-semantic-library-selection.js";
 export {
   SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResults,
   proofEntriesFromBranch, proofForLibraryEntry, slotQualifiersFor, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry,
   encodeSourceSemanticLibraryResponse, sourceSemanticLibraryQueryIdentity, sourceSemanticLibraryRequestIdentity,
   scopeSourceSemanticLibraryBranch, sourceSemanticLibraryRawPreview
 } from "./recall/runtime/source-semantic-library-recall.js";
+export {
+  computeUtilizationBuckets,
+  listSingleUsedAnchorDeliveries,
+  rollUpUtilizationBucketsByCohort,
+  type UtilizationBucketDelivery,
+  type UtilizationBucketReport
+} from "./recall/recall-utilization-buckets.js";

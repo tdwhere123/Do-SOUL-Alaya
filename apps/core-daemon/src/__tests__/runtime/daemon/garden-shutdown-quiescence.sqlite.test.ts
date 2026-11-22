@@ -54,7 +54,6 @@ async function fixture(options: {
     },
     securityStatusService: { close: () => undefined },
     daemonMcpRuntimeRegistry: { close: async () => undefined },
-    globalMemoryRecallInvalidationSubscription: null,
     closeEmbeddingProvider: options.closeEmbeddingProvider,
     database,
     temporalRuntimeLease: lease,

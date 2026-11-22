@@ -4,9 +4,13 @@ import type {
   MemoryProposalOperation,
   PathAnchorRef,
   Proposal,
-  SoulPendingProposalSummary,
-  SynthesisCapsule
+  SoulPendingProposalSummary
 } from "@do-soul/alaya-protocol";
+import type {
+  AcceptedMemoryUpdateInput,
+  AcceptedPathRelationGovernanceInput,
+  ProposalRepo
+} from "@do-soul/alaya-storage";
 import { McpToolError } from "../tool/mcp-tool-error.js";
 
 export interface McpMemoryProposalWorkflowEventLogRepo {
@@ -104,14 +108,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     proposalId: string,
     updatedAt: string,
     events: readonly ProposalResolutionEventInput[],
-    memoryUpdate: {
-      readonly target_object_id: string;
-      readonly workspace_id: string;
-      readonly proposed_changes: MemoryEntryMutableFields;
-      readonly updated_at: string;
-      readonly caused_by: string;
-      readonly expected_baseline_updated_at?: string | null;
-    },
+    memoryUpdate: AcceptedMemoryUpdateInput,
     options?: { readonly reviewerIdentity?: string }
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
@@ -121,13 +118,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     proposalId: string,
     updatedAt: string,
     events: readonly ProposalResolutionEventInput[],
-    pathRelationGovernance: {
-      readonly target_object_id: string;
-      readonly workspace_id: string;
-      readonly path_id_on_create: string;
-      readonly updated_at: string;
-      readonly caused_by: string;
-    },
+    pathRelationGovernance: AcceptedPathRelationGovernanceInput,
     options?: { readonly reviewerIdentity?: string }
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;
@@ -137,11 +128,7 @@ export interface McpMemoryProposalWorkflowProposalRepo {
     proposalId: string,
     updatedAt: string,
     events: readonly ProposalResolutionEventInput[],
-    synthesisCreate: {
-      readonly workspace_id: string;
-      readonly capsule: SynthesisCapsule;
-      readonly caused_by: string;
-    },
+    synthesisCreate: Parameters<ProposalRepo["acceptPendingSynthesisCreateWithEvents"]>[3],
     options?: { readonly reviewerIdentity?: string }
   ): Promise<Readonly<{
     readonly proposal: Readonly<Proposal>;

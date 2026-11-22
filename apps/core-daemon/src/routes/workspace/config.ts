@@ -1,4 +1,4 @@
-import { CoreError, type WorkspaceService } from "@do-soul/alaya-core";
+import type { WorkspaceService } from "@do-soul/alaya-core";
 import {
   EnvironmentConfigSchema,
   ManifestationBudgetConfigSchema,
@@ -12,7 +12,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { Context, Hono } from "hono";
 import { z, type ZodTypeAny } from "zod";
-import { parseJsonBody } from "../shared/shared.js";
+import { jsonError, parseJsonObject, parseRequiredString } from "../shared/shared.js";
 import type { AppConfigService } from "../../services/config/config-service.js";
 import type { EnvironmentStatusService } from "../../services/status/environment-status-service.js";
 import {
@@ -75,7 +75,7 @@ function registerWorkspaceConfigRoute<T extends ZodTypeAny>(
       configService,
       section,
       workspaceId,
-      await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
+      await parseJsonObject(context.req.json.bind(context.req), "Config patch body must be a JSON object")
     );
     return jsonStandardResponse(context, schema, config);
   });
@@ -124,7 +124,7 @@ function registerRuntimeConfigRoutes(app: Hono, configService: AppConfigService)
       return forbidden;
     }
     const config = await configService.patchRuntimeEmbeddingConfig(
-      await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
+      await parseJsonObject(context.req.json.bind(context.req), "Config patch body must be a JSON object")
     );
     return jsonConfigPatchResponse(context, RuntimeEmbeddingConfigSchema, config, true);
   });
@@ -140,7 +140,7 @@ function registerRuntimeConfigRoutes(app: Hono, configService: AppConfigService)
       return forbidden;
     }
     const config = await configService.patchRuntimeGardenComputeConfig(
-      await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
+      await parseJsonObject(context.req.json.bind(context.req), "Config patch body must be a JSON object")
     );
     return jsonConfigPatchResponse(context, RuntimeGardenComputeConfigSchema, config, false);
   });
@@ -164,7 +164,7 @@ function registerManifestationBudgetRoutes(
     const workspaceId = await requireWorkspace(services.workspaceService, context.req.param("workspaceId"));
     const saved = await configService.patchManifestationBudgetConfig(
       workspaceId,
-      await parseJsonBody(context.req.json.bind(context.req), parseConfigPatchBody)
+      await parseJsonObject(context.req.json.bind(context.req), "Config patch body must be a JSON object")
     );
     return jsonStandardResponse(context, ManifestationBudgetConfigSchema, saved);
   });
@@ -211,24 +211,11 @@ function denyProcessSecretPatch(context: Context): Response | null {
   if (grant === undefined || grantAllowsProcessSecretPatch(grant)) {
     return null;
   }
-  return context.json({ success: false, error: "Process-level secret patch is not allowed" }, 403);
+  return jsonError(context, 403, "Process-level secret patch is not allowed");
 }
 
 async function requireWorkspace(workspaceService: WorkspaceService, workspaceId: string): Promise<string> {
-  const trimmed = workspaceId.trim();
-
-  if (trimmed.length === 0) {
-    throw new CoreError("VALIDATION", "workspaceId is required");
-  }
-
+  const trimmed = parseRequiredString(workspaceId, "workspaceId is required");
   await workspaceService.getById(trimmed);
   return trimmed;
-}
-
-function parseConfigPatchBody(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new CoreError("VALIDATION", "Config patch body must be a JSON object");
-  }
-
-  return value as Record<string, unknown>;
 }

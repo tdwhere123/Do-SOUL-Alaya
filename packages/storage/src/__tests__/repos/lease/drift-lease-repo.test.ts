@@ -115,11 +115,14 @@ describe("SqliteDriftLeaseRepo", () => {
     await expect(repo.findActiveById("workspace-1", "missing")).resolves.toBeNull();
   });
 
-  it("deletes leases by id", async () => {
+  it("deletes a lease once for its workspace and grantee", async () => {
     const { repo } = await createRepo();
     await repo.create(createLease());
 
-    await repo.delete("lease-1");
+    expect(repo.delete("lease-1", "other-workspace", "user")).toBe(false);
+    expect(repo.delete("lease-1", "workspace-1", "other-user")).toBe(false);
+    expect(repo.delete("lease-1", "workspace-1", "user")).toBe(true);
+    expect(repo.delete("lease-1", "workspace-1", "user")).toBe(false);
 
     await expect(repo.findActive("workspace-1")).resolves.toEqual([]);
   });

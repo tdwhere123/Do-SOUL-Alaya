@@ -29,13 +29,15 @@ export interface ClaimFormRepo {
     objectId: string,
     status: ClaimLifecycleState,
     updatedAt: string,
-    expectedFromStatus: ClaimLifecycleState
+    expectedFromStatus: ClaimLifecycleState,
+    workspaceId: string
   ): Promise<Readonly<ClaimForm>>;
   updateStatusSync(
     objectId: string,
     status: ClaimLifecycleState,
     updatedAt: string,
-    expectedFromStatus: ClaimLifecycleState
+    expectedFromStatus: ClaimLifecycleState,
+    workspaceId: string
   ): Readonly<ClaimForm>;
 }
 
@@ -231,41 +233,42 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     objectId: string,
     status: ClaimLifecycleState,
     updatedAt: string,
-    expectedFromStatus: ClaimLifecycleState
+    expectedFromStatus: ClaimLifecycleState,
+    workspaceId: string
   ): Promise<Readonly<ClaimForm>> {
-    return this.updateStatusSync(objectId, status, updatedAt, expectedFromStatus);
+    return this.updateStatusSync(objectId, status, updatedAt, expectedFromStatus, workspaceId);
   }
 
   public updateStatusSync(
     objectId: string,
     status: ClaimLifecycleState,
     updatedAt: string,
-    expectedFromStatus: ClaimLifecycleState
+    expectedFromStatus: ClaimLifecycleState,
+    workspaceId: string
   ): Readonly<ClaimForm> {
     const parsedStatus = parseClaimLifecycleState(status);
     const parsedFrom = parseClaimLifecycleState(expectedFromStatus);
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      this.findByIdSync(objectId);
-      const result = this.statements.updateStatusStatement.run(
+      const statement = this.statements.updateStatusStatement;
+      requirePrivacyObjectAvailable(this.connectionIdentity, parsedWorkspaceId, "claim_form", objectId);
+      const result = statement.run(
         parsedStatus,
         parsedUpdatedAt,
         objectId,
+        parsedWorkspaceId,
         parsedFrom
       );
 
       if (result.changes === 0) {
-        // invariant: zero rows changed either because the claim does
-        // not exist OR another transition raced ahead and the row no
-        // longer matches expectedFromStatus. The race case is
-        // semantically a conflict, not a not-found.
         const current = this.findByIdSync(objectId);
-        if (current === null) {
+        if (current === null || current.workspace_id !== parsedWorkspaceId) {
           throw new StorageError("NOT_FOUND", `Claim form ${objectId} was not found.`);
         }
         throw new StorageError(
-          "QUERY_FAILED",
+          "CONFLICT",
           `Claim form ${objectId} transition expected from ${parsedFrom} but found ${current.claim_status}.`
         );
       }
@@ -452,7 +455,7 @@ function prepareClaimFormUpdateStatements(db: StorageDatabase) {
     updateStatusStatement: db.connection.prepare(`
       UPDATE claim_forms
       SET claim_status = ?, updated_at = ?
-      WHERE object_id = ? AND claim_status = ?
+      WHERE object_id = ? AND workspace_id = ? AND claim_status = ?
     `)
   };
 }

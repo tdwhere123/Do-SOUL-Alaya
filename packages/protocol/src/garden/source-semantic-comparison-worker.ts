@@ -16,8 +16,8 @@ const QueryRequest = z.object({ ...SourceSemanticWorkerRequestSchema.options[2].
 const RecallRequest = z.object({ ...SourceSemanticWorkerRequestSchema.options[4].unwrap().shape,
   access_policy: z.never().optional(), continuation: SourceSemanticProfiledLibraryContinuationSchema.optional()
 }).strict().superRefine((value, ctx) => refineSourceSemanticQueryRequest(value, ctx, true));
-export const SourceSemanticComparisonWorkerRequestSchema = z.discriminatedUnion("kind", [QueryRequest, RecallRequest]);
-export type SourceSemanticComparisonWorkerRequest = z.infer<typeof SourceSemanticComparisonWorkerRequestSchema>;
+const SourceSemanticComparisonWorkerRequestSchema = z.discriminatedUnion("kind", [QueryRequest, RecallRequest]);
+type SourceSemanticComparisonWorkerRequest = z.infer<typeof SourceSemanticComparisonWorkerRequestSchema>;
 export type SourceSemanticReadableWorkerRequest = z.infer<typeof SourceSemanticWorkerRequestSchema> | SourceSemanticComparisonWorkerRequest;
 export const SourceSemanticComparisonRequestSchema = z.discriminatedUnion("operation", [
   z.object(QueryRequest.shape).omit({ kind: true }).extend({ operation: z.literal("prepare_query"), authorized_scopes: AuthorizedScopesAdmissionSchema.optional() })

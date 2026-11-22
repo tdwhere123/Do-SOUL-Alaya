@@ -3,7 +3,6 @@ import {
   createGardenProposalWriter,
   type AnswersWithEdgeProducerService,
   GardenBacklogTelemetryService,
-  RelationAssertionService,
   rebuildCountersFromEventLog,
   scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
@@ -18,7 +17,6 @@ import {
   createTombstoneDispositionSweepPort
 } from "../../garden/support/forget-disposition-ports.js";
 import { createGardenRuntime } from "../../garden/runtime/runtime.js";
-import { createPostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
 import { createDaemonHostSessionCapture } from "../../garden/host-session/host-session-capture.js";
 import type { WarnLogger } from "../daemon/lifecycle/daemon-runtime-helpers.js";
 import { recordStartupStep } from "../daemon/lifecycle/daemon-runtime-support.js";
@@ -29,7 +27,7 @@ import {
   createGardenEdgeProposalReconcileDeferralPort,
   deferGardenBootstrapPathReconciliation
 } from "./garden-legacy-path-admission.js";
-import { materializeWorkspaceSessionStructuralRelations } from "./session-structural-relations.js";
+import { admitStatementSessionStructuralRelations } from "./session-structural-relations.js";
 import { createGardenSignalRefReplayPort } from "./garden-signal-ref-replay.js";
 import type { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
 import type { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
@@ -38,7 +36,6 @@ import type { DaemonStartupStepRecord } from "../daemon/lifecycle/daemon-runtime
 import type { createRecallMaterializationWiring } from "../recall-materialization/recall-materialization-wiring.js";
 import type { AlayaRuntimeNotifier } from "../daemon/support/runtime-notifier.js";
 import { createAnswersWithBackfillPort } from "./answers-with-backfill.js";
-import { createRecallTemporalProjectionEnsurer } from "../recall/recall-path-readers.js";
 
 type DaemonRepositories = ReturnType<typeof createDaemonRepositories>;
 type DaemonServiceFoundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
@@ -92,6 +89,8 @@ type GardenRuntimeWiringInput = Readonly<{
   Pick<
     RecallMaterializationWiring,
     | "embeddingBackfillHandler"
+    | "relationAssertionService"
+    | "ensureTemporalProjection"
     | "signalService"
     | "materializationRouter"
     | "edgeAutoProducerService"
@@ -195,11 +194,7 @@ function createGardenSchedulerRuntime(
   forgetTombstoneAuthority: ReturnType<typeof createForgetTombstoneAuthority>,
   answersWithCrystallizer: AnswersWithEdgeProducerService | undefined
 ) {
-  const relationAssertionService = new RelationAssertionService({
-    repo: input.relationAssertionRepo,
-    eventPublisher: input.eventPublisher,
-    eventHistory: input.eventLogRepo
-  });
+  const { relationAssertionService } = input;
   return createGardenRuntime({
     databaseConnection: input.database.connection,
     backlogThresholds: input.gardenBacklogThresholds,
@@ -220,19 +215,13 @@ function createGardenSchedulerRuntime(
     configService: input.configService,
     officialApiGardenProvider: input.officialGardenProvider,
     localHeuristicsProvider: input.localHeuristicsProvider,
-    signalReceiver: createPostTurnSignalReceiver(input.signalService),
+    signalReceiver: input.signalService,
     hostSessionCaptureFor: gardenTaskRepo => createDaemonHostSessionCapture({ stores: input.fieldStores,
       eventLogRepo: input.eventLogRepo, runtimeNotifier: input.runtimeNotifier, gardenTaskRepo,
       relationAssertionService, now: () => new Date().toISOString(), warn: input.warnLogger.warn }),
-    onStatementSessionSettled: async (evt) => {
-      await materializeWorkspaceSessionStructuralRelations({
-        database: input.database,
-        assertionService: relationAssertionService,
-        workspaceId: evt.workspaceId,
-        runId: evt.runId,
-        warn: input.warnLogger.warn
-      });
-    },
+    onStatementSessionSettled: evt => admitStatementSessionStructuralRelations({
+      database: input.database, assertionService: relationAssertionService, ...evt, warn: input.warnLogger.warn
+    }),
     strongRefService: input.strongRefService,
     workspaceRepo: input.workspaceRepo,
     tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort(
@@ -245,9 +234,7 @@ function createGardenSchedulerRuntime(
 }
 
 function createTemporalMaintenancePathReader(input: GardenRuntimeWiringInput) {
-  const service = new RelationAssertionService({ repo: input.relationAssertionRepo,
-    eventPublisher: input.eventPublisher, eventHistory: input.eventLogRepo });
-  const ensure = createRecallTemporalProjectionEnsurer(service);
+  const ensure = input.ensureTemporalProjection;
   const reader = new SqliteTemporalPathProjectionReader(input.relationAssertionRepo);
   return {
     findByAnchors: async (workspaceId: string, anchors: Parameters<SqliteTemporalPathProjectionReader["findByAnchors"]>[1]) => {

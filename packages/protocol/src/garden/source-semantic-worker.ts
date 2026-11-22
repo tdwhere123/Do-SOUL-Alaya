@@ -46,7 +46,7 @@ export const SourceSemanticFieldLibraryContinuationSchema = ContinuationSchema.u
   result_version: z.literal(ORDINARY_NATIVE_FIELD_RESULT_VERSION), enumeration_policy: z.literal("native_query")
 }).readonly();
 
-export const SOURCE_SEMANTIC_COVERAGE_STATES = [
+const SOURCE_SEMANTIC_COVERAGE_STATES = [
   "complete", "open", "truncated", "unexercised"
 ] as const;
 
@@ -200,7 +200,7 @@ export const SourceSemanticLibraryDiscoverySchema = z.object({
   truncated: z.boolean()
 }).strict().readonly();
 
-export const SourceSemanticLibraryOrderSchema = z.object({
+const SourceSemanticLibraryOrderSchema = z.object({
   enumeration_policy: z.literal("evidence_support"),
   tie_policy: z.literal(SOURCE_SEMANTIC_LIBRARY_TIE_POLICY),
   occupancy: z.literal(SOURCE_SEMANTIC_LIBRARY_OCCUPANCY),
@@ -208,7 +208,7 @@ export const SourceSemanticLibraryOrderSchema = z.object({
   page_budget: z.literal(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET)
 }).strict().readonly();
 
-export const SourceSemanticQuerySupportSchema = z.object({
+const SourceSemanticQuerySupportSchema = z.object({
   answer: z.enum(["supported", "open", "unrepresented"]),
   evidence_inputs: z.array(z.object({ alternative: NonNegativeIntSchema, input: NonNegativeIntSchema,
     status: z.enum(["supported", "open"]) }).strict().readonly()).max(256).readonly(),

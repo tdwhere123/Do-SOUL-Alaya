@@ -443,5 +443,3 @@ function parseNullableNonEmptyString(value: string | null, fieldName: string): s
 function shouldSupersedeMintFailureReconcile(parsed: ParsedMintFailureReconcileInput, error: unknown): boolean {
   return parsed.toStatus === EdgeProposalStatus.PENDING && isUniqueConstraintError(error);
 }
-
-export const EDGE_PROPOSAL_PENDING_STATUS = EdgeProposalStatus.PENDING;

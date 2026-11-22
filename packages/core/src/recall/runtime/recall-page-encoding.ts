@@ -6,7 +6,7 @@ import { AlayaError, MILLIGRADE_TOP, ORDINARY_NATIVE_FIELD_RESULT_VERSION, SoulM
 import { RECALL_CONSUMER_PROTOCOL_VERSION } from "./recall-consumer-compatibility.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
 import { completeSourceDeliveryEnd, sourceDeliveryEnds, sourceDeliveryPrefix } from "./source-delivery-prefix.js";
-import { displayRecallPreview, projectPayloadCompleteness } from "./recall-result-encoding.js";
+import { displayRecallPreview, PAYLOAD_OMITTED_PREVIEW, projectPayloadCompleteness } from "./recall-result-encoding.js";
 import { fitSourceDependencyExposure } from "./source-dependency-delivery.js";
 
 /** The same complete envelope is sized by the field and returned by MCP. */
@@ -72,7 +72,7 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
     onEntry?.();
     const cacheKey = indexEntryCacheKey(entry), objectId = indexMemoryObjectId(entry);
     const retainedPreview = previews.get(cacheKey) ?? (objectId === undefined ? undefined : previews.get(objectId));
-    const preview = displayRecallPreview(retainedPreview, entry.target) ?? "[payload omitted]";
+    const preview = displayRecallPreview(retainedPreview, entry.target) ?? PAYLOAD_OMITTED_PREVIEW;
     const metadata = sourceMetadata[cacheKey] ?? (objectId === undefined ? undefined : sourceMetadata[objectId]);
     const evidencePointers = metadata?.evidence_refs ?? [];
     const stagedWarnings = metadata?.staged_warnings?.map(warning => ({ ...warning,
@@ -117,21 +117,23 @@ export function encodeIndexResults(index: InformationIndex, previews: ReadonlyMa
       metadataBlock = { essential_bytes: essentialBytes, remaining_tokens: maxTotalTokens - usedBytes };
       break;
     }
-    const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedBytes, boundaryEnds);
+    const fitted = retainedPreview === undefined ? null
+      : fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedBytes, boundaryEnds);
     // Refuse a wider membership fit before issuance when a deferred tail can fit intact on a
     // fresh page; the projector retries a shorter prefix without advancing the deferred source.
     // Oversized first units still make UTF-8 progress instead of indefinitely deferring.
     if (encoded.length > 0 && shouldDeferTailSource(entry, preview, fitted?.preview, metadataBytes, maxTotalTokens, boundaryEnds)) {
       break;
     }
-    const content = fitted?.preview ?? "[payload omitted]";
-    const target = deliveredTarget(entry.target, content, fitted !== null && retainedPreview !== undefined);
-    const encodedBytes = fitted?.encodedBytes ?? metadataBytes;
+    const content = fitted?.preview ?? PAYLOAD_OMITTED_PREVIEW;
+    const encodedBytes = fitted?.encodedBytes ?? metadataBytes + Buffer.byteLength(PAYLOAD_OMITTED_PREVIEW);
+    if (encodedBytes > maxTotalTokens - usedBytes) break;
+    const target = deliveredTarget(entry.target, content, fitted !== null);
     usedBytes += encodedBytes;
     encoded.push({ ...(objectId === undefined ? {} : { object_id: objectId }), object_kind: indexEntryObjectKind(entry),
       target,
       relevance_score: score, content_preview: content,
-      payload_available: fitted !== null && retainedPreview !== undefined,
+      payload_available: fitted !== null,
       ...(disclosure === undefined ? {} : { source_disclosure: disclosure }), evidence_pointers: evidencePointers,
       ...(stagedWarnings === undefined ? {} : { staged_warnings: stagedWarnings }),
       ...(retainedReasons === undefined ? {} : { source_lookup_reasons: retainedReasons }),

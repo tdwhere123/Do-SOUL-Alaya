@@ -15,11 +15,13 @@ import {
 import {
   deferUnverifiableSignalEmission,
   readSignalEventsByType,
+  resolveGroundingRedriveEmissionContext,
   resolveStoredSignalEmissionContext
 } from "./signal-emission-recovery.js";
 import {
   claimSourceGroundingRedrive,
   emptySourceGroundingDeferStats,
+  redriveClaimConflict,
   reconcileStaleSourceGroundingClaim
 } from "./signal-service-grounding-defer.js";
 import {
@@ -258,26 +260,29 @@ export class SignalService {
   private async redriveSourceGroundingOwned(workspaceId: string, signalId: string,
     patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }, recoverUnqueued?: true): Promise<SignalServiceReceiveResult> {
     const persistedSignal = await this.dependencies.signalRepo.getById(signalId);
+    if (persistedSignal === null || persistedSignal.workspace_id !== workspaceId) {
+      throw new CoreError("NOT_FOUND", `Signal ${signalId} was not found for grounding re-drive.`);
+    }
     if (UnavailableSourceStatementSignalSchema.safeParse(persistedSignal).success) {
       throw new CoreError("CONFLICT", "Erased statement signals cannot be redriven.");
     }
-    const context = persistedSignal === null
-      ? null
-      : await this.resolveStoredEmissionContext(CandidateMemorySignalSchema.parse(persistedSignal));
+    const signal = CandidateMemorySignalSchema.parse(persistedSignal);
+    if (!recoverUnqueued && (signal.signal_state !== SignalState.DEFERRED ||
+        this.dependencies.sourceGroundingDeferQueue?.get(workspaceId, signalId) === null)) {
+      throw redriveClaimConflict(signalId);
+    }
+    const context = await resolveGroundingRedriveEmissionContext(this.dependencies, signal);
+    if (context === null) {
+      if (recoverUnqueued) throw new CoreError("CONFLICT", "Unqueued grounding deferral has no verifiable emission and patch-chain proof.");
+      return await this.deferUnverifiableEmission(signal);
+    }
     const claim = await claimSourceGroundingRedrive({
       dependencies: this.dependencies,
       warn: this.warn,
-      workspaceId,
-      signalId,
+      signal,
       ...(recoverUnqueued ? { recoverUnqueued } : {}),
       ...(patch?.raw_payload === undefined ? {} : { rawPayload: patch.raw_payload })
     });
-    if (context === null) {
-      // The claim helper supplies the authoritative not-found error when no
-      // persisted signal exists; this branch only satisfies TypeScript's
-      // nullable control flow after that helper returns successfully.
-      return await this.deferUnverifiableEmission(claim.signal);
-    }
     return await materializeAcceptedSignal(
       this.dependencies,
       this.warn,

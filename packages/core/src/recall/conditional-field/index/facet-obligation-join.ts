@@ -5,7 +5,7 @@ import {
   type QueryFacetObligation
 } from "@do-soul/alaya-protocol";
 
-export function requiredFacetObligations(
+function requiredFacetObligations(
   obligations: readonly QueryFacetObligation[] | undefined
 ): readonly QueryFacetObligation[] {
   return (obligations ?? []).filter((row) => row.requiredness === "required");

@@ -10,11 +10,11 @@ import { assertPublicationBinding, bindInterpretation, findCompletePublication, 
   publicationIdentity, type ObservationEvidencePort, type ObservationMemoryPort, type ObservationTemporalProjection
 } from "./source-observation-identity.js";
 
-export type SourceObservationPublicationInput = Readonly<{
+type SourceObservationPublicationInput = Readonly<{
   signal: SourceStatementSignal;
   sourceEventAnchor: Readonly<{ event_type: "soul.signal.emitted"; event_id: string; occurred_at: string }> | null;
 }>;
-export type SourceObservationPublicationResult = Readonly<{
+type SourceObservationPublicationResult = Readonly<{
   bound: BoundSourceStatement; evidence: Readonly<EvidenceCapsule>; memory: Readonly<MemoryEntry>;
 }>;
 export type SourceObservationPublication = Readonly<{

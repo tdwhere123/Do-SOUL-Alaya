@@ -20,28 +20,6 @@ import {
   parseRelationAssertionJsonArray
 } from "../../relation-assertion-repo-support.js";
 
-export type AssertionRow = Readonly<{
-  readonly assertion_id: string;
-  readonly workspace_id: string;
-  readonly admission_event_id: string;
-  readonly anchors_json: string;
-  readonly relation_kind: string;
-  readonly validity_json: string;
-  readonly formation_receipt_json: string;
-  readonly admitted_at: string;
-  readonly evidence_receipts_json: string;
-}>;
-
-export type ResolutionRow = Readonly<{
-  readonly resolution_id: string;
-  readonly assertion_id: string;
-  readonly workspace_id: string;
-  readonly resolution_event_id: string;
-  readonly resolution_kind: string;
-  readonly resolved_at: string;
-  readonly reason: string;
-}>;
-
 export const AssertionRowParser: RowParser<Readonly<RelationAssertion>> = {
   parse: parseAssertionRow
 };

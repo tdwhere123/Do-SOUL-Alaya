@@ -136,7 +136,9 @@ const EXPIRING_GREEN_SQL = `
       g.object_id AS green_status_id,
       g.target_object_id AS memory_entry_id,
       m.dimension AS dimension,
-      g.valid_until AS valid_until
+      g.valid_until AS valid_until,
+      g.green_state AS green_state,
+      g.last_transition_at AS last_transition_at
     FROM green_statuses g
     JOIN memory_entries m
       ON m.object_id = g.target_object_id
@@ -149,6 +151,15 @@ const EXPIRING_GREEN_SQL = `
     LIMIT ${EXPIRING_GREEN_LIMIT}
   `;
 
+const EXPIRING_GREEN_CAS = `
+    WHERE object_id = ?
+      AND workspace_id = ?
+      AND green_state IN ('eligible', 'grace')
+      AND green_state = ?
+      AND valid_until = ?
+      AND last_transition_at = ?
+  `;
+
 const GREEN_RENEW_SQL = `
     UPDATE green_statuses
     SET green_state = 'eligible',
@@ -159,7 +170,7 @@ const GREEN_RENEW_SQL = `
         revoke_reason = 'none',
         updated_at = ?,
         last_transition_at = ?
-    WHERE object_id = ?
+    ${EXPIRING_GREEN_CAS}
   `;
 
 const GREEN_REQUEST_ACTIVE_SQL = `
@@ -175,7 +186,7 @@ const GREEN_REQUEST_ACTIVE_SQL = `
         revoke_reason = 'none',
         updated_at = ?,
         last_transition_at = ?
-    WHERE object_id = ?
+    ${EXPIRING_GREEN_CAS}
   `;
 
 const GREEN_REVOKE_SQL = `

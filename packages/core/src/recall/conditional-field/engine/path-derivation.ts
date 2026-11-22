@@ -11,7 +11,6 @@ import { fieldPartitionNodeId } from "../cap-contract.js";
 import { projectLegalDerivationStep } from "../reference/bind-max-min.js";
 import { traceDerivationForest } from "./derivation-provenance.js";
 
-export { projectLegalDerivationStep };
 
 export type DerivationForest = ReadonlyMap<string, Derivation>;
 export type LeafGrades = ReadonlyMap<string, number>;
@@ -121,13 +120,6 @@ export function withdrawDerivation(
   return revised.derivations.find((node) => node.derivation_id === root);
 }
 
-export function derivationsAfterWithdraw(
-  rows: readonly Derivation[],
-  withdrawnLeafId: string
-): readonly Derivation[] {
-  return reviseDerivations(rows, withdrawnLeafId).derivations;
-}
-
 export function reviseDerivations(rows: import("./retained-sequence.js").RetainedRows<Derivation>, withdrawnLeafId: string): {
   readonly derivations: readonly Derivation[];
   readonly roots: ReadonlyMap<string, string | undefined>;
@@ -158,7 +150,7 @@ export function reviseDerivations(rows: import("./retained-sequence.js").Retaine
   return { derivations: [...retained.values()], roots };
 }
 
-export function derivationIdentity(
+function derivationIdentity(
   kind: DerivationKind,
   children: readonly Derivation[]
 ): string {

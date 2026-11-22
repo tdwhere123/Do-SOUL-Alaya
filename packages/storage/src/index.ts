@@ -1,4 +1,10 @@
 export { SqliteSourceIndexRepository } from "./repos/source-index/source-index-repo.js";
+export {
+  readSourceIndexRootQualification,
+  readSourceIndexSnapshotFact,
+  type SourceIndexRootQualification,
+  type SourceIndexSnapshotFact
+} from "./repos/source-index/source-index-qualification.js";
 export { putSourceStatementArtifact } from "./repos/source-index/statement-artifact.js";
 export { putSourceStatementMemoryBinding } from "./repos/source-index/statement-dependencies.js";
 export { isLexicalDomainTable, isLexicalDomainTrigger, rebuildSourceIndexLexicalDomains } from "./repos/source-index/lexical-domain.js";
@@ -212,17 +218,14 @@ export {
   SqliteFieldCausalUsageRepo,
   SqliteFieldDerivationJobRepo,
   SqliteFieldEraseBarrierRepo,
-  SqliteFieldFactorRepo,
   SqliteFieldProjectionGenerationRepo,
   SqliteFieldProofEffectRepo,
   SqliteFieldSourceRecordRepo,
   SqliteFieldSourceSpanRepo,
   SqliteSourceHintReader,
   SqliteSourceRootRecallReader,
-  factorFromRow,
   generationFromRow,
   generationToRow,
-  incidenceFromRow,
   jobFromRow,
   sourceRecordFromRow,
   sourceSpanFromRow,
@@ -233,9 +236,6 @@ export {
   type FieldEraseBarrierRepo,
   type FieldEraseBarrierInput,
   type FieldEraseBarrierRow,
-  type FieldFactorDescriptorRow,
-  type FieldFactorIncidenceRow,
-  type FieldFactorRepo,
   type FieldProjectionPinRow,
   type FieldProjectionPointerRow,
   type FieldProjectionGenerationRepo,

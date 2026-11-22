@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { HTTP_REVIEWER_AGENT_TARGET } from "../../../mcp-memory/proposal/reviewer-surfaces.js";
 import type { ProposalRouteServices } from "./proposals-types.js";
 
-export function createInspectorToolContext(workspaceId: string) {
-  return { workspaceId, runId: null, agentTarget: "inspector", sessionId: `inspector-${randomUUID()}` };
+export function createHttpReviewerToolContext(workspaceId: string) {
+  return {
+    workspaceId,
+    runId: null,
+    agentTarget: HTTP_REVIEWER_AGENT_TARGET,
+    sessionId: `${HTTP_REVIEWER_AGENT_TARGET}-${randomUUID()}`
+  };
 }
 
 export async function findExistingPendingMatch(
@@ -13,29 +19,9 @@ export async function findExistingPendingMatch(
     readonly proposed_changes: Record<string, unknown>;
   }
 ): Promise<string | null> {
-  const result = await services.mcpMemoryToolHandler.call({
-    toolName: "soul.list_pending_proposals",
-    arguments: { limit: 100 },
-    context: {
-      workspaceId: input.workspaceId,
-      runId: null,
-      agentTarget: "inspector",
-      sessionId: `inspector-${randomUUID()}`
-    }
-  });
-  if (!result.ok) return null;
-  const output = result.output as
-    | {
-        readonly proposals?: ReadonlyArray<{
-          readonly proposal_id: string;
-          readonly target_object_id: string;
-          readonly proposed_changes: Record<string, unknown> | null;
-        }>;
-      }
-    | null
-    | undefined;
-  const proposals = output?.proposals ?? [];
-  if (proposals.length === 0) return null;
+  // Query the repository directly without a 100-row cap so older pending proposals
+  // are still deduplicated.
+  const proposals = await services.proposalRepo.findPendingSummaries(input.workspaceId);
   const targetKey = canonicalizeChanges(input.proposed_changes);
   for (const proposal of proposals) {
     if (proposal.target_object_id !== input.memoryId) continue;

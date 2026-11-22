@@ -3,7 +3,9 @@ import { EventLogEntrySchema, EventTypeSchema } from "../../events/event-log.js"
 import {
   ConstitutionalFragmentRegisteredEventSchema,
   RuntimeGovernanceEventType,
-  RuntimeGovernanceEventUnionSchema} from "../../events/runtime-governance.js";
+  RuntimeGovernanceEventUnionSchema,
+  runtimeGovernancePayloadSchemas
+} from "../../events/runtime-governance.js";
 
 import {
   validTimestamp,
@@ -36,6 +38,16 @@ import {
 } from "./runtime-governance-event-registry.fixtures.js";
 
 describe("runtime-governance events", () => {
+  it("registers exactly one union arm and the matching payload schema for every event type", () => {
+    const expected = Object.values(RuntimeGovernanceEventType).sort();
+    const options = RuntimeGovernanceEventUnionSchema.unwrap().options;
+    expect(Object.keys(runtimeGovernancePayloadSchemas).sort()).toEqual(expected);
+    expect(options.map(({ shape }) => shape.type.value).sort()).toEqual(expected);
+    for (const { shape } of options) {
+      expect(shape.payload).toBe(runtimeGovernancePayloadSchemas[shape.type.value]);
+    }
+  });
+
   it("validates event unions and EventLog compatibility", () => {
     expect(
       RuntimeGovernanceEventUnionSchema.parse({

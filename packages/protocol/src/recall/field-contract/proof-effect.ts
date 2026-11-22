@@ -28,11 +28,15 @@ export const ProofEffectWitnessSchema = z.object({
   source_content_digest: NonEmptyStringSchema.max(256).nullable()
 }).strict().readonly();
 
+function hasEffectRunAuthority(effect: { run_id: string | null; action: string }): boolean {
+  return effect.run_id !== null || effect.action === "erase";
+}
+
 export const EffectRequestSchema = z.object({
   schema_version: z.literal(2),
   workspace_id: BoundedIdSchema,
   actor_id: BoundedIdSchema,
-  run_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable(),
   delivery_id: BoundedIdSchema,
   action: NonEmptyStringSchema.max(128),
   target: NonEmptyStringSchema.max(256),
@@ -43,13 +47,13 @@ export const EffectRequestSchema = z.object({
   governance_frontier: FieldContractDigestSchema,
   policy_operator_id: NonEmptyStringSchema.max(128),
   policy_operator_version: NonEmptyStringSchema.max(64)
-}).strict().readonly();
+}).strict().refine(hasEffectRunAuthority, { path: ["run_id"] }).readonly();
 
 export const EffectDecisionReceiptSchema = FieldReceiptContractFieldsSchema.extend({
   schema_version: z.literal(2),
   workspace_id: BoundedIdSchema,
   actor_id: BoundedIdSchema,
-  run_id: BoundedIdSchema,
+  run_id: BoundedIdSchema.nullable(),
   delivery_id: BoundedIdSchema,
   request_digest: FieldContractDigestSchema,
   action: NonEmptyStringSchema.max(128),
@@ -63,7 +67,7 @@ export const EffectDecisionReceiptSchema = FieldReceiptContractFieldsSchema.exte
   policy_operator_id: NonEmptyStringSchema.max(128),
   policy_operator_version: NonEmptyStringSchema.max(64),
   recorded_at: IsoDatetimeStringSchema
-}).strict().readonly();
+}).strict().refine(hasEffectRunAuthority, { path: ["run_id"] }).readonly();
 
 export type EffectDecision = z.infer<typeof EffectDecisionSchema>;
 export type EffectRequest = z.infer<typeof EffectRequestSchema>;

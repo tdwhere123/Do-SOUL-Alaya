@@ -91,7 +91,9 @@ it.skipIf(!output)("profiles real SQLite recall retention, idle expiry and worke
     await expect(port.acknowledge!(warm.preparation_id!, warm.index,
       new Map(Object.entries(warm.previews)))).rejects.toThrow("Recall delivery worker unavailable");
     // A read RPC observes accounting only AFTER independent active-timer evidence.
-    await client!.memoryRepo.findByWorkspaceId(request.workspace_id);
+    await client!.activeConstraintsPort.findActiveConstraints({
+      workspaceId: request.workspace_id, cap: 8
+    });
     expect(rows().filter(row => row.kind === "response").at(-1)!.accounting)
       .toEqual({ entries: 0, executions: 0, retained_bytes: 0 });
     await client!.close();

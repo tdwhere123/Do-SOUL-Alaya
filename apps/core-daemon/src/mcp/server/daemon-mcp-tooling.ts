@@ -25,7 +25,6 @@ export async function bootstrapDaemonMcpTooling(input: {
   readonly eventPublisher: ExtensionRegistryDeps["eventPublisher"];
   readonly extensionDescriptorRepo: ExtensionStorePort;
   readonly now: () => string;
-  readonly nowMs?: () => number;
   readonly runtimeNotifier: RuntimeNotifierPort;
   readonly toolSpecService: ExtensionRegistryToolSpecPort &
     Pick<ToolSpecService, "findById" | "register" | "update">;
@@ -65,7 +64,6 @@ export async function bootstrapDaemonMcpTooling(input: {
     extensionRegistry: extensionRegistryService,
     mcpToolDiscoveryService,
     now: input.now,
-    nowMs: input.nowMs,
     runtimeRegistry: daemonMcpRuntimeRegistry,
     toolSpecService: input.toolSpecService,
     warn: input.warnLogger.warn
@@ -75,7 +73,6 @@ export async function bootstrapDaemonMcpTooling(input: {
     daemonMcpRuntimeRegistry,
     daemonMcpCatalog,
     extensionRegistryService,
-    conversationToolCatalog: daemonConversationTooling.conversationToolCatalog,
-    externalConversationToolExecutor: daemonConversationTooling.externalConversationToolExecutor
+    conversationToolCatalog: daemonConversationTooling.conversationToolCatalog
   });
 }

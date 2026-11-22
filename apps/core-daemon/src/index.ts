@@ -154,7 +154,7 @@ async function createRuntimeBootstrapContext() {
   warnLogger.info("effective recall runtime", {
     projections_enabled: getCoreConfig().recall.projectionsEnabled
   });
-  const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
+  const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"), process.env);
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const { database, temporalRuntimeLease } = await openRuntimeDatabase(dbPath, runtimeNotifier, warnLogger.warn);
   recordStartupStep(startupSteps, "database");
@@ -181,6 +181,7 @@ function createDaemonRepositoryWiring(
   const repositories = createDaemonRepositories({
     database: bootstrap.database,
     warn: bootstrap.warnLogger.warn,
+    env: bootstrap.effectiveEnv,
     ...(options.fieldProjectionAdmissionMode === undefined
       ? {}
       : { fieldProjectionAdmissionMode: options.fieldProjectionAdmissionMode })
@@ -199,6 +200,8 @@ async function createDaemonFoundationWiring(
     runtimeNotifier: bootstrap.runtimeNotifier,
     configPaths: bootstrap.configPaths,
     warnLogger: bootstrap.warnLogger,
+    effectiveEnv: bootstrap.effectiveEnv,
+    processEnv: process.env,
     workspaceRepo: repositories.workspaceRepo,
     runRepo: repositories.runRepo,
     eventLogRepo: repositories.eventLogRepo,
@@ -263,6 +266,8 @@ async function buildGardenWiring(
     proposalRepo: repositories.proposalRepo,
     pathPlasticityWatermarkRepo: repositories.pathPlasticityWatermarkRepo,
     embeddingBackfillHandler: runtimeWiring.recallWiring.embeddingBackfillHandler,
+    relationAssertionService: runtimeWiring.recallWiring.relationAssertionService,
+    ensureTemporalProjection: runtimeWiring.recallWiring.ensureTemporalProjection,
     answersWithCrystallizer: createAnswersWithCrystallizer({
       database: bootstrap.database,
       relationAssertionAdmissionPort: runtimeWiring.recallWiring.relationAssertionAdmissionPort,
@@ -449,8 +454,6 @@ function buildFinalizeOperationsRuntimeInput(
     projectMappingService: foundation.projectMappingService,
     globalMemoryService: runtimeWiring.recallWiring.globalMemoryService,
     gardenRuntime: gardenWiring.gardenRuntime,
-    globalMemoryRecallInvalidationSubscription:
-      runtimeWiring.recallWiring.globalMemoryRecallInvalidationSubscription,
     database: bootstrap.database,
     temporalRuntimeLease: bootstrap.temporalRuntimeLease,
     recallReadWorkerClient: runtimeWiring.recallWiring.recallReadWorkerClient,

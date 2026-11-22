@@ -94,7 +94,7 @@ export type FieldObservationEffect = Readonly<{
   readonly discovery?: RoutingDiscovery;
 }>;
 
-export type ObserverWorkUnits = Readonly<{
+type ObserverWorkUnits = Readonly<{
   readonly work_units: number;
 }>;
 
@@ -173,6 +173,8 @@ export type FieldEngineState = FieldRoutingProgress & Readonly<{
   readonly budget: RequestBudget;
   readonly remaining_exploration: number;
   readonly solver_completed_work?: number;
+  /** Solver steps whose resulting frontier was admitted. */
+  readonly solver_retained_work?: number;
   readonly remaining_reserve: number;
   readonly remaining_memory_bytes: number;
   /** Cumulative admitted logical allocation; releases do not erase a request's charge. */
@@ -328,6 +330,8 @@ export function applyObserverPage(
   if (page.query_id !== state.query_id || page.snapshot_id !== state.snapshot_id) {
     return reviseEpoch(state, consumption);
   }
+  const observedWork = consumption.work?.work_units ?? 0;
+  const exploration = Math.max(0, state.remaining_exploration - observedWork);
   const bindingContexts = consumption.binding_contexts?.snapshot() ?? state.binding_contexts;
   if (consumption.binding_contexts !== undefined && state.binding_contexts !== undefined
     && !consumption.binding_contexts.extends(state.binding_contexts)) {
@@ -335,19 +339,19 @@ export function applyObserverPage(
   }
   const bindingBytes = (bindingContexts?.bytes ?? 0) - (state.binding_contexts?.bytes ?? 0);
   if (bindingBytes < 0) throw new BindingContextResourceError("binding recovery owner cannot shrink an active field");
-  if (bindingBytes > state.remaining_memory_bytes) return { ...state, memory_exhausted: true, retention_rejected: "memory" };
+  if (bindingBytes > state.remaining_memory_bytes) return { ...state, remaining_exploration: exploration,
+    memory_exhausted: true, retention_rejected: "memory" };
   for (const effect of consumption.effects ?? []) {
     const edge = effect.transition ?? effect.hyperedge;
     for (const identity of [effect.seed?.state, edge?.from, edge?.to]) {
       if (identity !== undefined) parseBindingContext(identity.binding_context, bindingContexts);
     }
   }
-  const observedWork = consumption.work?.work_units ?? 0;
   const reserved = { ...state, binding_contexts: bindingContexts,
     binding_context_bytes: (state.binding_context_bytes ?? 0) + bindingBytes,
     admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + bindingBytes,
     remaining_memory_bytes: state.remaining_memory_bytes - bindingBytes,
-    remaining_exploration: Math.max(0, state.remaining_exploration - observedWork) };
+    remaining_exploration: exploration };
   const candidate = bindEngineState(absorbObservations(reserved, { ...consumption, work: { work_units: 0 } }));
   const workRejected = observedWork > state.remaining_exploration
     || retentionWorkUnits(candidate.remaining_work) > retentionWorkUnits(state.remaining_work);
@@ -356,6 +360,8 @@ export function applyObserverPage(
     ...state,
     remaining_exploration: candidate.remaining_exploration,
     remaining_reserve: candidate.remaining_reserve,
+    solver_completed_work: candidate.solver_completed_work,
+    admitted_allocation_bytes: candidate.admitted_allocation_bytes,
     memory_exhausted: candidate.memory_exhausted,
     retention_rejected: candidate.memory_exhausted ? "memory" : "work",
     last_observer_status: "interrupted",

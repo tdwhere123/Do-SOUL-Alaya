@@ -102,8 +102,9 @@ async function createEvidence(input: Readonly<{ evidenceService: ObservationEvid
       event_anchor: anchor === null ? null : { event_type: anchor.event_type, event_id: anchor.event_id, occurred_at: anchor.occurred_at },
       physical_anchor: { file_path: null, line_range: null, symbol_name: null, artifact_ref: null },
       gist: JSON.stringify(bound), excerpt: bound.message.text, source_hash: bound.source_target.content_digest,
-      run_id: signal.run_id, workspace_id: signal.workspace_id, surface_id: signal.surface_id
-    }, [], undefined, undefined, undefined, input.assertSourceCurrent, SOURCE_PROVENANCE_CAPSULE);
+      run_id: signal.run_id, workspace_id: signal.workspace_id, surface_id: signal.surface_id,
+      assertSourceCurrent: input.assertSourceCurrent, sourceProvenance: SOURCE_PROVENANCE_CAPSULE
+    });
   } catch (error) {
     const raced = await input.evidenceService.findByIdScoped(objectId, signal.workspace_id);
     if (raced !== null) return check(raced);

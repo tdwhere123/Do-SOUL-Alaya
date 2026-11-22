@@ -9,10 +9,6 @@ import {
   type ParsedWorkerOperation
 } from "./operation-schemas.js";
 import { createBoundedActiveConstraintsReader, runWorkerActiveConstraints } from "./active-constraints.js";
-import { runMemoryOperation } from "./memory-operations.js";
-import { runEvidenceOperation } from "./evidence-operations.js";
-import { runSynthesisOperation } from "./synthesis-operations.js";
-import { runPathOperation } from "./path-operations.js";
 import { runConditionalFieldWorkerRecall } from "./observer-operations.js";
 import { runSourceSemanticWorker } from "./source-semantic-reasoning.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
@@ -99,40 +95,6 @@ async function dispatchParsed(
   switch (parsed.operation) {
     case "ready":
       return null;
-    case "memory.findRecallTierWindow":
-    case "memory.findByWorkspaceId":
-    case "memory.findByEventTimeWindow":
-    case "memory.findByDimension":
-    case "memory.findByScopeClass":
-    case "memory.searchByKeyword":
-    case "memory.searchByKeywordField":
-    case "memory.searchByKeywordWithinObjectIds":
-    case "memory.searchByKeywordWithinTier":
-    case "memory.searchManyByKeywordWithinObjectIds":
-    case "memory.searchByAnchorWithinObjectIds":
-    case "memory.searchByAnchorWithinTier":
-    case "memory.searchByAnchorField":
-    case "memory.findByEvidenceRefs":
-    case "memory.findBoundEvidenceRefs":
-    case "memory.findByIds":
-      return await runMemoryOperation(runtime, parsed);
-    case "evidence.searchByKeyword":
-    case "evidence.searchByKeywordField":
-    case "evidence.searchManyByKeywordField":
-    case "evidence.findByIds":
-    case "evidence.findRecallQualifiedByIds":
-    case "evidence.findRecallQualifiedFactKeysByIds":
-    case "evidence.findSourceAnchorsByIds":
-      return await runEvidenceOperation(runtime, parsed);
-    case "synthesis.searchByKeyword":
-    case "synthesis.searchByKeywordField":
-    case "synthesis.searchManyByKeywordField":
-    case "synthesis.findByIds":
-      return await runSynthesisOperation(runtime, parsed);
-    case "path.findByAnchors":
-    case "path.findByTimeConcernWindowDigests":
-    case "pathPlasticity.getStrengthByMemoryId":
-      return await runPathOperation(runtime, parsed);
     case "constraints.findActive":
       return await runWorkerActiveConstraints({
         payload: parsed.payload,

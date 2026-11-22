@@ -2,6 +2,7 @@ import { PathRelationSchema, type PathRelation } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
 import { StorageError } from "../../../../shared/errors.js";
 import { parseRows } from "../../../shared/parse-row.js";
+import { erasedAssertionSql } from "../../relation-assertion/erased-formation-evidence.js";
 import {
   parseRelationAssertionJson,
   wrapRelationAssertionStorageError
@@ -160,6 +161,14 @@ export function readActiveProjectionGeneration(
   }
 }
 
+export function readReadableProjectionHistoryDigest(db: StorageDatabase): string | null {
+  const row = db.connection.prepare(`
+    SELECT history_digest FROM temporal_schema_state
+    WHERE state_id = 1 AND status = 'ready' AND projection_refresh_required = 0
+  `).get() as Readonly<{ history_digest: string | null }> | undefined;
+  return row?.history_digest ?? null;
+}
+
 export async function findActiveProjectionByWorkspace(
   db: StorageDatabase,
   workspaceId: string
@@ -168,12 +177,13 @@ export async function findActiveProjectionByWorkspace(
   try {
     const rows = parseRows(db.connection.prepare(`
       SELECT projection_json
-      FROM relation_path_projections
+      FROM relation_path_projections AS projection
       WHERE generation = (
         SELECT active_projection_generation
         FROM temporal_schema_state
         WHERE state_id = 1 AND status = 'ready' AND projection_refresh_required = 0
       ) AND workspace_id = ?
+        AND NOT ${erasedAssertionSql("projection.workspace_id", "projection.assertion_id")}
       ORDER BY path_id ASC
     `).all(workspaceId), { parse: (value: unknown) => value as ProjectionRow }, "projection row");
     return Object.freeze(rows.map(parseProjectionRow));
@@ -190,12 +200,13 @@ export async function findActiveProjectionById(
   try {
     const row = db.connection.prepare(`
       SELECT projection_json
-      FROM relation_path_projections
+      FROM relation_path_projections AS projection
       WHERE generation = (
         SELECT active_projection_generation
         FROM temporal_schema_state
         WHERE state_id = 1 AND status = 'ready' AND projection_refresh_required = 0
       ) AND path_id = ?
+        AND NOT ${erasedAssertionSql("projection.workspace_id", "projection.assertion_id")}
       LIMIT 1
     `).get(pathId) as ProjectionRow | undefined;
     return row === undefined ? null : parseProjectionRow(row);
@@ -215,8 +226,9 @@ export async function findProjectionByWorkspaceAtAsOf(
     if (generation === null) return null;
     const rows = parseRows(db.connection.prepare(`
       SELECT projection_json
-      FROM relation_path_projections
+      FROM relation_path_projections AS projection
       WHERE generation = ? AND workspace_id = ?
+        AND NOT ${erasedAssertionSql("projection.workspace_id", "projection.assertion_id")}
       ORDER BY path_id ASC
     `).all(generation, workspaceId), { parse: (value: unknown) => value as ProjectionRow }, "projection row");
     return Object.freeze(rows.map(parseProjectionRow));

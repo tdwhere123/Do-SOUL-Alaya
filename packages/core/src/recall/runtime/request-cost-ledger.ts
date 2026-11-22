@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import { CoreError } from "../../shared/errors.js";
 import type { RetainedFieldLevels } from "./request-cost-engine-snapshot.js";
 
-export const REQUEST_COST_PHASES = [
+const REQUEST_COST_PHASES = [
   "compile",
   "acquire",
   "observe",
@@ -34,7 +34,7 @@ export type RequestCostDelta = Readonly<{
   readonly cache_misses?: number;
 }>;
 
-export type RequestPhaseCost = Readonly<{
+type RequestPhaseCost = Readonly<{
   readonly exclusive_ms: number;
   readonly inclusive_ms: number;
   /** Absent only on legacy receipts; absence is not measured zero. */

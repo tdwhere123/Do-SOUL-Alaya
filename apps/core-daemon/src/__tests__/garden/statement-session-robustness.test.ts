@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GardenEventType, GardenTaskKind, hostSessionContainerKey } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { createGardenClaimReclaimer, createHostWorkerTaskExpirer } from "../../garden/host-worker/host-worker-task-maintenance.js";
-import { IN_PROCESS_CLAIMANT } from "../../garden/host-worker/host-worker-task-processors.js";
 import { STATEMENT_SESSION_IDLE_MS } from "../../garden/statement-session/statement-session-closure.js";
 import { createGardenTaskHandlers } from "../../mcp-memory/garden-task/garden-task-handlers.js";
 import { CONTAINER, CONTAINER_KEY, WORKSPACE, createStatementSessionEnvironment, hostMessages } from "./statement-session-fixture.js";
@@ -112,7 +111,7 @@ describe("statement session closure robustness", { timeout: 30_000 }, () => {
     const [chunk] = env.sessionTasks();
     expect(chunk).toMatchObject({ status: "pending" });
     const claimedAt = env.now();
-    expect(await env.gardenTaskRepo.claimAtomic(chunk!.id, IN_PROCESS_CLAIMANT, claimedAt, WORKSPACE)).toBe("claimed");
+    expect(await env.gardenTaskRepo.claimAtomic(chunk!.id, "in-process:expired-fixture", claimedAt, WORKSPACE)).toBe("claimed");
     const eventCount = (type: string) => (env.database.connection.prepare(
       `SELECT COUNT(*) AS n FROM event_log WHERE event_type = ? AND entity_id = ?`).get(type, chunk!.id) as { n: number }).n;
     expect(eventCount(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED)).toBe(0);

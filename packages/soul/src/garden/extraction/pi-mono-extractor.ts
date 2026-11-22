@@ -3,8 +3,6 @@ import { inspectJsonRecovery, parseOrRecoverJson, type JsonRecoveryKind } from "
 import { readTextContent, requestJsonPayload, selectModel } from "./pi-mono-transport.js";
 
 export { SignalExtractorError } from "./pi-mono-errors.js";
-export type { SignalExtractorErrorKind } from "./pi-mono-errors.js";
-export type { JsonRecoveryKind } from "./pi-mono-json-recovery.js";
 
 export interface SignalExtractor {
   extract(input: {
@@ -95,7 +93,7 @@ export interface PiMonoAssistantMessage {
   };
 }
 
-export type PiMonoComplete = (
+type PiMonoComplete = (
   model: PiMonoModel,
   context: PiMonoContext,
   options?: PiMonoStreamOptions

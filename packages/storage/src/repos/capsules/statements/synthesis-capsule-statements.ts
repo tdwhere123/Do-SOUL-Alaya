@@ -1,7 +1,7 @@
 import type BetterSqlite3 from "better-sqlite3";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 
-export type SqliteStatement = BetterSqlite3.Statement;
+type SqliteStatement = BetterSqlite3.Statement;
 
 export interface SynthesisCapsuleStatements {
   readonly createStatement: SqliteStatement;
@@ -66,7 +66,7 @@ function updateRefsSql(columnName: "evidence_refs" | "source_memory_refs"): stri
     `;
 }
 
-export const SYNTHESIS_SELECT_COLUMNS = `
+const SYNTHESIS_SELECT_COLUMNS = `
         object_id,
         object_kind,
         schema_version,

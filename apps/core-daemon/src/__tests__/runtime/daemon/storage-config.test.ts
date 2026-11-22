@@ -34,14 +34,16 @@ describe("configured database path shared with installer", () => {
     expect(output.trim().split("\t")).toEqual([configDir, expected]);
   });
 
-  it("decodes supported escapes once and preserves unsupported escapes", () => {
+  it("decodes supported escapes, supports single quotes and trailing comments, and throws on malformed db_path", () => {
     const original = 'folder\\new/quoted"file\nnext.db';
     expect(parseStorageDbPathFromToml(`[storage]\ndb_path = ${JSON.stringify(original)}\n`)).toBe(original);
     expect(parseStorageDbPathFromToml(String.raw`[storage]
 db_path = "folder\tname.db"`)).toBe(String.raw`folder\tname.db`);
     expect(parseStorageDbPathFromToml('[storage]\ndb_path = ""\n')).toBe("");
-    for (const literal of ['"unterminated', "unquoted"]) {
-      expect(parseStorageDbPathFromToml(`[storage]\ndb_path = ${literal}\n`)).toBeNull();
+    expect(parseStorageDbPathFromToml('[storage] # section comment\ndb_path = "data/live.db" # trailing "comment"\n')).toBe("data/live.db");
+    expect(parseStorageDbPathFromToml(`[storage]\ndb_path = 'C:\\Users\\new\\alaya.db' # literal path\n`)).toBe(`C:\\Users\\new\\alaya.db`);
+    for (const literal of ['"unterminated', "'unterminated", "unquoted", "", "# comment only", '"a" extra']) {
+      expect(() => parseStorageDbPathFromToml(`[storage]\ndb_path = ${literal}\n`)).toThrow(/Malformed \[storage\]\.db_path/);
     }
   });
 
@@ -69,5 +71,48 @@ db_path = "folder\tname.db"`)).toBe(String.raw`folder\tname.db`);
       expect(installerPath).toBe(expected);
       expect(await readFile(installerPath!, "utf8")).toBe(cwdName);
     }
+  });
+
+  it("stops [storage] parsing at [[array.of.tables]] headers and ignores .env DATA_DIR per allowlist contract", async () => {
+    expect(
+      parseStorageDbPathFromToml("[storage]\n[[backup.targets]]\ndb_path = \"ignored/backup.db\"\n")
+    ).toBeNull();
+    expect(
+      parseStorageDbPathFromToml("[[storage]]\ndb_path = \"ignored/array-table.db\"\n")
+    ).toBeNull();
+
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), "alaya-dotenv-data-dir-")));
+    roots.push(root);
+    const configDir = path.join(root, "config");
+    const launchCwd = path.join(root, "launch");
+    await mkdir(configDir);
+    await mkdir(launchCwd);
+    await writeFile(path.join(configDir, ".env"), "DATA_DIR=dotenv-data\n", "utf8");
+
+    const envWithoutDataDir: NodeJS.ProcessEnv = { ...process.env, ALAYA_CONFIG_DIR: configDir };
+    delete envWithoutDataDir.DATA_DIR;
+    const fallbackDb = path.join(configDir, "alaya.db");
+    expect(
+      await resolveConfiguredDatabasePath(resolveAlayaConfigPaths(configDir), {
+        env: envWithoutDataDir,
+        launchCwd,
+        fallbackPath: fallbackDb
+      })
+    ).toBe(fallbackDb);
+    const locatorFromDotenv = execFileSync(process.execPath, [locator], {
+      cwd: launchCwd,
+      env: envWithoutDataDir,
+      encoding: "utf8"
+    });
+    expect(locatorFromDotenv.trim().split("\t")).toEqual([configDir, fallbackDb]);
+
+    const envWithProcessDataDir = { ...envWithoutDataDir, DATA_DIR: "process-data" };
+    const expectedFromProcess = path.join(launchCwd, "process-data", "alaya.db");
+    const locatorFromProcess = execFileSync(process.execPath, [locator], {
+      cwd: launchCwd,
+      env: envWithProcessDataDir,
+      encoding: "utf8"
+    });
+    expect(locatorFromProcess.trim().split("\t")).toEqual([configDir, expectedFromProcess]);
   });
 });

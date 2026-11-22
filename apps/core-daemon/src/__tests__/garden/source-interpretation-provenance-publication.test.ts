@@ -119,18 +119,12 @@ it("persists explicit semantic provenance without admitting its excerpt as anoth
   expect(fixture.stores.listSpans(WORKSPACE_ID)).toEqual(spans);
   expect(fixture.stores.getCurrentRecord(WORKSPACE_ID, original.record.content_digest)).toBeNull();
   expect(fixture.stores.getStoredRecord(WORKSPACE_ID, original.record.identity)?.content_bytes).toBe(SOURCE);
-  expect(fixture.stores.listFactors(WORKSPACE_ID)).toEqual([]);
-  expect(fixture.stores.listIncidences(WORKSPACE_ID)).toEqual([]);
   expect(fixture.notifications.map(row => row.event_type)).toEqual([
     "soul.field.source_record.admitted", "soul.evidence.created"
   ]);
   expect(fixture.database.connection.prepare(
     "SELECT source_provenance FROM evidence_capsules WHERE object_id = ?")
     .get(publication.evidence.object_id)).toEqual({ source_provenance: 1 });
-  for (const table of ["evidence_fact_frame_formations", "evidence_semantic_factor_formations"]) {
-    expect(fixture.database.connection.prepare(`SELECT evidence_object_id FROM ${table} WHERE evidence_object_id = ?`)
-      .get(publication.evidence.object_id)).toEqual({ evidence_object_id: publication.evidence.object_id });
-  }
   fixture.database.close();
   databases.delete(fixture.database);
   const reopened = await openFixture(filename);
@@ -143,10 +137,11 @@ it("persists explicit semantic provenance without admitting its excerpt as anoth
 
   const ordinary = await reopened.evidenceService.create(createEvidenceInput({
     source_hash: "ordinary-source", excerpt: "Ordinary evidence body.",
-    semantic_anchor: publication.evidence.semantic_anchor
-  }), [], undefined, undefined, undefined, () => {
-    expect(reopened.database.connection.inTransaction).toBe(true);
-  });
+    semantic_anchor: publication.evidence.semantic_anchor,
+    assertSourceCurrent: () => {
+      expect(reopened.database.connection.inTransaction).toBe(true);
+    }
+  }));
   expect(reopened.stores.listStoredRecords(WORKSPACE_ID)).toHaveLength(2);
   const ordinaryRecord = reopened.stores.getCurrentRecord(WORKSPACE_ID, "ordinary-source");
   expect(ordinaryRecord?.evidence_object_id).toBe(ordinary.object_id);
@@ -166,16 +161,18 @@ it("rejects explicit semantic publication when its source changes before the SQL
   const original = await fixture.admission.admit(sourceRequest(), { workspaceId: WORKSPACE_ID });
   const evidenceService: Pick<EvidenceService, "create" | "findByIdScoped"> = {
     findByIdScoped: fixture.evidenceService.findByIdScoped.bind(fixture.evidenceService),
-    async create(...args) {
+    async create(input, projections) {
       await fixture.admission.admit(sourceRequest("User: Alice uses apps.", "2", "2026-09-15T00:00:00.000Z"),
         { workspaceId: WORKSPACE_ID });
-      const current = args[5];
+      const current = input.assertSourceCurrent;
       expect(current).toBeTypeOf("function");
-      args[5] = () => {
-        expect(fixture.database.connection.inTransaction).toBe(true);
-        current?.();
-      };
-      return await fixture.evidenceService.create(...args);
+      return await fixture.evidenceService.create({
+        ...input,
+        assertSourceCurrent: () => {
+          expect(fixture.database.connection.inTransaction).toBe(true);
+          current?.();
+        }
+      }, projections);
     }
   };
   const owner = { ...fixture.owner, evidenceService };

@@ -26,7 +26,7 @@ import {
 } from "./dispatch/invalid-task-quarantine.js";
 import { buildTaskFailureCompletionEvent } from "./dispatch/task-failure-completion-event.js";
 import {
-  buildCoolingKey,
+  buildCoolingKeys,
   countByStatus,
   gardenTaskRoutingError,
   parseIsoTimestampMs,
@@ -51,11 +51,9 @@ export type {
   GardenSchedulerConfig,
   GardenSchedulerEventLogPort,
   GardenTaskBacklogCount,
-  GardenTaskClaimResult,
   GardenTaskEventInput,
   GardenTaskRepoPort,
-  GardenTaskRow,
-  GardenTaskStatus
+  GardenTaskRow
 } from "./scheduler-types.js";
 
 export const MAX_PENDING_BACKLOG_WARNING_TRANSITIONS = 32;
@@ -318,8 +316,8 @@ export class GardenScheduler {
 
     if (success && result.tier === GardenTier.TIER_1) {
       this.pruneExpiredCoolingEntries(nowIso);
-      for (const ref of result.objects_affected) {
-        this.coolingMap.set(buildCoolingKey(result.task_kind, ref), nowIso);
+      for (const key of buildCoolingKeys(result.task_kind, result.objects_affected, result.workspace_id)) {
+        this.coolingMap.set(key, nowIso);
       }
     }
   }
@@ -357,9 +355,12 @@ export class GardenScheduler {
   }
 
   private isCooling(task: GardenTaskDescriptor, nowIso: string): boolean {
-    const targetRef = task.target_object_refs[0] ?? task.workspace_id;
-    const lastRunAt = this.coolingMap.get(buildCoolingKey(task.task_kind, targetRef));
+    const keys = buildCoolingKeys(task.task_kind, task.target_object_refs, task.workspace_id);
+    return keys.some((key) => this.isCoolingKeyActive(key, nowIso));
+  }
 
+  private isCoolingKeyActive(key: string, nowIso: string): boolean {
+    const lastRunAt = this.coolingMap.get(key);
     if (lastRunAt === undefined) {
       return false;
     }

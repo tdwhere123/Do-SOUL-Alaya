@@ -21,7 +21,7 @@ export function interpretationCoverage(
   return open ? "open" : "complete";
 }
 
-export function interpretationHasOpenHoles(
+function interpretationHasOpenHoles(
   status: QueryInterpretationStatus,
   interpretation?: InterpretationOpenMaterial
 ): boolean {

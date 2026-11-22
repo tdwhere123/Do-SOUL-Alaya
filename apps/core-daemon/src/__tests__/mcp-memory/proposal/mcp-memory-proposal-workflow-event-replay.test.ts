@@ -217,8 +217,8 @@ describe("mcp memory proposal workflow — event_log audit replay", () => {
         reviewer_token: "reviewer-token"
       },
       // Human-reviewer surface (runId: null) — exercises the loosened
-      // context check on a real repo (Inspector / `alaya review`).
-      { workspaceId: "ws-utf8", runId: null, agentTarget: "inspector", sessionId: "session-1" }
+      // context check on a real repo (HTTP reviewer / `alaya review`).
+      { workspaceId: "ws-utf8", runId: null, agentTarget: "http-reviewer", sessionId: "session-1" }
     );
 
     const replayed = await eventLogRepo.queryByEntity("proposal", created.proposal_id);

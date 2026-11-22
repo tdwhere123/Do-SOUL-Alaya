@@ -1,9 +1,10 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FieldGenerationEventType,
+  MemoryGovernanceEventType,
   ProposalResolutionState,
   WorkspaceKind,
   WorkspaceState,
@@ -42,7 +43,7 @@ afterEach(() => {
 });
 
 describe("privacy erase proposal review", () => {
-  it("applies the source closure only when the review accepts", async () => {
+  it.each(["cli", "http-reviewer"])("applies the source closure on runless %s approval", async (agentTarget) => {
     const harness = createHarness();
     const created = await proposePrivacyErase(harness.workflow);
 
@@ -54,7 +55,8 @@ describe("privacy erase proposal review", () => {
     await expect(harness.proposalRepo.findPendingSummaries(WORKSPACE_ID)).resolves.toMatchObject([
       { proposal_operation: "privacy_erase", target_object_kind: "source_record" }
     ]);
-    await expect(acceptPrivacyErase(harness.workflow, created.proposal_id)).resolves.toEqual({
+    await expect(harness.workflow.reviewMemoryProposal(reviewRequest(created.proposal_id, "accept"),
+      { ...reviewContext(null), agentTarget })).resolves.toEqual({
       proposal_id: created.proposal_id,
       resolution_state: ProposalResolutionState.ACCEPTED
     });
@@ -78,10 +80,18 @@ describe("privacy erase proposal review", () => {
       payload_json: { receipt_identity: eraseReceiptIdentity() }
     });
     expect(readEffectDecision(harness.database)).toMatchObject({
+      run_id: null,
       action: "erase",
       target: RECORD_ID,
       decision: "allow",
       witness_kinds: ["actor_authority", "confirmation"]
+    });
+    const review = (await harness.eventLogRepo.queryByEntity("proposal", created.proposal_id))
+      .find((event) => event.event_type === MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED);
+    expect(review).toMatchObject({ caused_by: "reviewer", workspace_id: WORKSPACE_ID, run_id: null,
+      payload_json: { to_state: "accepted", run_id: null } });
+    expect(readEffectDecision(harness.database)).toMatchObject({
+      supporting_proof_witnesses_json: expect.stringContaining(review!.event_id)
     });
     expect(countEventType(
       harness.database,
@@ -224,9 +234,15 @@ describe("privacy erase proposal review", () => {
     expect(countRows(harness.database, "proof_effect_decisions")).toBe(0);
   });
 
-  it("rolls back a review that lacks run-bound durable authority", async () => {
+  it("rolls back a runless review whose durable approval has a different reviewer", async () => {
     const harness = createHarness();
     const created = await proposePrivacyErase(harness.workflow, null);
+    const accept = harness.proposalRepo.acceptPendingPrivacyEraseWithEvents.bind(harness.proposalRepo);
+    vi.spyOn(harness.proposalRepo, "acceptPendingPrivacyEraseWithEvents")
+      .mockImplementation((id, updatedAt, events, mutation, options) => accept(
+        id, updatedAt, events.map((event) => event.event_type === MemoryGovernanceEventType.SOUL_REVIEW_COMPLETED
+          ? { ...event, caused_by: "different-reviewer" } : event), mutation, options
+      ));
 
     await expect(harness.workflow.reviewMemoryProposal(
       reviewRequest(created.proposal_id, "accept"),
@@ -339,7 +355,7 @@ function reviewContext(runId: string | null = RUN_ID) {
   return {
     workspaceId: WORKSPACE_ID,
     runId,
-    agentTarget: "inspector",
+    agentTarget: "http-reviewer",
     sessionId: "session-1"
   } as const;
 }
@@ -380,7 +396,7 @@ function countRows(database: StorageDatabase, table: string): number {
 
 function readEffectDecision(database: StorageDatabase): unknown {
   const row = database.connection.prepare(`
-    SELECT action, target, decision, supporting_proof_witnesses_json
+    SELECT run_id, action, target, decision, supporting_proof_witnesses_json
     FROM proof_effect_decisions LIMIT 1
   `).get() as {
     readonly action: string;

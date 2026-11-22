@@ -9,7 +9,7 @@ export type LexicalRawRankLaneId =
   | "object_key_porter"
   | "object_key_trigram";
 
-export const LEXICAL_LANE_UNIVERSE_PRODUCER_ID =
+const LEXICAL_LANE_UNIVERSE_PRODUCER_ID =
   "alaya.storage.lexicalLaneEvaluatedUniverse.v1";
 
 export const LEXICAL_LANE_INDEX_KIND = Object.freeze({
@@ -23,7 +23,7 @@ export const LEXICAL_LANE_INDEX_KIND = Object.freeze({
 export type LexicalLaneIndexKind =
   typeof LEXICAL_LANE_INDEX_KIND[LexicalRawRankLaneId];
 
-export type LexicalLaneUniverseApplicability =
+type LexicalLaneUniverseApplicability =
   | Readonly<{ readonly applicable: true }>
   | Readonly<{ readonly applicable: false; readonly reason: "no_tokens_routed" }>;
 
@@ -109,7 +109,7 @@ export function sealLexicalLaneEvaluatedUniverse(input: Readonly<{
   }));
 }
 
-export function lexicalLaneUniverseDigestPreimage(
+function lexicalLaneUniverseDigestPreimage(
   witness: Omit<LexicalLaneEvaluatedUniverseWitness, "universe_digest">
 ): string {
   return JSON.stringify({

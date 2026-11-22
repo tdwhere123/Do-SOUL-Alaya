@@ -91,7 +91,7 @@ describe("bench conditional field index response", () => {
   it("keeps the raw logical index when the payload budget truncates encoding", () => {
     const result = fixture();
     const tight = { ...policy, fine_assessment: { ...policy.fine_assessment,
-      budgets: { ...policy.fine_assessment.budgets, max_total_tokens: 2 } } };
+      budgets: { ...policy.fine_assessment.budgets, max_total_tokens: 2 * Buffer.byteLength("[payload omitted]") } } };
     const rows = encodeBenchRecallResults(result, tight);
     const response = buildBenchRecallResponse("delivery", rows, result, budget);
     expect(rows.map((row) => row.object_id)).toEqual(["first", "second"]);
@@ -129,15 +129,16 @@ describe("bench conditional field index response", () => {
     const requiredMetadataBytes = Buffer.byteLength(JSON.stringify({
       evidencePointers: rows[0]!.evidence_pointers, stagedWarnings: rows[0]!.staged_warnings
     }));
+    const omittedBytes = Buffer.byteLength("[payload omitted]");
     const tight = { ...policy, fine_assessment: { ...policy.fine_assessment,
-      budgets: { ...policy.fine_assessment.budgets, max_total_tokens: requiredMetadataBytes } } };
+      budgets: { ...policy.fine_assessment.budgets, max_total_tokens: requiredMetadataBytes + 2 * omittedBytes } } };
     const tightRows = encodeBenchRecallResults(result, tight);
     expect(tightRows.map((row) => row.object_id)).toEqual(["first", "second"]);
     expect(tightRows.every((row) => row.content_preview === "[payload omitted]")).toBe(true);
     expect(tightRows[0]?.evidence_pointers).toEqual(rows[0]!.evidence_pointers);
     expect(tightRows[0]?.staged_warnings).toEqual(rows[0]!.staged_warnings);
     const insufficient = { ...tight, fine_assessment: { ...tight.fine_assessment,
-      budgets: { ...tight.fine_assessment.budgets, max_total_tokens: requiredMetadataBytes - 1 } } };
+      budgets: { ...tight.fine_assessment.budgets, max_total_tokens: requiredMetadataBytes + omittedBytes - 1 } } };
     const omitted = encodeBenchRecallResults(result, insufficient);
     expect(omitted).toEqual([]);
     expect(frameEncodedIndex(result.index, omitted).completeness.payload).toBe("omitted");

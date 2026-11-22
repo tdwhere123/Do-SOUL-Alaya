@@ -5,6 +5,7 @@ import {
   bindProcessWorkspaceIds,
   ensureLiveWorkspaceGrant,
   extractWorkspaceIdFromUnknown,
+  resolveWorkspaceGrantScope,
   type RequestTokenProtection
 } from "../../runtime/request-token-binding.js";
 
@@ -239,5 +240,19 @@ describe("request token workspace binding", () => {
     expect(before.ok).toBe(false);
     expect(after.ok).toBe(true);
     expect(other.ok).toBe(false);
+  });
+
+  it("fails closed to an empty allowlist when request grant is missing and allows all only on explicit *", () => {
+    expect(resolveWorkspaceGrantScope(undefined)).toEqual({
+      kind: "allowlist",
+      workspaceIds: []
+    });
+    expect(
+      resolveWorkspaceGrantScope({
+        token: PROCESS_TOKEN,
+        workspaceIds: "*",
+        allowProcessSecretPatch: false
+      })
+    ).toEqual({ kind: "all" });
   });
 });

@@ -67,6 +67,24 @@ it.each(["[payload omitted]", "[payload omitted] trailing text"])(
     expect(encoded[0]?.payload_available).toBe(true);
   });
 
+it.each(["literal", "page_delta"] as const)("charges the whole omission marker in a %s page", disclosure_codec => {
+  const entry = sourceIndexEntry({ workspace_id: "workspace", root_kind: "source_record", root_id: "omitted",
+    source_version: "1", content_digest: `sha256:${"c".repeat(64)}`, evidence_object_id: null,
+    association_milligrades: 500, hypothesis_id: "source", output_binding: "source", program_state: "matched", time_state: "current" });
+  const page: InformationIndex = { ...index, entries: [entry], as_of: request.as_of,
+    representation: { ...index.representation, disclosure_codec } };
+  const text = "界";
+  const previews = new Map([[indexEntryCacheKey(entry), text]]);
+  const overhead = encodeIndexResults(page, previews)[0]!.budget_state.token_estimate - Buffer.byteLength(text);
+  const cost = overhead + Buffer.byteLength("[payload omitted]");
+  expect(encodeIndexResults(page, previews, overhead + 1)).toEqual([]);
+  expect(encodeIndexResults(page, new Map(), cost - 1)).toEqual([]);
+  expect(encodeIndexResults(page, new Map(), cost)).toMatchObject([{
+    content_preview: "[payload omitted]", payload_available: false,
+    budget_state: { token_estimate: cost, remaining_tokens: 0 }
+  }]);
+});
+
 it.each(["interrupted", "unknown", "invalidated", "unavailable", "resource_rejected", "cancelled", "omitted"] as const)(
   "preserves explicit payload %s through service and public encoders", payload => {
     const entry = sourceIndexEntry({ workspace_id: "workspace", root_kind: "source_record", root_id: "empty",

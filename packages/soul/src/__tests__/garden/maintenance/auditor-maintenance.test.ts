@@ -280,8 +280,8 @@ function createAuditor(options: {
   };
   const greenMaintenancePort = {
     findExpiringGreenStatuses: vi.fn(async () => options.expiringStatuses ?? []),
-    renewGreenPassiveStable: vi.fn(async () => undefined),
-    requestActiveVerification: vi.fn(async () => undefined),
+    renewGreenPassiveStable: vi.fn(() => true),
+    requestActiveVerification: vi.fn(() => true),
     revokeGreen: vi.fn(() => ({ affected: options.revokeAffected ?? 1 }))
   };
   const bootstrappingPort = {

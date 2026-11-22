@@ -40,8 +40,7 @@ export function withCapContractConflict(
 export {
   completenessForInterpretationStatus,
   interpretationCoverage,
-  interpretationCoverageOf,
-  interpretationMayEmitCompleteEmpty
+  interpretationCoverageOf
 } from "../engine/interpretation-coverage.js";
 import {
   classifyResidualInfluence,
@@ -52,15 +51,10 @@ import {
   type ResidualClassificationContext
 } from "./residual-influence.js";
 
-export type { ResidualClassificationContext } from "./residual-influence.js";
 export {
   classifyResidualInfluence,
-  coverageRoleOf,
-  residualAffectsGrade,
   residualGradeUpper,
-  residualsInvalidateBounds,
-  semanticEffectsOf,
-  sufficientAlternatePaths
+  residualsInvalidateBounds
 } from "./residual-influence.js";
 
 export type ObserverCoverage = Readonly<{

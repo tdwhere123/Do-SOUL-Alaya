@@ -12,8 +12,6 @@ import {
   type CandidateMemorySignal,
   type EvidenceCapsule,
   type GardenSourceTurnFallbackVerifiedReceipt,
-  type OpenSemanticFactorFormationCapture,
-  type EvidenceFactFrameFormationCapture
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../../sqlite/refreshable-statement-holder.js";
@@ -33,10 +31,6 @@ import {
   readQualifiedProjectionIndex,
   type StoredProjectionRow
 } from "./qualification/qualified-evidence-projection.js";
-import { readStoredSemanticFactorFormation } from
-  "./qualification/semantic-factor-formation-read.js";
-import { readStoredFactFrameFormation } from
-  "./qualification/fact-frame-formation-read.js";
 import { matchesVerifiedAssertionReceipt } from
   "./qualification/verified-assertion-receipt-proof.js";
 import {
@@ -145,9 +139,7 @@ export class RecallQualifiedEvidenceReader {
         candidate.capsule,
         proof.turnReceipt,
         projections,
-        candidate.signalId === null ? undefined : signals.get(candidate.signalId),
-        candidate.semanticFactorFormation,
-        candidate.factFrameFormation
+        candidate.signalId === null ? undefined : signals.get(candidate.signalId)
       );
       return qualified === null ? [] : [qualified];
     });
@@ -227,57 +219,10 @@ function readEvidenceCandidate(
     const signalId = row.source_signal_id ?? readGardenSourceTurnFallbackArtifactSignalId(
       capsule.physical_anchor?.artifact_ref ?? null
     );
-    const factFrameFormation = readFactFrameFormation(row, capsule);
-    const semanticFactorFormation = readSemanticFactorFormation(
-      row, capsule, factFrameFormation
-    );
-    return matchesEvidenceEnvelope(capsule)
-      ? {
-          capsule,
-          signalId,
-          ...(semanticFactorFormation === undefined ? {} : { semanticFactorFormation }),
-          ...(factFrameFormation === undefined ? {} : { factFrameFormation })
-        }
-      : null;
+    return matchesEvidenceEnvelope(capsule) ? { capsule, signalId } : null;
   } catch (error) {
-    if (error instanceof EvidenceProjectionIntegrityError) throw error;
     parse.recordSkip();
     throw error;
-  }
-}
-
-function readFactFrameFormation(
-  row: EvidenceQualificationRow,
-  capsule: Readonly<EvidenceCapsule>
-): Readonly<EvidenceFactFrameFormationCapture> | undefined {
-  if (capsule.source_hash === null) return undefined;
-  try {
-    return readStoredFactFrameFormation(row, capsule.workspace_id, capsule.source_hash, capsule.excerpt);
-  } catch (error) {
-    throw new EvidenceProjectionIntegrityError(
-      capsule.object_id,
-      error instanceof Error ? error.message : "invalid fact-frame formation capture"
-    );
-  }
-}
-
-function readSemanticFactorFormation(
-  row: EvidenceQualificationRow,
-  capsule: Readonly<EvidenceCapsule>,
-  factFrame: Readonly<EvidenceFactFrameFormationCapture> | undefined
-): Readonly<OpenSemanticFactorFormationCapture> | undefined {
-  try {
-    return readStoredSemanticFactorFormation(
-      row,
-      capsule.workspace_id,
-      capsule.excerpt,
-      factFrame
-    );
-  } catch (error) {
-    throw new EvidenceProjectionIntegrityError(
-      capsule.object_id,
-      error instanceof Error ? error.message : "invalid semantic factor formation capture"
-    );
   }
 }
 

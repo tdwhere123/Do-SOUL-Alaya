@@ -16,7 +16,7 @@ parentPort.on("message", ({ id, operation, payload }) => {
     let result = null;
     if (operation === "snapshot.beginDeferred") database.exec("BEGIN DEFERRED");
     if (operation === "snapshot.rollback") database.exec("ROLLBACK");
-    if (operation === "memory.findByWorkspaceId") result = [];
+    if (operation === "constraints.findActive") result = { constraints: [], total_count: 0 };
     if (operation === "conditionalField.recall") {
       const details = payload.kind === "absent" ? undefined
         : { owner: { label: "private-owner-evidence", token: "fixture-sensitive-token" },

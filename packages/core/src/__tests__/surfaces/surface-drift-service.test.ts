@@ -114,7 +114,7 @@ describe("SurfaceDriftService", () => {
   });
 
   it("releases lease via durable repo", async () => {
-    const deleteSyncSpy = vi.fn();
+    const deleteSyncSpy = vi.fn(() => true);
     const service = new SurfaceDriftService({
       leaseRepo: createLeaseRepo({
         findActiveById: vi.fn(async () => createLease()),
@@ -125,7 +125,7 @@ describe("SurfaceDriftService", () => {
 
     await service.releaseLease("lease-1", "workspace-1", "user");
 
-    expect(deleteSyncSpy).toHaveBeenCalledWith("lease-1");
+    expect(deleteSyncSpy).toHaveBeenCalledWith("lease-1", "workspace-1", "user");
   });
 
   it("releases an existing lease with EventLog-first mutation ordering", async () => {
@@ -134,6 +134,7 @@ describe("SurfaceDriftService", () => {
       findActiveById: vi.fn(async () => createLease()),
       delete: vi.fn(() => {
         order.push("repo_delete");
+        return true;
       })
     });
     const appendManyWithMutationSpy = vi.fn(async (
@@ -154,7 +155,7 @@ describe("SurfaceDriftService", () => {
 
     expect(order).toEqual(["event_log", "repo_delete"]);
     expect(repo.findActiveById).toHaveBeenCalledWith("workspace-1", "lease-1");
-    expect(repo.delete).toHaveBeenCalledWith("lease-1");
+    expect(repo.delete).toHaveBeenCalledWith("lease-1", "workspace-1", "user");
     expect(appendManyWithMutationSpy).toHaveBeenCalledWith(
       [
         expect.objectContaining({
@@ -306,7 +307,7 @@ describe("SurfaceDriftService", () => {
     });
     const repo = createLeaseRepo({
       findActiveById: vi.fn(async () => createLease()),
-      delete: vi.fn()
+      delete: vi.fn(() => true)
     });
     const service = new SurfaceDriftService({
       now: () => "2026-04-20T08:01:00.000Z",
@@ -469,14 +470,14 @@ function createLeaseRepo(overrides: Partial<{
     workspaceId: string,
     leaseId: string
   ) => Promise<Readonly<GovernanceDriftLease> | null>;
-  delete: (leaseId: string) => void;
+  delete: (leaseId: string, workspaceId: string, grantedTo: string) => boolean;
   deleteExpired: (beforeDate: string) => number;
 }> = {}) {
   return {
     create: overrides.create ?? vi.fn((lease: Readonly<GovernanceDriftLease>) => lease),
     findActive: overrides.findActive ?? vi.fn(async () => []),
     findActiveById: overrides.findActiveById ?? vi.fn(async () => null),
-    delete: overrides.delete ?? vi.fn(),
+    delete: overrides.delete ?? vi.fn(() => true),
     deleteExpired: overrides.deleteExpired ?? vi.fn(() => 0)
   };
 }

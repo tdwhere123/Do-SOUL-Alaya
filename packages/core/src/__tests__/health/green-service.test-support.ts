@@ -139,6 +139,7 @@ export function createHarness(options: {
       upsert: upsertStatus
     },
     memoryRepo: {
+      findByIdSync: (objectId) => memories.get(objectId) ?? null,
       findById: vi.fn(async (objectId: string) =>
         memories.has(objectId) ? Object.freeze({ ...memories.get(objectId)! }) : null
       )

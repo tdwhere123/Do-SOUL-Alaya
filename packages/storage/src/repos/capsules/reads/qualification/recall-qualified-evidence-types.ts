@@ -1,14 +1,9 @@
 import type {
   CandidateMemorySignal,
   EvidenceCapsule,
-  EvidenceFactFrameFormationCapture,
-  GardenSourceTurnFallbackVerifiedReceipt,
-  OpenSemanticFactorFormationCapture
+  GardenSourceTurnFallbackVerifiedReceipt
 } from "@do-soul/alaya-protocol";
 import type { EvidenceCapsuleRow } from "../../mappers/evidence-capsule-mappers.js";
-import type { StoredFactFrameFormationColumns } from "./fact-frame-formation-read.js";
-import type { StoredSemanticFactorFormationColumns } from
-  "./semantic-factor-formation-read.js";
 
 export interface StoredSignalRow {
   readonly signal_id: string;
@@ -44,16 +39,13 @@ export interface StoredMaterializationRow {
   readonly payload_json: string;
 }
 
-export interface EvidenceQualificationRow extends EvidenceCapsuleRow,
-  StoredSemanticFactorFormationColumns, StoredFactFrameFormationColumns {
+export interface EvidenceQualificationRow extends EvidenceCapsuleRow {
   readonly source_signal_id: string | null;
 }
 
 export interface EvidenceCandidate {
   readonly capsule: Readonly<EvidenceCapsule>;
   readonly signalId: string | null;
-  readonly semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>;
-  readonly factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>;
 }
 
 export interface QualificationInputs {

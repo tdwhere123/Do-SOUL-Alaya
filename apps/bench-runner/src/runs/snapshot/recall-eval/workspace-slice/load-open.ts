@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   bindEmbeddingOverlayIfPresent,
   detachEmbeddingOverlay,
@@ -21,32 +22,66 @@ export function loadSliceIntoOpenDatabase(
   live: StorageDatabase,
   sliceDbPath: string
 ): void {
-  const triggers = readTriggers(live);
-  // TEMP overlay views must not shadow main table DML during slice replace.
-  detachEmbeddingOverlay(live.connection);
+  if (live.connection.inTransaction) {
+    throw new AlayaError("CONFLICT", "Workspace slice replacement requires a top-level SQLite transaction");
+  }
   const catalog = classifyPackedTables(createSqliteCatalogReader(live.connection));
-  dropTriggers(live, triggers);
-  live.connection.pragma("foreign_keys = OFF");
-  let attached = false, replaced = false;
+  const triggers = readTriggers(live);
+  const foreignKeys = live.connection.pragma("foreign_keys", { simple: true });
+  let primaryError: unknown = null;
+  let hasPrimaryError = false;
+  let attached = false;
   try {
+    // TEMP overlay views must not shadow main table DML during slice replace.
+    detachEmbeddingOverlay(live.connection);
+    live.connection.pragma("foreign_keys = OFF");
     attachSlice(live, sliceDbPath);
     attached = true;
-    replaceAttachedTables(live, catalog);
-    replaced = true;
+    live.connection.transaction(() => {
+      dropTriggers(live, triggers);
+      replaceAttachedTables(live, catalog);
+      // The lexical rebuild installs its own domain triggers.
+      restoreTriggers(live, triggers.filter((trigger) => !isLexicalDomainTrigger(trigger.name)));
+    })();
     // Unqualified ANALYZE writes sqlite_stat on every attached schema, including the sealed slice.
     live.connection.exec("ANALYZE main");
+  } catch (error) {
+    primaryError = error;
+    hasPrimaryError = true;
+    throw error;
   } finally {
-    if (attached) {
-      try {
-        detachSlice(live);
-      } catch {
-        // Keep FK/trigger restore even if DETACH fails.
-      }
+    cleanupSliceLoad(live, attached, foreignKeys, hasPrimaryError, primaryError);
+  }
+}
+
+function cleanupSliceLoad(
+  live: StorageDatabase,
+  attached: boolean,
+  foreignKeys: unknown,
+  hasPrimaryError: boolean,
+  primaryError: unknown
+): void {
+  const cleanupErrors: unknown[] = [];
+  const runCleanup = (step: () => void) => {
+    try {
+      step();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
     }
-    live.connection.pragma("foreign_keys = ON");
-    // Domain triggers are rebuilt with the replacement rows, never restored from the old workspace set.
-    restoreTriggers(live, replaced ? triggers.filter(trigger => !isLexicalDomainTrigger(trigger.name)) : triggers);
-    bindEmbeddingOverlayIfPresent(live.connection, live.filename);
+  };
+  if (attached) runCleanup(() => detachSlice(live));
+  runCleanup(() => live.connection.pragma(foreignKeys === 1 ? "foreign_keys = ON" : "foreign_keys = OFF"));
+  runCleanup(() => bindEmbeddingOverlayIfPresent(live.connection, live.filename));
+  if (cleanupErrors.length === 0) return;
+  const cleanupSummary =
+    cleanupErrors.length === 1
+      ? cleanupErrors[0]
+      : new AggregateError(cleanupErrors, "Workspace slice cleanup failed");
+  if (!hasPrimaryError) {
+    throw cleanupSummary;
+  }
+  if (primaryError instanceof Error && Object.isExtensible(primaryError) && primaryError.cause === undefined) {
+    primaryError.cause = cleanupSummary;
   }
 }
 
@@ -61,24 +96,13 @@ function detachSlice(live: StorageDatabase): void {
 }
 
 function replaceAttachedTables(live: StorageDatabase, catalog: ClassifiedCatalog): void {
-  live.connection.exec("BEGIN");
-  try {
-    for (const table of catalog.workspace) {
-      replaceAttachedTable(live, table.name);
-    }
-    for (const table of catalog.global) {
-      applyAttachedGlobalTable(live, table.name, table.policy);
-    }
-    rebuildWorkspaceFts(live.connection, catalog.ftsVirtual);
-    live.connection.exec("COMMIT");
-  } catch (error) {
-    try {
-      live.connection.exec("ROLLBACK");
-    } catch {
-      // live may already be rolled back
-    }
-    throw error;
+  for (const table of catalog.workspace) {
+    replaceAttachedTable(live, table.name);
   }
+  for (const table of catalog.global) {
+    applyAttachedGlobalTable(live, table.name, table.policy);
+  }
+  rebuildWorkspaceFts(live.connection, catalog.ftsVirtual);
 }
 
 function applyAttachedGlobalTable(

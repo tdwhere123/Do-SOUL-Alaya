@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PNPM_VERSION: '12.3.4'
@@ -466,18 +466,19 @@ jobs:
     name: CLI install surface smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [quality-ubuntu, quality-macos, quality-windows, install-smoke-check]
+    needs: [quality-ubuntu, quality-macos, quality-windows, install-smoke-check, content-contracts]
     if: always()
     env:
       QUALITY_UBUNTU_RESULT: ${{ needs.quality-ubuntu.result }}
       QUALITY_MACOS_RESULT: ${{ needs.quality-macos.result }}
       QUALITY_WINDOWS_RESULT: ${{ needs.quality-windows.result }}
       INSTALL_SMOKE_RESULT: ${{ needs.install-smoke-check.result }}
+      CONTENT_CONTRACTS_RESULT: ${{ needs.content-contracts.result }}
     steps:
       - name: Require quality and install smoke success
         shell: bash
         run: |
-          for result in "$QUALITY_UBUNTU_RESULT" "$QUALITY_MACOS_RESULT" "$QUALITY_WINDOWS_RESULT" "$INSTALL_SMOKE_RESULT"; do
+          for result in "$QUALITY_UBUNTU_RESULT" "$QUALITY_MACOS_RESULT" "$QUALITY_WINDOWS_RESULT" "$INSTALL_SMOKE_RESULT" "$CONTENT_CONTRACTS_RESULT"; do
             if [[ "$result" != "success" ]]; then
               echo "Required CI job finished as: $result"
               exit 1

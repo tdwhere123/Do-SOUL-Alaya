@@ -197,7 +197,6 @@ describe("cli registration", () => {
       "doctor",
       "status",
       "install",
-      "inspect",
       "update",
       "attach",
       "detach",

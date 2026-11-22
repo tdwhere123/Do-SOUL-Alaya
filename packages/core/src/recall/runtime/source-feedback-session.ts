@@ -244,7 +244,6 @@ export function createSourceFeedbackSession(input: SourceFeedbackSessionInput) {
   }
   return { next, accept, finish, stop };
 }
-export type SourceFeedbackSession = ReturnType<typeof createSourceFeedbackSession>;
 
 function copyOwnEnumerableCauseExtras(target: object, source: object): void {
   for (const key of Object.keys(source)) {

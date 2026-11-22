@@ -405,7 +405,9 @@ describe("SqliteEvidenceCapsuleRepo", () => {
         expect.objectContaining({ object_id: objectId })
       ]));
 
-    await repo.deleteById(objectId);
+    await repo.deleteById(objectId, "another-workspace");
+    await expect(repo.findById(objectId)).resolves.not.toBeNull();
+    await repo.deleteById(objectId, "workspace-1");
     await expect(repo.searchByKeyword!("workspace-1", "bookshelf IKEA", 10))
       .resolves.not.toEqual(expect.arrayContaining([
         expect.objectContaining({ object_id: objectId })

@@ -1,3 +1,4 @@
+import type { EnvLookup } from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   ArbitrationService,
@@ -62,6 +63,8 @@ export type DaemonServiceFoundationInput = {
   readonly runtimeNotifier: RuntimeNotifier;
   readonly configPaths: AlayaConfigPaths;
   readonly warnLogger: WarnLogger;
+  readonly effectiveEnv?: EnvLookup;
+  readonly processEnv?: EnvLookup;
 } & Pick<
   DaemonRepositories,
   | "workspaceRepo"
@@ -97,8 +100,10 @@ export type DaemonServiceFoundationInput = {
 >;
 
 export async function createDaemonServiceFoundation(input: DaemonServiceFoundationInput) {
-  const environmentFoundation = await createEnvironmentSecurityFoundation(input);
-  const configFoundation = createConfigFoundation(input, environmentFoundation.eventPublisher);
+  const effectiveEnv = input.effectiveEnv ?? processEnvLookup();
+  const configProcessEnv = input.processEnv ?? input.effectiveEnv ?? processEnvLookup();
+  const environmentFoundation = await createEnvironmentSecurityFoundation(input, effectiveEnv);
+  const configFoundation = createConfigFoundation(input, environmentFoundation.eventPublisher, configProcessEnv);
   const knowledgeFoundation = createKnowledgeFoundation(
     input,
     environmentFoundation.eventPublisher
@@ -117,20 +122,24 @@ export async function createDaemonServiceFoundation(input: DaemonServiceFoundati
   };
 }
 
-async function createEnvironmentSecurityFoundation(input: DaemonServiceFoundationInput) {
+async function createEnvironmentSecurityFoundation(
+  input: DaemonServiceFoundationInput,
+  effectiveEnv: EnvLookup
+) {
   const now = () => new Date().toISOString();
   const environmentStatusService = createEnvironmentStatusService({
     toolNames: CORE_DAEMON_ENVIRONMENT_TOOLS,
     getDatabasePath: () => input.database.filename,
-    getFilesDirectory: () => input.filesDirectory
+    getFilesDirectory: () => input.filesDirectory,
+    env: effectiveEnv as NodeJS.ProcessEnv
   });
   const environmentStatus = await environmentStatusService.getStatus();
   const principalCodingAvailability = derivePrincipalCodingAvailability({
-    runtimeConfigured: processEnvLookup().ALAYA_PRINCIPAL_RUNTIME === "claude_code",
+    runtimeConfigured: effectiveEnv.ALAYA_PRINCIPAL_RUNTIME === "claude_code",
     tools: environmentStatus.tools
   });
   const zeroDaySecurityLayer = new ZeroDaySecurityLayer({
-    loadPolicies: async () => parseZeroDayPoliciesJson(processEnvLookup().ZERO_DAY_POLICIES_JSON)
+    loadPolicies: async () => parseZeroDayPoliciesJson(effectiveEnv.ZERO_DAY_POLICIES_JSON)
   });
   const {
     eventPublisher,
@@ -167,12 +176,14 @@ async function createEnvironmentSecurityFoundation(input: DaemonServiceFoundatio
 
 function createConfigFoundation(
   input: DaemonServiceFoundationInput,
-  eventPublisher: ReturnType<typeof createSecurityStatusBootstrapServices>["eventPublisher"]
+  eventPublisher: ReturnType<typeof createSecurityStatusBootstrapServices>["eventPublisher"],
+  configProcessEnv: EnvLookup
 ) {
   const rawConfigService = createConfigService({
     configRepo: input.configRepo,
     eventPublisher,
-    configPathsProvider: () => input.configPaths
+    configPathsProvider: () => input.configPaths,
+    envProvider: () => configProcessEnv as NodeJS.ProcessEnv
   });
   const manifestationBudgetConfigProvider = createManifestationBudgetConfigProvider(input.configRepo);
   const trustStateRecorder = createTrustStateRecorder({

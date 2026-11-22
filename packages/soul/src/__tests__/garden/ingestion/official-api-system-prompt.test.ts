@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import fs, { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { SOURCE_INTERPRETATION_CONTRACT } from "@do-soul/alaya-protocol";
 import { buildOfficialApiExtractionRequests, parseOfficialApiExtractionRequest } from
@@ -246,6 +246,30 @@ describe("official API system prompt", () => {
     expect(g8).not.toContain("kind_projection");
     expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain("kind_projection");
     expect(resolveOfficialApiSystemPrompt("0".repeat(64))).toBeUndefined();
+  });
+
+  it("loads historical prompt files once on the first lookup", async () => {
+    vi.resetModules();
+    const read = vi.spyOn(fs, "readFileSync");
+    const promptReads = () => read.mock.calls.filter(([file]) =>
+      String(file).includes(`${path.sep}historical-prompts${path.sep}`)
+    );
+    try {
+      const { resolveOfficialApiSystemPrompt: resolvePrompt } = await import(
+        "../../../garden/ingestion/official-api/system-prompt.js"
+      );
+      expect(promptReads()).toHaveLength(0);
+
+      const digest = "cdb968269d0585f9144509c9ae6a237ec7caeedb3d176fcea0abbcc29be56da8";
+      const prompt = resolvePrompt(digest);
+      expect(prompt).toContain('"event_time_end":"2021-01-01T00:00:00.000Z"');
+      const readsAfterLookup = promptReads().length;
+      expect(readsAfterLookup).toBeGreaterThan(0);
+      expect(resolvePrompt(digest)).toBe(prompt);
+      expect(promptReads()).toHaveLength(readsAfterLookup);
+    } finally {
+      read.mockRestore();
+    }
   });
 
   it("keys historical prompts by the hash of their read-only files", () => {

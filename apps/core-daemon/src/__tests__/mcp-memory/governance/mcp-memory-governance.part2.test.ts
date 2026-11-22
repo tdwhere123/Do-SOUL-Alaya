@@ -138,7 +138,7 @@ describe("mcp memory governance", () => {
         reviewer_token: "reviewer-token"
       },
       // Human-reviewer surface: runId === null. Workspace matches.
-      { workspaceId: "ws1", runId: null, agentTarget: "inspector", sessionId: "session-1" }
+      { workspaceId: "ws1", runId: null, agentTarget: "http-reviewer", sessionId: "session-1" }
     );
 
     expect(reviewed.resolution_state).toBe(ProposalResolutionState.ACCEPTED);
@@ -184,7 +184,7 @@ describe("mcp memory governance", () => {
           reason: "wrong ws",
           reviewer_identity: "user:bob"
         },
-        { workspaceId: "ws1", runId: null, agentTarget: "inspector", sessionId: "session-1" }
+        { workspaceId: "ws1", runId: null, agentTarget: "http-reviewer", sessionId: "session-1" }
       )
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });

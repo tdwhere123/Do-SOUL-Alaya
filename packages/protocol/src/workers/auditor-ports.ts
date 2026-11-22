@@ -9,6 +9,7 @@ import {
 import { type GardenTaskResult } from "../garden/garden-tier.js";
 import { MemoryDimensionSchema } from "../memory/memory-entry.js";
 import { type OrphanRadar } from "../lifecycle/orphan-radar.js";
+import { GreenStateSchema } from "../governance/green-status.js";
 
 export const StaleMemoryEntrySchema = z
   .object({
@@ -72,7 +73,9 @@ export const ExpiringGreenStatusSchema = z
     green_status_id: NonEmptyStringSchema,
     memory_entry_id: NonEmptyStringSchema,
     dimension: MemoryDimensionSchema,
-    valid_until: NonEmptyStringSchema
+    valid_until: NonEmptyStringSchema,
+    green_state: GreenStateSchema.exclude(["revoked"]),
+    last_transition_at: IsoDatetimeStringSchema
   })
   .strict()
   .readonly();
@@ -146,8 +149,8 @@ export interface AuditorGreenMaintenancePort {
   // SOUL_GREEN_GRACE_REQUESTED EventLog row commit in the same SQLite
   // transaction. The underlying better-sqlite3 ops are sync, so the
   // port surface is sync too.
-  renewGreenPassiveStable(greenStatusId: string, taskId: string): void;
-  requestActiveVerification(greenStatusId: string, taskId: string): void;
+  renewGreenPassiveStable(status: ExpiringGreenStatus, workspaceId: string): boolean;
+  requestActiveVerification(status: ExpiringGreenStatus, workspaceId: string): boolean;
   // invariant: workspaceId is required so the UPDATE cannot match rows in
   // a foreign workspace. Returns affected-row count; callers MUST roll back
   // the corresponding SOUL_GREEN_REVOKED EventLog row when affected === 0

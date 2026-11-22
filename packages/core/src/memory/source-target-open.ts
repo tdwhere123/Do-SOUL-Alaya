@@ -12,7 +12,7 @@ import {
 import { CoreError } from "../shared/errors.js";
 import { projectSourceDisclosure } from "../recall/runtime/source-disclosure.js";
 
-export type OpenSourceRootRow = Readonly<{
+type OpenSourceRootRow = Readonly<{
   readonly kind: "source_record" | "evidence_capsule";
   readonly workspace_id: string;
   readonly root_id: string;
@@ -31,7 +31,7 @@ export type OpenSourceRootRow = Readonly<{
   readonly valid_to?: string | null;
 }>;
 
-export type OpenCurrentSourceTargetResult =
+type OpenCurrentSourceTargetResult =
   | { readonly status: "ok"; readonly row: OpenSourceRootRow }
   | { readonly status: "not_found" }
   | { readonly status: "conflict"; readonly reason: string }
@@ -100,6 +100,9 @@ export async function openWorkspaceSourceTarget(input: Readonly<{
   }
   if (outcome.status === "unavailable") {
     throw new AlayaError("UNAVAILABLE", `Pointer source target read could not complete: ${outcome.reason}`);
+  }
+  if (!outcome.row.content_complete && outcome.row.content_end === startOffset) {
+    throw new AlayaError("VALIDATION", "byte_budget cannot fit the UTF-8 character at start_offset.");
   }
   return buildSourceOpenPointerResponse(outcome.row, input.workspaceId, input.evaluatedAsOf);
 }

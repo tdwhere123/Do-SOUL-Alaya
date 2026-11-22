@@ -3,10 +3,7 @@ import { getSqliteWriteQueuePort, type StorageDatabase } from "../../sqlite/db.j
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
 import { requirePrivacyEventsAvailable } from "../field/privacy-availability.js";
-import {
-  appendInCurrentTransaction as appendEventLogInTransaction,
-  wrapAppendError
-} from "./event-log/writes/event-log-append.js";
+import { getEventLogWriter, insertEventLogEntry } from "./writes/event-log-writer.js";
 import { appendEventLogViaWriteQueue } from "./event-log/writes/queue-append.js";
 import { assertEventLogWriteScope, runSynchronousEventLogTransaction } from "./event-log/writes/synchronous-transaction.js";
 import {
@@ -78,7 +75,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     // directly, because multiple CLI/daemon processes can bootstrap against the same DB.
     const connection = this.activeConnection();
     if (connection.inTransaction) {
-      return this.appendInCurrentTransaction(event);
+      return insertEventLogEntry(getEventLogWriter(connection), event);
     }
 
     const queue = getSqliteWriteQueuePort();
@@ -88,8 +85,8 @@ export class SqliteEventLogRepo implements EventLogRepo {
       return appendEventLogViaWriteQueue(this.db, queue, event);
     }
 
-    const txn = connection.transaction(() => this.appendInCurrentTransaction(event));
-    return txn.immediate();
+    return runSynchronousEventLogTransaction(connection, () =>
+      insertEventLogEntry(getEventLogWriter(connection), event));
   }
 
   public deleteById(eventId: string): void {
@@ -511,11 +508,4 @@ export class SqliteEventLogRepo implements EventLogRepo {
     }
   }
 
-  private appendInCurrentTransaction(event: EventLogAppendInput): EventLogEntry {
-    try {
-      return appendEventLogInTransaction(this.activeStatements(), event);
-    } catch (error) {
-      wrapAppendError(error);
-    }
-  }
 }

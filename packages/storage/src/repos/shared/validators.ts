@@ -1,7 +1,7 @@
 import { SURFACE_URI_PATTERN } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
 export const DEFAULT_REPO_LIST_PAGE_LIMIT = 500;
-export const MAX_REPO_LIST_PAGE_LIMIT = 500;
+const MAX_REPO_LIST_PAGE_LIMIT = 500;
 
 export function parseNonEmptyString(value: string, field: string): string {
   if (value.trim().length === 0) {

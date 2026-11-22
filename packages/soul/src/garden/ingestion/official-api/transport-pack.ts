@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { ReferenceTransportBatchSizeSchema, type ReferenceTransportBatchSize } from "@do-soul/alaya-protocol";
 import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "./extraction-request.js";
 
-export const TRANSPORT_PACK_CONTRACT_VERSION = 1;
+const TRANSPORT_PACK_CONTRACT_VERSION = 1;
 
 export interface PackableAssertion {
   readonly semanticKey: string;

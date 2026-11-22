@@ -94,7 +94,7 @@ export function updateMemoryEntryWithinTransaction(
   fields: MemoryEntryRepoUpdateFields,
   callbacks: {
     readonly beforeUpdate?: () => void;
-    readonly afterUpdate?: () => void;
+    readonly afterUpdate?: (updated: Readonly<MemoryEntry>) => void;
   },
   workspaceId?: string
 ): Readonly<MemoryEntry> {
@@ -104,7 +104,7 @@ export function updateMemoryEntryWithinTransaction(
   return this.transaction(() => {
     callbacks.beforeUpdate?.();
     const updated = runParsedMemoryEntryUpdate(this, objectId, parsedFields, parsedWorkspaceId);
-    callbacks.afterUpdate?.();
+    callbacks.afterUpdate?.(updated);
     return updated;
   }, { immediate: true });
 }

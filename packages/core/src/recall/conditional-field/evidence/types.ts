@@ -9,8 +9,6 @@ import type {
   SupportRecord,
   Witness
 } from "@do-soul/alaya-protocol";
-
-export const CONDITIONAL_FIELD_EVIDENCE_OPERATOR_ID = "conditional-field.evidence.v1" as const;
 export const COMMON_CAUSE_PROPOSITION_KIND = "common_cause" as const;
 
 export const ATTRIBUTABLE_CLAIM_STATUSES: ReadonlySet<ClaimLifecycleState> = new Set([
@@ -26,11 +24,11 @@ export const REFUTING_RELATION_KINDS: ReadonlySet<string> = new Set([
 
 export type EvidencePolarity = "supports" | "refutes";
 export type EvidenceAccess = "eligible" | "ineligible" | "protected";
-export type EvidenceCorrelationState =
+type EvidenceCorrelationState =
   | "same_evidence_unit"
   | "same_source_lineage"
   | "possibly_correlated";
-export type SupportWorkStatus = "complete" | "open";
+type SupportWorkStatus = "complete" | "open";
 
 export type GovernanceReason =
   | "eligible"

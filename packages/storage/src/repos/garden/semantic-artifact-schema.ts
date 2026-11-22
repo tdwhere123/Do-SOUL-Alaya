@@ -4,6 +4,26 @@ import { INDEXED_RECALL_PROJECTION_SCHEMA_SQL, initializeObservableMutationGener
 
 export const SEMANTIC_ARTIFACT_CANDIDATE_SCHEMA_REVISION = 7;
 
+const WORKSPACE_ARTIFACT_TABLES = {
+  task_dependencies: ["garden_semantic_attempts", "garden_semantic_work_claims", "garden_semantic_intents"],
+  projections: [
+    "garden_semantic_bindings", "garden_semantic_artifacts", "garden_semantic_projections",
+    "garden_semantic_fts", "garden_index_revisions", "garden_projection_cursor"
+  ]
+} as const;
+
+/** The dynamic Garden schema may be absent before daemon projection setup. */
+export function deleteGardenSemanticWorkspaceRows(
+  db: SqliteConnection,
+  phase: keyof typeof WORKSPACE_ARTIFACT_TABLES,
+  workspaceId: string
+): void {
+  const installed = new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").pluck().all());
+  for (const table of WORKSPACE_ARTIFACT_TABLES[phase]) {
+    if (installed.has(table)) db.prepare(`DELETE FROM ${table} WHERE workspace_id = ?`).run(workspaceId);
+  }
+}
+
 /** Explicit candidate initialization; the runtime migration ledger remains unchanged. */
 export function initializeSemanticArtifactCandidateSchema(db: SqliteConnection): void {
   db.transaction(() => {

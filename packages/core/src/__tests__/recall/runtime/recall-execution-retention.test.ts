@@ -124,9 +124,12 @@ describe("Recall execution lease retention", () => {
       throw new Error("stale field");
     })).toThrow("stale field");
     expect(store.get("page:a")).toBe(previous);
+    expect(store.valuesForExecution("a", "page:")).toEqual([previous]);
+    expect(store.valuesForExecution("b", "page:")).toEqual([]);
     expect(store.snapshot()).toEqual(before);
     expect(removed).not.toHaveBeenCalled();
     store.invalidate("a");
+    expect(store.valuesForExecution("a", "page:")).toEqual([]);
   });
 
   it("counts the complete retained backing buffer of a small typed-array view", () => {

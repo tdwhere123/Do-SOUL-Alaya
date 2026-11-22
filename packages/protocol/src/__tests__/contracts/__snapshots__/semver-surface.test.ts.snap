@@ -169,9 +169,9 @@ evt:event-log-orphan.ts#EventLogOrphanExpectedTableSchema()#ca9f0f0|enum=trust_c
 evt:event-log-orphan.ts#SoulGardenEventLogOrphanDetectedEventSchema(payload,type)#1263a65
 evt:event-log-orphan.ts#SoulGardenEventLogOrphanDetectedEventTypeSchema()#934e370|enum=soul.garden.event_log_orphan_detected
 evt:event-log-orphan.ts#SoulGardenEventLogOrphanDetectedPayloadSchema(audit_event_id,detected_at,event_type,expected_table)#3b04085
-evt:event-log.ts#EventLogEntrySchema(caused_by,created_at,entity_id,entity_type,event_id,event_type,payload_json,revision,run_id,workspace_id)#f563d14
+evt:event-log.ts#EventLogEntrySchema(caused_by,created_at,entity_id,entity_type,event_id,event_type,payload_json,revision,run_id,workspace_id)#e5e5403
 evt:event-log.ts#EventLogPayloadSchema()#ad99ca4
-evt:event-log.ts#EventTypeSchema()#2016d52
+evt:event-log.ts#EventTypeSchema()#1a77649
 evt:event-log.ts#WorkspaceRunEventTypeSchema()#fc7cb80|enum=engine.response.received|run.created|run.deleted|run.engine_binding.updated|run.message.appended|run.renamed|workspace.created|workspace.default_engine_class.updated|workspace.deleted|workspace.engine_binding.updated
 evt:field-generation.ts#FieldGenerationEventTypeSchema()#bb0cf19|enum=soul.field.effect.decided|soul.field.erase.barrier|soul.field.generation.activated|soul.field.generation.rebuild_started|soul.field.source_record.admitted|soul.field.usage.causal_recorded
 evt:field-generation.ts#SoulFieldEffectDecidedPayloadSchema(action,decision,effective_as_of,occurred_at,request_digest,scope,target,workspace_id)#4e6c547
@@ -196,8 +196,8 @@ evt:file-approval.ts#SoulExplanationProvidedPayloadSchema(explanation,message_id
 evt:file-approval.ts#SoulHintEmittedEventSchema(payload,type)#ab8fab9
 evt:file-approval.ts#SoulHintEmittedPayloadSchema(hint,message_id,source_kind)#ebd58f1
 evt:file-approval.ts#SoulInteractionRiskLevelSchema()#8979484|enum=high|low|medium
-evt:garden.ts#GardenEventTypeSchema()#e4f9ccf|enum=soul.garden.embedding_follow_up|soul.garden.enrich_abandoned|soul.garden.semantic_enrichment|soul.garden.task_claim_reclaimed|soul.garden.task_completed|soul.garden.task_dispatched|soul.garden.task_expired|soul.garden.tier_violation_rejected|soul.health_journal.recorded
-evt:garden.ts#GardenEventUnionSchema()#3369859
+evt:garden.ts#GardenEventTypeSchema()#d6dc745|enum=soul.garden.embedding_follow_up|soul.garden.enrich_abandoned|soul.garden.semantic_enrichment|soul.garden.statement_session.extracted|soul.garden.task_claim_reclaimed|soul.garden.task_completed|soul.garden.task_dispatched|soul.garden.task_expired|soul.garden.tier_violation_rejected|soul.health_journal.recorded
+evt:garden.ts#GardenEventUnionSchema()#8249b72
 evt:garden.ts#SoulEnrichAbandonedEventSchema(payload,type)#856ec77
 evt:garden.ts#SoulEnrichAbandonedPayloadSchema(attempt_count,last_failure_kind,memory_id,occurred_at,run_id,source_signal_id,workspace_id)#bfa9104
 evt:garden.ts#SoulGardenEmbeddingFollowUpEventSchema(payload,type)#8b3b164
@@ -213,8 +213,8 @@ evt:garden.ts#SoulGardenTaskExpiredEventSchema(payload,type)#7e52a53
 evt:garden.ts#SoulGardenTaskExpiredPayloadSchema(enqueued_at,occurred_at,role,run_id,task_id,task_kind,tier,ttl_ms,workspace_id)#ec118b7
 evt:garden.ts#SoulGardenTierViolationRejectedEventSchema(payload,type)#3c18186
 evt:garden.ts#SoulGardenTierViolationRejectedPayloadSchema(occurred_at,required_tier,role_tier,task_id,task_kind,workspace_id)#ee6163f
-evt:garden.ts#SoulHealthJournalRecordedEventSchema(payload,type)#d4e0601
-evt:garden.ts#SoulHealthJournalRecordedPayloadSchema(change_summary,entry_id,event_kind,occurred_at,workspace_id)#23bfe9f
+evt:garden.ts#SoulHealthJournalRecordedEventSchema(payload,type)#626034f
+evt:garden.ts#SoulHealthJournalRecordedPayloadSchema(change_summary,entry_id,event_kind,occurred_at,workspace_id)#54db2d8
 evt:governance-resolution.ts#GovernanceConfirmElectionCompletedPayloadSchema(agent_target,confirmation_event_id,delivery_id,occurred_at,reviewer_identity,run_id,target_object_id,workspace_id)#247b314
 evt:governance-resolution.ts#GovernanceResolutionEventTypeSchema()#cc1eea3|enum=soul.resolution.confirm_applied|soul.resolution.confirm_election_completed|soul.resolution.correct_applied|soul.resolution.defer_applied|soul.resolution.not_relevant_applied|soul.resolution.reject_applied|soul.resolution.stale_applied
 evt:governance-resolution.ts#GovernanceResolutionPayloadSchema(activated_claim_id,agent_target,correction,delivery_id,obligation_id,occurred_at,policy,policy_classification,predecessor_receipt_id,reason,resolution,run_id,successor_receipt_id,target_object_id,workspace_id)#b19acd6
@@ -317,12 +317,7 @@ evt:memory-governance.ts#SoulSynthesisStatusChangedPayloadSchema(caused_by,evide
 evt:memory-governance.ts#TransitionCausedBySchema()#6170fe1|enum=auditor|bootstrap|deterministic_rule|review|system|user
 evt:memory-governance.ts#TransitionRecordSchema(caused_by,evidence_refs,from_state,occurred_at,reason_code,to_state)#a083ade
 evt:message-delta.ts#MessageCompletedEventSchema(content,finishReason,messageId,runId,timestamp,type)#3a0a193
-evt:message-delta.ts#MessageCreatedEventSchema(createdAt,messageId,role,runId)#fd30e7a
-evt:message-delta.ts#MessageDeltaEventSchema(delta,finishReason,index,messageId,runId,timestamp,type)#576b92b
-evt:message-delta.ts#RunErrorEventSchema(errorCode,errorMessage,runId)#d6cf869
-evt:message-delta.ts#RunStateChangedEventSchema(previousState,runId,state)#67beae5
 evt:message-delta.ts#StreamingEventTypeSchema()#75231ef|enum=message.completed|message.delta
-evt:message-delta.ts#StreamingStatusSchema()#ee911f3|enum=completed|error|idle|streaming
 evt:obligation-trust-narrative.ts#DirtyStatePanicEventSchema(payload,type)#f975d74
 evt:obligation-trust-narrative.ts#DirtyStatePanicPayloadSchema(affected_entity_count,dossier_id,panic_source,panic_summary,principal_run_id,trigger,worker_run_id)#6d3d988
 evt:obligation-trust-narrative.ts#NarrativeBudgetExceededEventSchema(payload,type)#fb29ee8
@@ -425,7 +420,7 @@ evt:runtime-governance.ts#PathRelationWeakenedPayloadSchema(contradiction_events
 evt:runtime-governance.ts#RelationAssertionAdmittedPayloadSchema(admitted_at,anchors,assertion_id,evidence_receipts,formation_receipt,relation_kind,validity,workspace_id)#3ba1416
 evt:runtime-governance.ts#RelationAssertionResolvedPayloadSchema(assertion_id,reason,resolution_id,resolution_kind,resolved_at,workspace_id)#a0811f6
 evt:runtime-governance.ts#RuntimeGovernanceEventTypeSchema()#e8bf96d|enum=bootstrapping.paths_planted|canonicalization.alias_resolved|canonicalization.applied|compute.provider_routed|constitutional.fragment_registered|extension.descriptor_registered|extension.descriptor_registration_compensation_failed|extension.descriptor_registration_reverted|extension.governance_checked|extension.tool_discovered|manifestation.budget_evaluated|manifestation.escalation_decided|output.command_compressed|output.shaping_applied|path.consolidation_completed|path.consolidation_fused|path.graph.snapshot_created|path.relation_created|path.relation_dormant|path.relation_legitimacy_updated|path.relation_merged|path.relation_redirected|path.relation_reinforced|path.relation_rejected|path.relation_retired|path.relation_revived|path.relation_weakened|relation.assertion_admitted|relation.assertion_resolved|runtime.side_effect_failed|security.passthrough_initialization_failed|security.passthrough_status_changed|stance.policy_evaluated|stance.resolution_changed|surface.drift_alert|surface.drift_detected|surface.drift_lease_acquired|surface.drift_lease_release_failed|surface.drift_lease_released
-evt:runtime-governance.ts#RuntimeGovernanceEventUnionSchema()#6683d8c
+evt:runtime-governance.ts#RuntimeGovernanceEventUnionSchema()#56282fe
 evt:runtime-governance.ts#RuntimeSideEffectFailedEventSchema(payload,type)#1999e94
 evt:runtime-governance.ts#RuntimeSideEffectFailedPayloadSchema(committed_event_id,error_message,error_name,failed_at,operation,run_id,severity,source,subject_id,subject_type,workspace_id)#e6b8cb8
 evt:runtime-governance.ts#SecurityPassthroughInitializationFailedEventSchema(payload,type)#56758fc

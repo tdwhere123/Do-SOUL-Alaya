@@ -17,7 +17,7 @@ export interface DetachCommandDeps {
 export function createDetachCommandSpec(deps: DetachCommandDeps = {}): AlayaSubcommandSpec<readonly string[]> {
   return {
     name: "detach",
-    description: "Detach Alaya MCP + /alaya-inspect from a supported agent profile.",
+    description: "Detach Alaya MCP from a supported agent profile.",
     argsSchema: stringListArgsSchema(),
     requiresDaemonReady: false,
     handler: async (ctx, args) => await executeDetach(ctx, args, deps)
@@ -65,18 +65,13 @@ async function executeDetachPlan(
   const applyOptions: ProfileMutationApplyOptions = {
     fs: deps.fs,
     auditWriter: deps.auditWriter,
-    allowConflicts: false,
     nowIso: deps.nowIso
   };
   const confirm = deps.confirm ?? confirmProfileMutation;
 
   try {
     const plan = await buildDetachProfileMutationPlan(target, { env: ctx.env, fs: deps.fs });
-    const searchedPaths = [...plan.paths.slashPathCandidates];
-    const conflictOperations = plan.operations.filter((operation) => operation.conflict !== undefined);
-    if (conflictOperations.length > 0) {
-      return reportDetachConflicts(ctx.stderr, target, searchedPaths, conflictOperations);
-    }
+    const searchedPaths = [plan.paths.mcpConfigPath];
     const hasChanges = plan.operations.some((operation) => operation.changed);
     if (!hasChanges) {
       return reportNoDetachChanges(ctx, target, searchedPaths);
@@ -107,35 +102,6 @@ function reportDetachUsage(stderr: NodeJS.WritableStream, message: string): Alay
     json: {
       ok: false,
       supported_targets: SUPPORTED_PROFILE_TARGETS
-    }
-  };
-}
-
-function reportDetachConflicts(
-  stderr: NodeJS.WritableStream,
-  target: ProfileTarget,
-  searchedPaths: readonly string[],
-  conflictOperations: readonly Readonly<{
-    readonly path: string;
-    readonly conflict?: Readonly<{ readonly message: string; readonly existingCommand: string | null }>;
-  }>[]
-): AlayaCliResult {
-  const message = conflictOperations
-    .map((operation) => operation.conflict!.message)
-    .join("; ");
-  stderr.write(`${message}\n`);
-  return {
-    exitCode: ALAYA_SYSEXITS.NOPERM,
-    json: {
-      ok: false,
-      target,
-      changed: false,
-      searched: searchedPaths,
-      conflicts: conflictOperations.map((operation) => ({
-        path: operation.path,
-        message: operation.conflict!.message,
-        existing_command: operation.conflict!.existingCommand
-      }))
     }
   };
 }

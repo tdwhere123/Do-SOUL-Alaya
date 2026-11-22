@@ -1,15 +1,14 @@
-export { HistoricalMemoryCaptureCandidateSchema, HistoricalMemoryCaptureMaterialSchema, HistoricalMemoryCaptureSchema,
-  HistoricalMemoryCaptureCommitmentSchema, HistoricalMemoryReadResultSchema, createHistoricalMemoryCapture,
+export { HistoricalMemoryCaptureCandidateSchema, HistoricalMemoryCaptureSchema,
+  HistoricalMemoryReadResultSchema, createHistoricalMemoryCapture,
   verifyHistoricalMemoryCapture, historicalCaptureTerminalMember, type HistoricalMemoryCaptureCandidate,
   type AutonomousTombstoneArguments, type HistoricalMemoryCapture, type HistoricalMemoryReadResult, type HistoricalMemoryCaptureNomination
 } from "./memory/historical-memory-capture.js";
 export { SOURCE_STATEMENTS_CONTRACT, SOURCE_STATEMENT_LIMITS, SourceStatementSchema,
   SourceStatementMessageSchema, SourceStatementRequestSchema, SourceStatementResponseEnvelopeSchema,
   SourceStatementResponseMessageSchema, LocatedSourceStatementSchema, BoundSourceStatementSchema,
-  sourceStatementKey, type SourceStatement, type SourceStatementMessage, type SourceStatementRequest,
+  type SourceStatement, type SourceStatementMessage, type SourceStatementRequest,
   type SourceStatementRejection, type SourceStatementMessageResult, type SourceStatementReceipt,
-  type LocatedSourceStatement, type BoundSourceStatement, SourceStatementArtifactSchema,
-  type SourceStatementArtifact, sourceStatementArtifact, SourceStatementContextSourceSchema,
+  type LocatedSourceStatement, type BoundSourceStatement, type SourceStatementArtifact, sourceStatementArtifact, SourceStatementContextSourceSchema,
   type SourceStatementContextSource } from "./garden/source-statements.js";
 /**
  * @packageDocumentation
@@ -42,10 +41,9 @@ export * from "./recall/source-index-lexical.js";
 export type * from "./recall/source-index-query.js";
 export { SourceIndexQueryResourcesSchema } from "./recall/source-index-query.js";
 export { SOURCE_DISCLOSURE_CODEC_VERSION, SOURCE_DISCLOSURE_DELTA_CODEC_VERSION, SourceDisclosureSchema,
-  SourceDisclosureDeltaSchema, SourceDisclosurePageSlotSchema, SourceDisclosureSemanticSchema,
-  encodeSourceDisclosure, encodePageSourceDisclosure, decodePageSourceDisclosure, sourceDisclosureFieldByteSavings,
+  encodeSourceDisclosure, encodePageSourceDisclosure, sourceDisclosureFieldByteSavings,
   qualifySourceDisclosure, sourceDisclosureProofUse, sourceDisclosure, decodeHistoricalSourceDisclosure, EvidenceTextDisclosuresSchema,
-  type SourceDisclosure, type SourceDisclosureDelta, type SourceDisclosurePageSlot, type SourceDisclosureSemantic,
+  type SourceDisclosure, type SourceDisclosureSemantic,
   type EvidenceTextDisclosures } from "./recall/source-disclosure.js";
 export * from "./garden/source-semantic-resources.js";
 export { sourceSemanticStructuralEdges, sourceSemanticContextContains, sourceSemanticSlotNodeId } from "./garden/source-semantic-structure.js";
@@ -61,10 +59,9 @@ export {
   parseEnvOptionalNumber,
   parseEnvPositiveInt
 } from "./config/env-value.js";
-export type { DiagnosticLogger, LoggerCorrelationIds, LoggerPort } from "./runtime/logger-port.js";
+export type { LoggerPort } from "./runtime/logger-port.js";
 export {
   bindDiagnosticLogger,
-  bindLoggerCorrelation,
   diagnosticError,
   diagnosticWarn,
   withLoggerCorrelation
@@ -82,15 +79,12 @@ export * from "./memory/base-types.js";
 export * from "./governance/governance-subject.js";
 export * from "./evidence/evidence-capsule.js";
 export {
-  ASSOCIATIVE_FACT_FRAME_SCHEMA_VERSION, ASSOCIATIVE_FACT_FRAME_SLOT_LIMIT,
-  AssociativeFactSlotRoleSchema, AssociativeFactSlotSchema, AssociativeFactFrameSchema,
-  EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID, EvidenceFactFrameFormationStatusSchema,
-  EvidenceFactFrameFormationProposalSchema, EvidenceFactFrameFormationCaptureSchema,
+  AssociativeFactFrameSchema,
+  EVIDENCE_FACT_FRAME_FORMATION_OPERATOR_ID, EvidenceFactFrameFormationProposalSchema, EvidenceFactFrameFormationCaptureSchema,
   evidenceFactFrameFormationCapturePreimage, verifyEvidenceFactFrameFormationCapture,
   groundAssociativeFactFrame, buildAssociativeFactKeyProjections, buildAttributedAssociativeFactKeyProjections,
   type AssociativeFactSlotRole, type AssociativeFactSlot, type AssociativeFactFrame,
-  type AssociativeFactKeyProjectionForm, type AttributedAssociativeFactKeyProjection,
-  type EvidenceFactFrameFormationStatus, type EvidenceFactFrameFormationProposal,
+  type AssociativeFactKeyProjectionForm, type EvidenceFactFrameFormationStatus, type EvidenceFactFrameFormationProposal,
   type EvidenceFactFrameFormationCapture, type EvidenceFactFrameFormationCaptureBody
 } from "./evidence/associative-fact-frame.js";
 export { hasUnquotedSourceDependentScope, isInsideSourceQuotation } from "./evidence/source-dependent-scope.js";
@@ -175,7 +169,7 @@ export * from "./memory/health-journal.js";
 export * from "./memory/health-issue-group.js";
 export * from "./governance/constitutional-fragment.js";
 export * from "./workspace/files.js";
-export * from "./tools/file-tools.js";
+export { FileToolName } from "./tools/file-tools.js";
 export * from "./config/app-config.js";
 export * from "./events/event-log.js";
 export * from "./events/field-generation.js";
@@ -209,11 +203,11 @@ export * from "./events/graph-auditor.js";
 export * from "./events/project-mapping.js";
 export * from "./events/file-approval.js";
 export * from "./events/event-log-orphan.js";
-export * from "./events/message-delta.js";
+export { MessageCompletedEventSchema, StreamingEventType } from "./events/message-delta.js";
 export * from "./engine/engine-binding.js";
 export * from "./engine/engine-port.js";
 export * from "./engine/intern-semantic-request-profile.js";
-export { STEP_SEMANTIC_REQUEST_MODEL, STEP_SEMANTIC_REQUEST_PROFILE,
+export { STEP_SEMANTIC_REQUEST_PROFILE,
   STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE,
   STEP_SEMANTIC_REQUEST_PROFILES, isStepSemanticRequestProfile, stepSemanticReasoningEffort,
   stepSemanticRequestModel, stepSemanticResponseFormat,
@@ -253,27 +247,22 @@ export {
 export {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BOUNDED_JSON_OBJECT_MAX_CHARS,
-  CANONICAL_ENTITIES_MAX,
   BoundedIdSchema,
   BoundedJsonObjectSchema,
   compareUtcInstants,
   utcInstantOrderKey,
   IsoDatetimeStringSchema,
   NonEmptyStringSchema,
-  NonNegativeIntSchema,
   PREFERENCE_FACT_MAX_CHARS,
-  PositiveIntSchema,
   normalizeCanonicalEntities
 } from "./shared/schema-primitives.js";
-export { readLocalJsonPointer, unescapeJsonPointerToken } from "./shared/json-pointer.js";
+export { readLocalJsonPointer } from "./shared/json-pointer.js";
 export {
   bindStandardConfigPatchResponse,
   bindStandardResponse,
-  createConfigRouteResponseSchema,
-  isZodValidationError,
-  unwrapStandardResponseData
+  isZodValidationError
 } from "./shared/standard-response.js";
-export { ManifestationBudgetConfigRouteDataSchema, createDefaultManifestationBudgetConfig } from "./recall/manifestation-budget.js";
+export { createDefaultManifestationBudgetConfig } from "./recall/manifestation-budget.js";
 export * from "./garden/semantic-artifact.js";
 export * from "./conversation/utterance-attribution.js";
 export * from "./conversation/host-occurrence.js";
@@ -296,9 +285,6 @@ export {
 } from "./garden/semantic-extraction-profile.js";
 export { KeyedMutex } from "./shared/keyed-mutex.js";
 export {
-  CJK_INTERROGATIVE_FALLBACK_ATOMS
-} from "./shared/cjk-interrogative-fallback-atoms.js";
-export {
   fallbackCjkRunPieces,
   isCjkSegmentationCandidate
 } from "./shared/cjk-run-policy.js";
@@ -310,7 +296,7 @@ export { SourceSemanticGenerationTaskSchema, sourceSemanticGenerationTaskSummary
 export { SOURCE_SEMANTIC_PRODUCER_OUTCOMES, isSourceSemanticProducerOutcome,
   sourceSemanticProducerEnvelopeViolation, sourceSemanticProducerClaimedEnvelopeViolation,
   sourceSemanticProducerEnvelopeJsonSchema, sourceSemanticProducerGenerationOutcomeSchema,
-  SourceSemanticProducerAbstainedOutcomeSchema, type SourceSemanticProducerKind
+  SourceSemanticProducerAbstainedOutcomeSchema
 } from "./garden/source-semantic-producer-envelope.js";
 export { SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT,
   SourceSemanticGenerationSchemaContractSchema, sourceSemanticPresentationContracts,
@@ -328,14 +314,11 @@ export {
   SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX, SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
   SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
   SOURCE_SEMANTIC_LIBRARY_OCCUPANCY, SOURCE_SEMANTIC_LIBRARY_TIE_POLICY,
-  SourceSemanticLibraryContinuationSchema, SOURCE_SEMANTIC_COVERAGE_STATES,
   SourceSemanticCoverageSchema, SourceSemanticQueryUnavailableReasonSchema,
   SourceSemanticQueryStatusSchema, SourceSemanticHandleDescriptorSchema,
   SourceSemanticWorkerWorkSchema, SourceSemanticWorkerRequestSchema,
-  SourceSemanticLibraryDiscoverySchema, SourceSemanticLibraryOrderSchema,
-  SourceSemanticQuerySupportSchema, SourceSemanticLibrarySlotQualifierSchema,
-  SourceSemanticLibraryProofSchema, SourceSemanticLibraryUnprovedComputationSchema, SourceSemanticLibraryDeliverySchema,
-  SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, SourceSemanticFieldLibraryDeliverySchema, SourceSemanticFieldLibraryWorkerResultSchema,
+  SourceSemanticLibraryDiscoverySchema, SourceSemanticLibrarySlotQualifierSchema,
+  SourceSemanticLibraryProofSchema, SourceSemanticLibraryUnprovedComputationSchema, SOURCE_SEMANTIC_FIELD_LIBRARY_PROTOCOL_VERSION, SourceSemanticFieldLibraryWorkerResultSchema,
   SourceSemanticFieldLibraryContinuationSchema,
   SourceSemanticWorkerResultSchema, projectSourceSemanticQuerySupport,
   proofForLibraryEntry, sourceSemanticProofQualifier, proofForLibraryQualifier, verifySourceSemanticLibraryDelivery
@@ -348,34 +331,29 @@ export type {
 } from "./garden/source-semantic-worker.js";
 export * from "./garden/source-semantic-access.js";
 export { SOURCE_SEMANTIC_PROFILED_ACCESS_CONTRACT, SOURCE_SEMANTIC_PROFILED_LIBRARY_RESULT_VERSION,
-  SOURCE_SEMANTIC_PROFILED_LIBRARY_PROTOCOL_VERSION, SourceSemanticEffectiveOrderSchema,
-  SourceSemanticAcquisitionPolicySchema, SourceSemanticAcquisitionChannelsSchema, SourceSemanticAcquisitionAllowanceSchema,
-  SourceSemanticAccessProfileSchema, SourceSemanticNominationOccurrenceSchema, SourceSemanticProfiledAcquisitionResultSchema,
-  SourceSemanticRetainedNominationWitnessSchema, sourceSemanticRetainedWitnessMatchesPhase,
-  SourceSemanticProfiledAcquisitionPhaseSchema, SourceSemanticProfiledExecutionPhasesSchema, sourceSemanticProfiledAcquisitionNotRun }
+  SOURCE_SEMANTIC_PROFILED_LIBRARY_PROTOCOL_VERSION, SourceSemanticAccessProfileSchema, SourceSemanticNominationOccurrenceSchema, SourceSemanticRetainedNominationWitnessSchema, sourceSemanticRetainedWitnessMatchesPhase,
+  SourceSemanticProfiledAcquisitionPhaseSchema, sourceSemanticProfiledAcquisitionNotRun }
   from "./garden/source-semantic-access-profile.js";
 export { SourceSemanticComparisonWorkerResultSchema, SourceSemanticReadableWorkerResultSchema, SourceSemanticComparisonResponseSchema,
-  SourceSemanticComparisonWorkerRequestSchema, SourceSemanticComparisonRequestSchema, admitSourceSemanticWorkerResultFamily } from "./garden/source-semantic-comparison-worker.js";
+  SourceSemanticComparisonRequestSchema, admitSourceSemanticWorkerResultFamily } from "./garden/source-semantic-comparison-worker.js";
 export type { SourceSemanticComparisonWorkerResult, SourceSemanticReadableWorkerResult, SourceSemanticComparisonResponse,
-  SourceSemanticComparisonWorkerRequest, SourceSemanticReadableWorkerRequest } from "./garden/source-semantic-comparison-worker.js";
-export type { SourceSemanticAccessProfile, SourceSemanticProfiledAcquisitionPhase, SourceSemanticProfiledExecutionPhases,
-  SourceSemanticNominationOccurrence, SourceSemanticRetainedNominationWitness }
+  SourceSemanticReadableWorkerRequest } from "./garden/source-semantic-comparison-worker.js";
+export type { SourceSemanticAccessProfile, SourceSemanticProfiledAcquisitionPhase, SourceSemanticNominationOccurrence, SourceSemanticRetainedNominationWitness }
   from "./garden/source-semantic-access-profile.js";
-export { SourceSemanticProfiledLibraryContinuationSchema, SourceSemanticProfiledLibraryDeliverySchema }
+export { SourceSemanticProfiledLibraryDeliverySchema }
   from "./garden/source-semantic-profiled-library.js";
-export type { SourceSemanticProfiledLibraryDelivery } from "./garden/source-semantic-profiled-library.js";
-export { SourceSemanticProfiledCompactAcquisitionSchema, SourceSemanticProfiledAccessPhasesSchema,
-  SourceSemanticProfiledExecutionSchema } from "./garden/source-semantic-phase-wire.js";
-export type { SourceSemanticProfiledCompactAcquisition, SourceSemanticProfiledAccessPhases,
-  SourceSemanticProfiledExecution, SourceSemanticReadableAcquisition, SourceSemanticReadableAccessPhases,
+export { SourceSemanticProfiledExecutionSchema } from "./garden/source-semantic-phase-wire.js";
+export type { SourceSemanticReadableAcquisition, SourceSemanticReadableAccessPhases,
   SourceSemanticReadableExecution } from "./garden/source-semantic-phase-wire.js";
 export {
-  SourceSemanticUndeliveredConclusionSchema, sourceSemanticUndeliveredConclusion, sourceSemanticReasonControl
+  sourceSemanticUndeliveredConclusion, sourceSemanticReasonControl
 } from "./garden/source-semantic-reason-delivery.js";
-export type { SourceSemanticUndeliveredConclusion } from "./garden/source-semantic-reason-delivery.js";
 export * from "./garden/source-semantic-identity.js";
-export { validateSchemaGroundingForSignal, type SchemaGroundingValidationResult,
-  type SchemaGroundingValidationStatus } from "./garden/schema-grounding.js";
+export {
+  validateSchemaGroundingForSignal,
+  type SchemaGroundingValidationResult,
+  type SchemaGroundingValidationStatus
+} from "./garden/schema-grounding.js";
 export * from "./garden/normalize-source-semantics.js";
 export { assertSourceSemanticAccounting, sourceSemanticEvidenceClosure } from "./garden/source-semantic-accounting.js";
 

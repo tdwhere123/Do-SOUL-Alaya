@@ -148,7 +148,7 @@ export const SourceDisclosureDeltaSchema = z.object({
   "7": fields.temporal_state.optional(),
   "8": fields.proof_use.optional()
 }).strict().readonly();
-export type SourceDisclosureDelta = z.infer<typeof SourceDisclosureDeltaSchema>;
+type SourceDisclosureDelta = z.infer<typeof SourceDisclosureDeltaSchema>;
 export const SourceDisclosurePageSlotSchema = z.union([SourceDisclosureSchema, SourceDisclosureDeltaSchema]);
 export type SourceDisclosurePageSlot = z.infer<typeof SourceDisclosurePageSlotSchema>;
 

@@ -2,11 +2,8 @@ import { SOUL_RECALL_CALLER_GUIDANCE, soulToolDefs } from "@do-soul/alaya-engine
 import { ATTACHED_AGENT_MEMORY_TOOL_NAMES } from "../../mcp-memory/tool/attach-profile-tool-allowlist.js";
 
 export const SUPPORTED_PROFILE_TARGETS = Object.freeze(["codex", "claude-code"] as const);
-export const ALAYA_SLASH_ALIAS = "/alaya-inspect";
-export const ALAYA_LEGACY_SLASH_COMMAND = "alaya inspect --open";
 export const ALAYA_MCP_COMMAND = "alaya";
 export const ALAYA_MCP_ARGS = Object.freeze(["mcp", "stdio"] as const);
-export const ALAYA_SLASH_ARGS = Object.freeze(["inspect", "--open"] as const);
 export const PROFILE_MUTATION_CONFIRM_PROMPT = "Apply profile mutation changes? [y/N] ";
 export const PUBLIC_SOUL_TOOL_NAMES = Object.freeze(soulToolDefs.map((toolDef) => toolDef.name));
 
@@ -20,7 +17,7 @@ export const ALAYA_OPERATOR_INSTRUCTIONS = [
   "Before answering, selectively read only relevant cut sources. For a relevant result with target.span.content_complete false, repeat soul.recall with the returned index.continuation and payload_continuation {schema_version:1, purpose:\"payload_expansion\", target: that source's index entry target, start_offset: span.content_end}. For a relevant member_index line outside page 1, open its statement_ids or source_target via soul.open_pointer.",
   "After each turn, call soul.capture_host_session with the turn's messages so Alaya retains the conversation as source; captured messages are input, not claims of truth.",
   "When you detect possible durable memory, call soul.emit_candidate_signal first; signal emission is candidate-only and not durable by itself.",
-  "For durable edits, call soul.propose_memory_update then soul.list_pending_proposals. Review and apply are human-only (Inspector or alaya review); attached agents cannot review.",
+  "For durable edits, call soul.propose_memory_update then soul.list_pending_proposals. Review and apply are human-only (HTTP reviewer or alaya review); attached agents cannot review.",
   "When the operator has set Garden compute provider_kind=host_worker and you have spare capacity, optionally call garden.list_pending_tasks, then garden.claim_task, then garden.complete_task. If provider_kind is not host_worker, do not claim Garden work.",
   "Accepted proposals trigger durable-memory apply; rejected proposals keep durable memory unchanged."
 ].join("\n");

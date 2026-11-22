@@ -248,17 +248,6 @@ export function resumeIndexProjection(state: FieldEngineState, snapshot: FieldSn
   };
 }
 
-export function retainIndexDelivery(
-  progress: ProjectionProgress,
-  entries: readonly IndexEntry[],
-  first: boolean
-): Readonly<{ progress: ProjectionProgress; bytes: number }> {
-  const delivered = { ...progress.delivered_entries };
-  for (const entry of entries) delivered[productIdOfEntry(entry)] = indexEntryRevision(entry);
-  return { progress: { ...progress, delivered_entries: delivered },
-    bytes: revisionRetentionBytes(progress.delivered_entries, delivered, first) };
-}
-
 export function retainCommittedRevisions(
   progress: ProjectionProgress,
   committed: EmittedRevisions,
@@ -341,8 +330,7 @@ export function deliveredPayloadEntry(queryKey: string, target: RecallTargetRef)
   readonly index: InformationIndex;
   readonly entry: IndexEntry;
 }> | undefined {
-  for (const issued of [...recallExecutionRetention.values<IssuedDelivery>("page:")].reverse()) {
-    if (issued.query_key !== queryKey) continue;
+  for (const issued of recallExecutionRetention.valuesForExecution<IssuedDelivery>(queryKey, "page:").reverse()) {
     const entry = issued.index.entries.find((candidate) => candidate.target.kind === "source_evidence"
       && target.kind === "source_evidence" && sameSourceEvidenceRoot(candidate.target, target));
     if (entry !== undefined) return { index: issued.index, entry };
@@ -363,11 +351,9 @@ export function assertMembershipContinuation(continuation: Continuation | null |
 
 export function evictIssuedDeliveries(queryKey: string): readonly string[] {
   const removed: string[] = [];
-  for (const issued of recallExecutionRetention.values<IssuedDelivery>("page:")) {
-    if (issued.query_key === queryKey) {
-      recallExecutionRetention.delete(`page:${issued.request_digest}`);
-      removed.push(issued.request_digest);
-    }
+  for (const issued of recallExecutionRetention.valuesForExecution<IssuedDelivery>(queryKey, "page:")) {
+    recallExecutionRetention.delete(`page:${issued.request_digest}`);
+    removed.push(issued.request_digest);
   }
   return removed;
 }
@@ -405,7 +391,7 @@ export function fieldExecutionId(state: FieldEngineState): string | undefined {
   return FIELD_EXECUTIONS.get(state);
 }
 
-export function continuationDigest(continuation: Continuation): string {
+function continuationDigest(continuation: Continuation): string {
   return createHash("sha256").update(JSON.stringify([
     continuation.schema_version, continuation.continuation_id, continuation.query_id,
     continuation.snapshot_id, continuation.result_version, continuation.expires_at,
@@ -448,13 +434,6 @@ export function prepareFieldCommit(
       ? "payload_only" : "membership", execution, workspace, deadline);
     committed = true;
   };
-}
-
-export function issuedContinuationFor(
-  continuation: Continuation | null | undefined
-): Continuation | undefined {
-  if (continuation === undefined || continuation === null) return undefined;
-  return lookupResume(continuation)?.issued;
 }
 
 export function issuedContinuationForState(state: FieldEngineState): Continuation | undefined {

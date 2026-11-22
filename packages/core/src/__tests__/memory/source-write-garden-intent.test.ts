@@ -211,13 +211,10 @@ describe("durable write garden intent", () => {
   it("evidence create enqueues recoverable intent on the same connection", async () => {
     const harness = await openHarness();
     harness.queueEvidenceId(IDS.evidence);
-    const evidence = await harness.evidence.create(
-      evidenceInput("checklist excerpt"),
-      [],
-      undefined,
-      undefined,
-      { runId: RUN, sourceSignalId: null }
-    );
+    const evidence = await harness.evidence.create({
+      ...evidenceInput("checklist excerpt"),
+      enqueueEnrichment: { runId: RUN, sourceSignalId: null }
+    });
     expect(await harness.storage.evidenceCapsuleRepo.findById(evidence.object_id)).not.toBeNull();
     const expectedId = buildSourceEnrichmentTaskId(
       WS,

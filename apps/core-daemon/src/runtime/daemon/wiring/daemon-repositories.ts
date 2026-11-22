@@ -1,4 +1,4 @@
-import { parseDefaultOnFlag } from "@do-soul/alaya-protocol";
+import { parseDefaultOnFlag, type EnvLookup } from "@do-soul/alaya-protocol";
 import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   SqliteBootstrappingRecordRepo,
@@ -62,6 +62,7 @@ export function createDaemonRepositories(input: {
   readonly database: StorageDatabase;
   readonly warn: WarnLogger["warn"];
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
+  readonly env?: EnvLookup;
 }) {
   prepareIndexedRecallProjection(input.database);
   const coreRepos = createCoreDaemonRepos(input.database);
@@ -123,15 +124,17 @@ function createCoreDaemonRepos(database: StorageDatabase) {
 function createDaemonMemoryRepos(input: {
   readonly database: StorageDatabase;
   readonly warn: WarnLogger["warn"];
+  readonly env?: EnvLookup;
 }) {
   const memoryEntryRepo = new SqliteMemoryEntryRepo(input.database, (message, meta) =>
     input.warn(message, meta)
   );
   const enrichPendingRepo = new SqliteEnrichPendingRepo(input.database);
   const sourceGroundingDeferQueueRepo = new SqliteSourceGroundingDeferQueueRepo(input.database);
+  const env = input.env ?? processEnvLookup();
 
   const orphanDetectionEnabled = parseDefaultOnFlag(
-    processEnvLookup().ORPHAN_DETECTION_ENABLED,
+    env.ORPHAN_DETECTION_ENABLED,
     "ORPHAN_DETECTION_ENABLED"
   );
 

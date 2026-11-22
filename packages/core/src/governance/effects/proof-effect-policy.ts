@@ -62,7 +62,7 @@ export type ProofRecord =
   | (ProofRecordBase & ProofTargetBinding & Readonly<{
       readonly kind: "actor_authority";
       readonly actor_id: string;
-      readonly run_id: string;
+      readonly run_id: string | null;
       readonly delivery_id: string;
     }>)
   | (ProofRecordBase & ProofTargetBinding & Readonly<{

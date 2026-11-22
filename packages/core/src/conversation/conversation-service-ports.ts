@@ -16,8 +16,6 @@ import type { EventPublisher } from "../runtime/event-publisher.js";
 
 export { RuntimeMode };
 export type {
-  CandidateMemorySignal,
-  ContextLens,
   ConversationMessage,
   EventLogEntry,
   Run,
@@ -95,9 +93,9 @@ export interface MemoryContextAssemblyResult {
   readonly recalledContextSection: string;
 }
 
-export const MAX_RECALLED_CONTEXT_CHARS = 4_000;
+const MAX_RECALLED_CONTEXT_CHARS = 4_000;
 
-export const CONVERSATION_EVENT_SCAN_PAGE_LIMIT = 500;
+const CONVERSATION_EVENT_SCAN_PAGE_LIMIT = 500;
 
 export function buildRecalledContextSection(workingProjection: Readonly<WorkingProjection>): string {
   if (workingProjection.entries.length === 0) {

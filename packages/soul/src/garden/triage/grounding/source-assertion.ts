@@ -10,7 +10,6 @@ import {
 import {
   hasUnresolvedReference,
   isLocallyClosedAtomicAssertion,
-  isBoundedTemplateSlotAssertion,
   startsWithChineseThirdPersonSubject
 } from "./source-assertion/reference-closure.js";
 import {
@@ -372,7 +371,6 @@ function strongerRejectionReason(
 }
 
 function hasCompleteClause(assertion: string, coordinated: boolean): boolean {
-  if (isBoundedTemplateSlotAssertion(assertion)) return true;
   const value = assertion.trim().replace(/[.!?。！？]+$/u, "").trim();
   const dummySubject = /^it\s+(?:took|takes|will\s+take)\s+me\b\s*(.*)$/iu.exec(value);
   if (dummySubject !== null) return hasContent(dummySubject[1]);

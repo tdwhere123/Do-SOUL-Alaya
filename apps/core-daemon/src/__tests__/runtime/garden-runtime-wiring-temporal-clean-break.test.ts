@@ -198,6 +198,7 @@ describe("Garden production temporal clean break", () => {
         pathGraphSnapshotRepo: new SqlitePathGraphSnapshotRepo(database),
         pathRelationRepo: new SqlitePathRelationRepo(database),
         relationAssertionRepo: new SqliteRelationAssertionRepo(database),
+        ensureTemporalProjection: vi.fn(async () => undefined),
         proposalRepo: new SqliteProposalRepo(database),
         pathPlasticityWatermarkRepo: new SqlitePathPlasticityWatermarkRepo(database),
         embeddingBackfillHandler: {

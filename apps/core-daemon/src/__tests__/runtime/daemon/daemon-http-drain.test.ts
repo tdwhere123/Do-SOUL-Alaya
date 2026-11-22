@@ -38,7 +38,6 @@ function createHttpLifecycle(
     },
     securityStatusService: { close() {} },
     daemonMcpRuntimeRegistry: { async close() {} },
-    globalMemoryRecallInvalidationSubscription: null,
     database,
     requestProtection: {
       allowedOrigin: "http://localhost:5173",

@@ -113,6 +113,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       workspaceService,
       memoryService,
       proposalService,
+      proposalRepo: { findPendingSummaries: vi.fn(async () => []) },
       mcpMemoryToolHandler
     }));
     return { app, workspaceService, proposalService, memoryService, mcpMemoryToolHandler };
@@ -172,7 +173,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       target_anchor: { kind: "object", object_id: foreignTargetMemoryId },
       constitution: {
         relation_kind: "supports",
-        why_this_relation_exists: ["inspector requested associative link"]
+        why_this_relation_exists: ["http-reviewer requested associative link"]
       },
       effect_vector: {
         salience: 0.5,
@@ -190,7 +191,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       },
       lifecycle: { status: "active", retirement_rule: "manual" },
       legitimacy: {
-        evidence_basis: ["inspector:object-anchor-proposal"],
+        evidence_basis: ["http-reviewer:object-anchor-proposal"],
         governance_class: "recall_allowed"
       }
     };
@@ -236,7 +237,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
           entity_id: proposalId,
           workspace_id: "ws-1",
           run_id: null,
-          caused_by: "inspector",
+          caused_by: "http-reviewer",
           payload_json: SoulProposalCreatedPayloadSchema.parse({
             object_id: proposalId,
             object_kind: ControlPlaneObjectKind.PROPOSAL,
@@ -253,7 +254,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       eventLogRepo,
       proposalRepo,
       runtimeNotifier: { notifyEntry: vi.fn() },
-      reviewerIdentityBinding: { token: "reviewer-token", identity: "user:inspector" },
+      reviewerIdentityBinding: { token: "reviewer-token", identity: "user:http-reviewer" },
       memoryService: {
         findByIdScoped: async (objectId, workspaceId) => {
           const memory = await memoryEntryRepo.findById(objectId);
@@ -272,14 +273,14 @@ describe("proposal routes (HTTP surface narrowed)", () => {
           proposal_id: proposalId,
           verdict: "accept",
           reason: "approved associative link",
-          reviewer_identity: "user:inspector",
+          reviewer_identity: "user:http-reviewer",
           reviewer_token: "reviewer-token"
         },
         {
           workspaceId: "ws-1",
           runId: null,
-          agentTarget: "inspector",
-          sessionId: "inspector-foreign-anchor-review"
+          agentTarget: "http-reviewer",
+          sessionId: "http-reviewer-foreign-anchor-review"
         }
       )
     ).rejects.toMatchObject({ code: "VALIDATION" });
@@ -324,35 +325,30 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       ok: true as const,
       output: { proposal_id: "new-rewrite-proposal", status: "created" }
     }));
-    const listPending = vi.fn(async () => ({
-      ok: true as const,
-      output: {
-        proposals: [
-          {
-            proposal_id: "existing-keep-proposal",
-            target_object_id: "mem-1",
-            target_object_kind: "memory_entry",
-            created_at: "2026-05-09T00:00:00.000Z",
-            proposed_change_summary: "keep mem-1",
-            // Different shape than retire — dedupe must NOT match.
-            proposed_changes: { confidence: 0.65 },
-            assigned_reviewer_identity: null,
-            assigned_at: null,
-            deadline_at: null,
-            is_overdue: false
-          }
-        ]
+    const findPendingSummaries = vi.fn(async () => [
+      {
+        proposal_id: "existing-keep-proposal",
+        target_object_id: "mem-1",
+        target_object_kind: "memory_entry",
+        proposal_operation: "memory_update" as const,
+        created_at: "2026-05-09T00:00:00.000Z",
+        proposed_change_summary: "keep mem-1",
+        // Different shape than retire — dedupe must NOT match.
+        proposed_changes: { confidence: 0.65 },
+        assigned_reviewer_identity: null,
+        assigned_at: null,
+        deadline_at: null,
+        is_overdue: false
       }
-    }));
+    ]);
     const mcpMemoryToolHandler = {
-      call: vi.fn(async (input: { toolName: string }) =>
-        input.toolName === "soul.list_pending_proposals" ? await listPending() : await propose()
-      )
+      call: vi.fn(async () => await propose())
     };
     registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
+      proposalRepo: { findPendingSummaries },
       mcpMemoryToolHandler
     }));
 

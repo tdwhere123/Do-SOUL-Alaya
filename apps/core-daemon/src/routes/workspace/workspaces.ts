@@ -9,9 +9,12 @@ import {
   WorkspaceEngineConfigUpdateSchema,
   WorkspaceGitBindingUpdateSchema,
   type Workspace,
-  type WorkspaceEngineConfig
+  type WorkspaceEngineConfig,
+  type WorkspaceListScope
 } from "@do-soul/alaya-protocol";
+import { resolveRequestWorkspaceGrantScope } from "../../runtime/request-token-binding.js";
 import {
+  jsonError,
   parseJsonBody,
   parseListPagination,
   rejectUnexpectedRequestBody,
@@ -63,12 +66,16 @@ function registerWorkspaceCrudRoutes(app: Hono, services: WorkspaceRouteServices
 
   app.get("/workspaces", async (context) => {
     const pagination = parseListPagination(context);
+    const scope: WorkspaceListScope = resolveRequestWorkspaceGrantScope(context);
+    const [listed, totalCount] = await Promise.all([
+      services.workspaceService.list(pagination, scope),
+      services.workspaceService.count(scope)
+    ]);
     const workspaces = await Promise.all(
-      (await services.workspaceService.list(pagination)).map(async (workspace) =>
+      listed.map(async (workspace) =>
         await sanitizeWorkspaceForGenericRead(workspace, services.gitBindingValidation)
       )
     );
-    const totalCount = await services.workspaceService.count();
     writeListPaginationHeaders(context, totalCount, pagination);
     return context.json({ success: true, data: workspaces }, 200);
   });
@@ -143,10 +150,7 @@ async function updateWorkspaceGitBinding(
   }
   const validation = await validateWorkspaceGitBindingInput(update.repo_path, services.gitBindingValidation);
   if (!validation.ok) {
-    return context.json(
-      { success: false, error: { code: validation.code, detail: validation.detail } },
-      400
-    );
+    return jsonError(context, 400, { code: validation.code, detail: validation.detail });
   }
   return await writeGitBindingUpdate(context, repo, workspaceId, validation.repo_path, services);
 }

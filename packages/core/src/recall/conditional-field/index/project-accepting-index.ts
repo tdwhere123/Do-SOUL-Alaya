@@ -78,7 +78,6 @@ import {
   usesEmittedSet
 } from "./project-accepting-continuation.js";
 
-export type { ObserverCoverage } from "./completeness.js";
 export {
   outputAttributionHandle,
   selectFeasibleWitnesses,
@@ -90,9 +89,7 @@ export {
   evaluateSamePathPredicate
 } from "./project-accepting-entries.js";
 export {
-  facetObligationsAccept,
-  queryRequiresFacetMeasurement,
-  requiredFacetObligations
+  facetObligationsAccept
 } from "./facet-obligation-join.js";
 
 export type AcceptingProjectionInput = Readonly<{

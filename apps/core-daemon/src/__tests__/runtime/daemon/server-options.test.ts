@@ -29,27 +29,46 @@ describe("core daemon server listen options", () => {
     },
   );
 
-  it("rejects non-loopback DAEMON_HOST when opt-in is not enabled", () => {
+  it("rejects non-loopback DAEMON_HOST unconditionally without misleading opt-in hints", () => {
     expect(() =>
       resolveDaemonHostFromEnv({
         DAEMON_HOST: "0.0.0.0",
       } as EnvLike),
-    ).toThrowError(/DAEMON_HOST/);
-  });
-
-  it("rejects wildcard 0.0.0.0 bind without ALAYA_ALLOW_WILDCARD_BIND even when remote opt-in is set", () => {
-    expect(() =>
-      resolveDaemonHostFromEnv({
-        DAEMON_HOST: "0.0.0.0",
-        ALAYA_ALLOW_REMOTE_DAEMON: "1"
-      } as EnvLike)
-    ).toThrowError(/ALAYA_ALLOW_WILDCARD_BIND=1/);
+    ).toThrowError(/Plaintext remote HTTP is unsupported/);
     expect(() =>
       resolveDaemonHostFromEnv({
         DAEMON_HOST: "::",
         ALAYA_ALLOW_REMOTE_DAEMON: "1"
       } as EnvLike)
-    ).toThrowError(/wildcard bind/);
+    ).toThrowError(/ALAYA_DAEMON_SOCKET/);
+    try {
+      resolveDaemonHostFromEnv({ DAEMON_HOST: "0.0.0.0" } as EnvLike);
+    } catch (error) {
+      expect((error as Error).message).not.toMatch(/ALAYA_ALLOW_REMOTE_DAEMON=1|ALAYA_ALLOW_WILDCARD_BIND=1/);
+    }
+  });
+
+  it("rejects programmatic non-loopback hostname overrides even with unix socket or opt-ins", () => {
+    expect(() =>
+      resolveDaemonListenPolicy(
+        {
+          ALAYA_ALLOW_REMOTE_DAEMON: "1",
+          ALAYA_ALLOW_WILDCARD_BIND: "1"
+        } as EnvLike,
+        { hostname: "0.0.0.0" }
+      )
+    ).toThrowError(/Plaintext remote HTTP is unsupported/);
+    expect(() =>
+      resolveDaemonListenPolicy(
+        {
+          ALAYA_DAEMON_SOCKET: "/tmp/alaya.sock"
+        } as EnvLike,
+        { hostname: "192.168.1.10" }
+      )
+    ).toThrowError(/Plaintext remote HTTP is unsupported/);
+    expect(
+      resolveDaemonListenPolicy({} as EnvLike, { hostname: "::1" })
+    ).toEqual({ kind: "loopback", host: "::1" });
   });
 
   it("rejects non-loopback TCP without a unix socket even with remote and wildcard opt-in", () => {
@@ -169,5 +188,26 @@ describe("core daemon server listen options", () => {
   it("does not treat a unix socket with default loopback TCP as a remote bind", () => {
     expect(isRemoteDaemonBind({ ALAYA_DAEMON_SOCKET: "/tmp/alaya.sock" })).toBe(false);
     expect(isRemoteDaemonBind({})).toBe(false);
+  });
+
+  it("normalizes localhost to 127.0.0.1 in TCP listen policy", () => {
+    expect(resolveDaemonListenPolicy({ DAEMON_HOST: "localhost" })).toEqual({
+      kind: "loopback",
+      host: "127.0.0.1"
+    });
+    expect(resolveDaemonListenPolicy({}, { hostname: "localhost" })).toEqual({
+      kind: "loopback",
+      host: "127.0.0.1"
+    });
+    expect(
+      resolveDaemonListenPolicy(
+        { ALAYA_DAEMON_SOCKET: "/tmp/alaya.sock" },
+        { hostname: "localhost" }
+      )
+    ).toEqual({
+      kind: "unix",
+      path: "/tmp/alaya.sock",
+      tcpHost: "127.0.0.1"
+    });
   });
 });

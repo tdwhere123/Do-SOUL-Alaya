@@ -7,7 +7,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { Hono } from "hono";
 import { CoreError, type WorkspaceService } from "@do-soul/alaya-core";
-import { throwInvalidRequestBody } from "../../shared/shared.js";
+import { parseJsonObject, parseRequiredString } from "../../shared/shared.js";
 
 export type GlobalMemoryEntryRecord = GlobalMemoryEntry;
 
@@ -104,38 +104,6 @@ async function parseAdoptInput(readJson: () => Promise< unknown>): Promise<Globa
     workspace_id: parseRequiredString(body.workspace_id, "workspace_id is required"),
     accepted_by: parseOptionalAcceptedBy(body.accepted_by) ?? AcceptedBy.USER
   };
-}
-
-async function parseJsonObject(
-  readJson: () => Promise< unknown>,
-  objectMessage: string
-): Promise<Record<string, unknown>> {
-  let body: unknown;
-
-  try {
-    body = await readJson();
-  } catch (error) {
-    throwInvalidRequestBody(error);
-  }
-
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    throw new CoreError("VALIDATION", objectMessage);
-  }
-
-  return body as Record<string, unknown>;
-}
-
-function parseRequiredString(value: unknown, message: string): string {
-  if (typeof value !== "string") {
-    throw new CoreError("VALIDATION", message);
-  }
-
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    throw new CoreError("VALIDATION", message);
-  }
-
-  return trimmed;
 }
 
 function parseOptionalString(value: string | undefined): string | undefined {

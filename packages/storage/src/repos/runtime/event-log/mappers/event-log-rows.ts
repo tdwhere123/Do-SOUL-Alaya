@@ -30,19 +30,6 @@ export interface EventLogRow {
   readonly created_at: string;
 }
 
-export interface EventLogEntryCandidate {
-  readonly event_id: string;
-  readonly event_type: string;
-  readonly entity_type: string;
-  readonly entity_id: string;
-  readonly workspace_id: string;
-  readonly run_id: string | null;
-  readonly caused_by: string | null;
-  readonly revision: number;
-  readonly payload_json: unknown;
-  readonly created_at: string;
-}
-
 export interface EventLogCursorStateRow {
   readonly cursor_exists: number;
   readonly events_up_to_cursor: number;

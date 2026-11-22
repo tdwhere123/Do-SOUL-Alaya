@@ -1,20 +1,63 @@
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventPublisher } from "@do-soul/alaya-core";
 import { SoulMemorySearchRequestSchema, SoulMemorySearchResponseSchema, type Derivation, type FieldSnapshot, type InformationIndex, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
-import { SqliteEventLogRepo, SqliteTrustStateRepo, type StorageDatabase } from "@do-soul/alaya-storage";
+import { SqliteEventLogRepo, SqliteMemoryEntryRepo, SqliteTrustStateRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { projectAcceptingIndex, indexEntryRevision } from "../../../../../../packages/core/src/recall/conditional-field/index/project-accepting-index.js";
 import { productStateNodeId } from "../../../../../../packages/core/src/recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/reference/deployment.fixture.js";
 import { openSourceSlice, WS, RUN, MEM } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 import { createRecallHandler, createReportContextUsageHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import { TrustStateRecorder } from "../../../trust/state.js";
-import { createDeps } from "../tool/mcp-memory-tool-handler-fixture.js";
+import { capableRecallRequest, createDeps, stubRecallIndex } from "../tool/mcp-memory-tool-handler-fixture.js";
 
 const databases = new Set<StorageDatabase>();
 afterEach(() => { for (const db of databases) db.close(); databases.clear(); });
 
 describe("bounded explanation continuation delivery", () => {
+  it("records usage across runless CLI invocations and rejects foreign scope before object lookup", async () => {
+    const { database, writeMemory } = await openSourceSlice((db) => databases.add(db));
+    await writeMemory(MEM.r, "Needle in runtime memory.", "fact");
+    const events = new SqliteEventLogRepo(database);
+    const repo = new SqliteTrustStateRepo(database);
+    const memories = new SqliteMemoryEntryRepo(database);
+    const now = () => "2026-09-08T00:00:00.000Z";
+    const recorder = new TrustStateRecorder({ ready: true, clock: now, repo,
+      eventPublisher: new EventPublisher({ eventLogRepo: events,
+        runHotStateService: { apply: () => {} }, runtimeNotifier: { notify: async () => {}, notifyEntry: async () => {} } }) });
+    const deps = { ...createDeps(), trustStateRecorder: recorder };
+    const originalRecall = deps.recallService.recall;
+    const index = stubRecallIndex([MEM.r]);
+    deps.recallService.recall = async (input) => {
+      const recalled = await originalRecall(input);
+      return { ...recalled, index: { ...index, entries: index.entries.map((entry) => ({
+        ...entry, target: { kind: "memory_entry", workspace_id: WS, object_id: MEM.r, source_revision: "rev" }
+      })) } };
+    };
+    const lookup = vi.fn((ids: readonly string[], workspaceId: string) => memories.findByIds(workspaceId, ids));
+    deps.memoryService.findByIdsScoped = lookup;
+    const recall = createRecallHandler({ deps, now, generateId: randomUUID, warn: () => undefined });
+    const report = createReportContextUsageHandler({ deps, now, warn: () => undefined });
+    const ctx = { workspaceId: WS, runId: null, agentTarget: "tools-cli", sessionId: "tools-cli-recall" };
+    const response = SoulMemorySearchResponseSchema.parse(await recall(SoulMemorySearchRequestSchema.parse(
+      capableRecallRequest({ query: "needle", scope_class: null, dimension: null, domain_tags: null, max_results: 1 })
+    ), ctx));
+    const request = { delivery_id: response.delivery_id, usage_state: "used", used_object_ids: [MEM.r] } as const;
+    const reportCtx = { ...ctx, sessionId: "tools-cli-report" };
+    await expect(report(request, { ...reportCtx, workspaceId: "foreign-workspace" }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(report(request, { ...reportCtx, agentTarget: "other-agent" }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(report(request, { ...reportCtx, runId: "other-run" }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(lookup).not.toHaveBeenCalled();
+    await expect(repo.findDeliveryById(response.delivery_id)).resolves.toMatchObject({ run_id: null });
+    await expect(report(request, reportCtx)).resolves.toMatchObject({ status: "recorded" });
+    await expect(repo.listUsageByDeliveryIds([response.delivery_id])).resolves.toMatchObject([
+      { usage_state: "used", used_object_ids: [MEM.r] }
+    ]);
+  });
+
   it("attaches the later forest to the prior product and records only newly exposed witnesses", async () => {
     const originalState = productKey(MEM.r);
     const state = { ...originalState, target: { ...originalState.target, workspace_id: WS } };

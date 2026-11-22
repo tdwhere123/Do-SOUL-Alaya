@@ -46,7 +46,7 @@ function createHarness(options?: {
     const appended: EventLogEntry = {
       event_id: `evt_${appendCallCount}`,
       created_at: "2026-07-14T00:00:00.000Z",
-      revision: 0,
+      revision: appendCallCount,
       ...event
     };
     appendedEvents.push(appended);
@@ -453,9 +453,10 @@ describe("SignalService source grounding defer queue", () => {
         created_objects: [{ object_kind: "memory_entry", object_id: "mem-1" }],
         success: true as const
       });
-    const { service, transitions, appendedEvents } = createHarness({ materialize });
+    const { service, transitions, appendedEvents, signals } = createHarness({ materialize });
     await service.receiveSignal(createSignal({ source: "garden_compile", confidence: 0.9 }));
     const crashClaim = transitions.claimRedrive({
+      expected_raw_payload: signals.get("signal-1")!.raw_payload,
       workspace_id: "workspace-1",
       signal_id: "signal-1",
       claim_token: "crashed-attempt",

@@ -1,7 +1,7 @@
 import { constantTimeTokenEqual } from "../../shared/constant-time-token.js";
 import { createWorkflowError } from "../tool/mcp-tool-error.js";
 import type { McpMemoryToolCallContext } from "../tool/tool-handler-types.js";
-import { HUMAN_REVIEWER_AGENT_TARGETS, INSPECTOR_REVIEWER_AGENT_TARGET } from "./reviewer-surfaces.js";
+import { HUMAN_REVIEWER_AGENT_TARGETS, HTTP_REVIEWER_AGENT_TARGET } from "./reviewer-surfaces.js";
 
 export interface ReviewerIdentityBinding {
   readonly token: string;
@@ -17,9 +17,9 @@ export function assertReviewCallerIsAllowed(
   context: McpMemoryToolCallContext,
   binding: ReviewerIdentityBinding | undefined
 ): void {
-  // The Inspector HTTP loopback asserts reviewer_identity over the network with
-  // no token; without a configured binding it would forge the audit trail.
-  if (context.agentTarget === INSPECTOR_REVIEWER_AGENT_TARGET) {
+  // The daemon HTTP reviewer surface asserts reviewer_identity over the network
+  // with no token; without a configured binding it would forge the audit trail.
+  if (context.agentTarget === HTTP_REVIEWER_AGENT_TARGET) {
     if (binding === undefined) {
       throw createWorkflowError("VALIDATION", "reviewer binding not configured");
     }
@@ -32,7 +32,7 @@ export function assertReviewCallerIsAllowed(
 
   throw createWorkflowError(
     "VALIDATION",
-    "Review requires a human reviewer surface (Inspector/alaya review); attached agents cannot review."
+    "Review requires a human reviewer surface (HTTP reviewer / alaya review); attached agents cannot review."
   );
 }
 

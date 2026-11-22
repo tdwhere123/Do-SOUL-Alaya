@@ -49,7 +49,7 @@ async function assertResolvedProviderUrl(endpoint: string, env: EnvLookup): Prom
   await assertProviderHostResolvesPublic(endpoint);
 }
 
-export async function assertProviderHostResolvesPublic(endpoint: string): Promise<void> {
+async function assertProviderHostResolvesPublic(endpoint: string): Promise<void> {
   await resolvePublicProviderAddresses(endpoint);
 }
 

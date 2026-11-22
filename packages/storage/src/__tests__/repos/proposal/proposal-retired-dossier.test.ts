@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 const appliedStates = ["accepted", "auto_applied"] as const;
-const genericEntries = ["unconditional", "pending", "with_events"] as const;
+const genericEntries = ["pending", "with_events"] as const;
 const appliedEntries = genericEntries.flatMap(entry => appliedStates.map(state => ({ entry, state })));
 
 it.each(appliedStates)("refuses a new retired proposal already marked %s", async state => {
@@ -38,7 +38,6 @@ it.each([...appliedEntries, { entry: "privacy", state: "accepted" } as const])(
       const mutation = vi.fn(() => []);
       const timestamp = "2026-03-21T03:00:00.000Z";
       const accept = () => {
-        if (entry === "unconditional") return repo.updateResolution(proposal.proposal_id, state, timestamp);
         if (entry === "pending") return repo.updatePendingResolution(proposal.proposal_id, state, timestamp);
         if (entry === "with_events") return repo.updatePendingResolutionWithEvents(proposal.proposal_id,
           state, timestamp, createReviewEvents(proposal));
@@ -75,8 +74,7 @@ it.each(appliedEntries)(
         }), proposal.proposal_id);
       }
       const timestamp = "2026-03-21T03:00:00.000Z";
-      const result = entry === "unconditional" ? repo.updateResolution(proposal.proposal_id, state, timestamp)
-        : entry === "pending" ? repo.updatePendingResolution(proposal.proposal_id, state, timestamp)
+      const result = entry === "pending" ? repo.updatePendingResolution(proposal.proposal_id, state, timestamp)
         : repo.updatePendingResolutionWithEvents(proposal.proposal_id, state, timestamp, createReviewEvents(proposal));
       await expect(result).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
       expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
@@ -87,7 +85,7 @@ it.each(appliedEntries)(
   }
 );
 
-it.each(["unconditional", "pending"] as const)("locks the %s acceptance check against a second connection", async entry => {
+it("locks the pending acceptance check against a second connection", async () => {
   const directory = mkdtempSync(join(tmpdir(), "alaya-proposal-acceptance-"));
   const database = initDatabase({ filename: join(directory, "alaya.db") });
   const concurrent = new BetterSqlite3(database.filename);
@@ -105,8 +103,7 @@ it.each(["unconditional", "pending"] as const)("locks the %s acceptance check ag
       verify(row);
     });
     const timestamp = "2026-03-21T03:00:00.000Z";
-    const result = entry === "unconditional" ? repo.updateResolution(proposal.proposal_id, "accepted", timestamp)
-      : repo.updatePendingResolution(proposal.proposal_id, "accepted", timestamp);
+    const result = repo.updatePendingResolution(proposal.proposal_id, "accepted", timestamp);
     await expect(result).resolves.toMatchObject({ resolution_state: "accepted" });
     expect(blocked).toBe(true);
   } finally {

@@ -12,7 +12,6 @@ const projectDirs = [
   "packages/engine-gateway",
   "packages/storage",
   "apps/core-daemon",
-  "apps/inspector",
   "apps/bench-runner",
 ];
 
@@ -75,26 +74,6 @@ if (existsSync(daemonDistDir)) {
     join(daemonDistDir, "build-info.json"),
     `${JSON.stringify(buildInfo, null, 2)}\n`
   );
-}
-
-// Inspector SPA frontend lives in apps/inspector/web — separate Vite build.
-// Skip when a prebuilt bundle is already present and the operator opted out
-// (CLI/MCP-only installs, or a tarball that vendors web/dist).
-const inspectorWebDir = "apps/inspector/web";
-const inspectorWebIndex = join(inspectorWebDir, "dist", "index.html");
-const skipInspectorWeb =
-  process.env.ALAYA_BUILD_INSPECTOR_WEB === "0" && existsSync(inspectorWebIndex);
-if (skipInspectorWeb) {
-  console.log("skipping inspector web build (ALAYA_BUILD_INSPECTOR_WEB=0 and dist/index.html present)");
-} else if (existsSync(join(inspectorWebDir, "package.json"))) {
-  const inspectorWebBuild = spawnSync(
-    "pnpm",
-    ["--dir", inspectorWebDir, "build"],
-    { stdio: "inherit", shell: process.platform === "win32" },
-  );
-  if (inspectorWebBuild.status !== 0) {
-    process.exit(inspectorWebBuild.status ?? 1);
-  }
 }
 
 process.exit(0);

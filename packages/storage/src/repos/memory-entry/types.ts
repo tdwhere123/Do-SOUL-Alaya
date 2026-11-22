@@ -32,7 +32,7 @@ export interface MemoryEntryListPageOptions {
   readonly offset: number;
 }
 
-export interface RecallTierWindowCursor {
+interface RecallTierWindowCursor {
   readonly created_at: string;
   readonly object_id: string;
 }
@@ -97,7 +97,7 @@ export interface MemoryEntryKeywordLaneReceipt {
   readonly unseen_upper_bound: number | null;
 }
 
-export type MemoryKeywordFieldCaptureVariant =
+type MemoryKeywordFieldCaptureVariant =
   | "lexical_relaxed"
   | "lexical_expanded";
 
@@ -135,7 +135,7 @@ export interface MemoryEntryRepo {
     fields: MemoryEntryRepoUpdateFields,
     callbacks: {
       readonly beforeUpdate?: () => void;
-      readonly afterUpdate?: () => void;
+      readonly afterUpdate?: (updated: Readonly<MemoryEntry>) => void;
     },
     workspaceId?: string
   ): Readonly<MemoryEntry>;

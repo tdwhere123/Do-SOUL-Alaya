@@ -19,7 +19,7 @@ export function createSqliteCatalogReader(connection: SqliteCatalogConnection): 
       `).all() as CatalogObject[];
     },
     listColumns(table: string): readonly ColumnInfo[] {
-      return connection.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all() as ColumnInfo[];
+      return connection.prepare(`PRAGMA main.table_info(${quoteIdent(table)})`).all() as ColumnInfo[];
     }
   };
 }

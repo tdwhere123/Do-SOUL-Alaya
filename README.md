@@ -7,7 +7,7 @@
 # Do-SOUL Alaya
 
 A local-first memory plane for CLI coding agents (`@do-soul/alaya-*`).
-MCP and CLI only. No chat UI. No telemetry.
+MCP (`stdio`), CLI, and loopback Daemon HTTP JSON API. No GUI, TUI, or SPA. No telemetry.
 
 Workspace packages are `private: true` with `workspace:*` dependencies.
 They are **not** published to npm — `npm install @do-soul/alaya-*` is
@@ -25,7 +25,6 @@ a completed recall landing or a published KPI.
 | [`docs/handbook/invariants.md`](docs/handbook/invariants.md) | Rules that always win |
 | [`docs/handbook/architecture.md`](docs/handbook/architecture.md) | Package shape, surfaces, write model, governance routes |
 | [`docs/handbook/recall.md`](docs/handbook/recall.md) | Recall contract, live path, readiness vocabulary |
-| [`docs/handbook/glossary.md`](docs/handbook/glossary.md) | Stable vocabulary |
 
 Agent working copy: [`AGENTS.md`](AGENTS.md).
 
@@ -158,9 +157,5 @@ The runtime is required in CI and default developer installs; default installs
 do not download model weights. CI provisions a pinned model for one Linux native
 canary, verifies its artifact tree before loading, and runs inference offline;
 the other platform shards do not require that cache.
-
-Inspector SPA is compiled by `pnpm build` (`apps/inspector/web`) unless
-`ALAYA_BUILD_INSPECTOR_WEB=0` and `apps/inspector/web/dist/index.html`
-already exists. This tree does not ship a separate Inspector tarball.
 
 License: [AGPL-3.0](LICENSE).

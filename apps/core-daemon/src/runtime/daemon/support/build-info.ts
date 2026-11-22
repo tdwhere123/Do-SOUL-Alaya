@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CoreError } from "@do-soul/alaya-core";
 
 export interface BuildInfo {
   readonly version: string;
@@ -21,50 +22,83 @@ interface BuildInfoReadOptions {
   readonly readFile?: ReadFileSyncLike;
 }
 
-// dist/build-info.json is written by scripts/build-existing.mjs at the end
-// of every build. From built code (dist/runtime/build-info.js), the JSON lives
-// one level up at dist/build-info.json. From source (tests, ts-node), no
-// build-info.json exists, so callers fall back to the unknown sentinel or the
-// package version depending on the surface they are rendering.
+const CORE_DAEMON_PACKAGE_NAME = "@do-soul/alaya";
+
+// dist/build-info.json is written by scripts/build-existing.mjs at the end of
+// every build. Walk up once to the @do-soul/alaya package root and read it;
+// unbuilt dev/test trees fall back to UNKNOWN_BUILD_INFO or package version.
 export function readBuildInfo(options: BuildInfoReadOptions = {}): BuildInfo {
   const readFile = options.readFile ?? readFileSync;
-  for (const candidatePath of resolveBuildInfoCandidatePaths(options.moduleUrl ?? import.meta.url)) {
-    try {
-      const raw = readFile(candidatePath, "utf8");
-      return normalizeBuildInfo(parseJsonObject(raw));
-    } catch {
-      continue;
-    }
+  const located = findCoreDaemonPackage(
+    dirname(fileURLToPath(options.moduleUrl ?? import.meta.url)),
+    readFile
+  );
+  if (located === null) {
+    return UNKNOWN_BUILD_INFO;
   }
-  return UNKNOWN_BUILD_INFO;
+  return readDistBuildInfo(located.root, readFile) ?? UNKNOWN_BUILD_INFO;
 }
 
 export function readRuntimeVersion(options: BuildInfoReadOptions = {}): string {
-  const buildInfo = readBuildInfo(options);
-  return buildInfo.version === UNKNOWN_BUILD_INFO.version
-    ? readPackageVersion(options)
-    : buildInfo.version;
+  const readFile = options.readFile ?? readFileSync;
+  const located = findCoreDaemonPackage(
+    dirname(fileURLToPath(options.moduleUrl ?? import.meta.url)),
+    readFile
+  );
+  if (located === null) {
+    return UNKNOWN_BUILD_INFO.version;
+  }
+  const built = readDistBuildInfo(located.root, readFile);
+  if (built !== null && built.version !== UNKNOWN_BUILD_INFO.version) {
+    return built.version;
+  }
+  return readNonEmptyString(located.pkg.version, UNKNOWN_BUILD_INFO.version);
 }
 
-function readPackageVersion(options: BuildInfoReadOptions): string {
+export function resolveCoreDaemonPackageRoot(
+  moduleUrl: string = import.meta.url,
+  readFile: ReadFileSyncLike = readFileSync
+): string {
+  const startDir = dirname(fileURLToPath(moduleUrl));
+  const located = findCoreDaemonPackage(startDir, readFile);
+  if (located === null) {
+    throw new CoreError(
+      "NOT_FOUND",
+      `Unable to locate ${CORE_DAEMON_PACKAGE_NAME} package.json from ${startDir}.`
+    );
+  }
+  return located.root;
+}
+
+function readDistBuildInfo(packageRoot: string, readFile: ReadFileSyncLike): BuildInfo | null {
   try {
-    const readFile = options.readFile ?? readFileSync;
-    const raw = readFile(resolvePackageJsonPath(options.moduleUrl ?? import.meta.url), "utf8");
-    const parsed = parseJsonObject(raw);
-    return readNonEmptyString(parsed.version, UNKNOWN_BUILD_INFO.version);
+    const raw = readFile(resolve(packageRoot, "dist", "build-info.json"), "utf8");
+    return normalizeBuildInfo(parseJsonObject(raw));
   } catch {
-    return UNKNOWN_BUILD_INFO.version;
+    return null;
   }
 }
 
-function resolveBuildInfoCandidatePaths(moduleUrl: string): readonly string[] {
-  const here = dirname(fileURLToPath(moduleUrl));
-  return [resolve(here, "build-info.json"), resolve(here, "..", "build-info.json")];
-}
-
-function resolvePackageJsonPath(moduleUrl: string): string {
-  const here = dirname(fileURLToPath(moduleUrl));
-  return resolve(here, "..", "..", "package.json");
+function findCoreDaemonPackage(
+  startDir: string,
+  readFile: ReadFileSyncLike
+): Readonly<{ root: string; pkg: Record<string, unknown> }> | null {
+  let current = startDir;
+  while (true) {
+    try {
+      const pkg = parseJsonObject(readFile(resolve(current, "package.json"), "utf8"));
+      if (pkg.name === CORE_DAEMON_PACKAGE_NAME) {
+        return { root: current, pkg };
+      }
+    } catch {
+      // Keep walking up until the @do-soul/alaya package root is located.
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> {

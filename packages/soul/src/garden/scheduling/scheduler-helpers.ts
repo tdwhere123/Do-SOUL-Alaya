@@ -32,11 +32,20 @@ export function compareTasks(
   return left.task_id.localeCompare(right.task_id);
 }
 
-export function buildCoolingKey(
+function buildCoolingKey(
   taskKind: GardenTaskDescriptor["task_kind"],
   targetRef: string
 ): string {
   return `${taskKind}:${targetRef}`;
+}
+
+export function buildCoolingKeys(
+  taskKind: GardenTaskDescriptor["task_kind"],
+  refs: readonly string[],
+  workspaceId: string
+): readonly string[] {
+  const targets = refs.length > 0 ? refs : [workspaceId];
+  return targets.map((ref) => buildCoolingKey(taskKind, ref));
 }
 
 export function parseTaskDescriptorFromRow(

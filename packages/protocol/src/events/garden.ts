@@ -13,6 +13,7 @@ const gardenEventTypeValues = [
   "soul.garden.semantic_enrichment",
   "soul.garden.embedding_follow_up",
   "soul.garden.task_dispatched",
+  "soul.garden.statement_session.extracted",
   "soul.garden.task_completed",
   "soul.garden.task_claim_reclaimed",
   "soul.garden.task_expired",
@@ -25,6 +26,7 @@ export const GardenEventType = {
   SOUL_GARDEN_SEMANTIC_ENRICHMENT: "soul.garden.semantic_enrichment",
   SOUL_GARDEN_EMBEDDING_FOLLOW_UP: "soul.garden.embedding_follow_up",
   SOUL_GARDEN_TASK_DISPATCHED: "soul.garden.task_dispatched",
+  SOUL_GARDEN_STATEMENT_SESSION_EXTRACTED: "soul.garden.statement_session.extracted",
   SOUL_GARDEN_TASK_COMPLETED: "soul.garden.task_completed",
   SOUL_GARDEN_TASK_CLAIM_RECLAIMED: "soul.garden.task_claim_reclaimed",
   // invariant: a never-claimed pending Garden task that outlived its kind TTL is
@@ -57,6 +59,14 @@ export const SoulGardenTaskDispatchedPayloadSchema = z
     occurred_at: IsoDatetimeStringSchema
   })
   .readonly();
+
+const StatementSessionExtractedPayloadSchema = z.object({
+  status: z.enum(["complete", "partial", "failed"]),
+  emitted_signal_ids: z.array(NonEmptyStringSchema).readonly(),
+  failed_candidate_signals_count: NonNegativeIntSchema,
+  unknown_candidate_signals_count: NonNegativeIntSchema,
+  inflight_candidate_signals_count: NonNegativeIntSchema
+}).strict().readonly();
 
 export const SoulGardenTaskCompletedPayloadSchema = z
   .object({
@@ -201,6 +211,7 @@ const gardenPayloadSchemas = {
   [GardenEventType.SOUL_GARDEN_SEMANTIC_ENRICHMENT]: SoulGardenSemanticEnrichmentPayloadSchema,
   [GardenEventType.SOUL_GARDEN_EMBEDDING_FOLLOW_UP]: SoulGardenEmbeddingFollowUpPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_DISPATCHED]: SoulGardenTaskDispatchedPayloadSchema,
+  [GardenEventType.SOUL_GARDEN_STATEMENT_SESSION_EXTRACTED]: StatementSessionExtractedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_COMPLETED]: SoulGardenTaskCompletedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_CLAIM_RECLAIMED]: SoulGardenTaskClaimReclaimedPayloadSchema,
   [GardenEventType.SOUL_GARDEN_TASK_EXPIRED]: SoulGardenTaskExpiredPayloadSchema,
@@ -267,6 +278,7 @@ export const GardenEventUnionSchema = z
     SoulGardenSemanticEnrichmentEventObjectSchema,
     SoulGardenEmbeddingFollowUpEventObjectSchema,
     SoulGardenTaskDispatchedEventObjectSchema,
+    createGardenEventObjectSchema(GardenEventType.SOUL_GARDEN_STATEMENT_SESSION_EXTRACTED, StatementSessionExtractedPayloadSchema),
     SoulGardenTaskCompletedEventObjectSchema,
     SoulGardenTaskClaimReclaimedEventObjectSchema,
     SoulGardenTaskExpiredEventObjectSchema,

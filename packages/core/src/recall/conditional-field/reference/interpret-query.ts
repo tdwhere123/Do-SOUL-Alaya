@@ -5,9 +5,7 @@ import type {
 
 export {
   completenessForInterpretationStatus,
-  interpretationCoverage,
   interpretationCoverageFor,
-  interpretationHasOpenHoles,
   interpretationMayEmitCompleteEmpty
 } from "../engine/interpretation-coverage.js";
 

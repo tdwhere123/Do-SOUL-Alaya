@@ -168,7 +168,7 @@ function reviewContext() {
   return {
     workspaceId: WORKSPACE_ID,
     runId: RUN_ID,
-    agentTarget: "inspector",
+    agentTarget: "http-reviewer",
     sessionId: "session-1"
   } as const;
 }

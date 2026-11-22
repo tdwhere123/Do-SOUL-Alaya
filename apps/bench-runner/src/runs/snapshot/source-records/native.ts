@@ -109,7 +109,7 @@ export async function admitRetainedNativeSourceSnapshot(input: Readonly<{
   NativeSourceSnapshotBodySchema.shape.producer_commit.parse(input.producerCommit);
   const protectedPaths = [retainedPath, ...["-wal", "-shm", "-journal"].map(suffix => retainedPath + suffix)]
     .map(canonicalPath);
-  const protectedFiles = protectedPaths.filter(boundedArtifactEntryExists).map(path => statSync(path));
+  const protectedFiles = protectedPaths.filter(boundedArtifactEntryExists).map(path => statSync(path, { bigint: true }));
   const outputs = [snapshotPath, nativeSourceSnapshotManifestPath(snapshotPath),
     ...["-wal", "-shm", "-journal"].map(suffix => snapshotPath + suffix)];
   const lockPath = snapshotPublishLockPath(snapshotPath);
@@ -117,8 +117,8 @@ export async function admitRetainedNativeSourceSnapshot(input: Readonly<{
   if ([...outputs, ...lockFiles].some(path => {
     if (protectedPaths.some(protectedPath => canonicalPathsOverlap(canonicalPath(path), protectedPath))) return true;
     if (!boundedArtifactEntryExists(path)) return false;
-    const file = statSync(path);
-    return protectedFiles.some(original => file.dev === original.dev && file.ino === original.ino);
+    const file = statSync(path, { bigint: true });
+    return file.ino !== 0n && protectedFiles.some(original => file.dev === original.dev && file.ino === original.ino);
   })) {
     throw new AlayaError("CONFLICT", "retained source admission output overlaps its original");
   }

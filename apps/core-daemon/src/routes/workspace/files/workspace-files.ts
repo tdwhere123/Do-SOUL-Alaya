@@ -1,5 +1,6 @@
 import type { Context, Hono } from "hono";
 import { boundedPathParams, readBoundedPathParam } from "../../../middleware/bounded-path-params.js";
+import { jsonError } from "../../shared/shared.js";
 import { CoreError } from "@do-soul/alaya-core";
 import { parseWorkspaceGitLogLimit } from "@do-soul/alaya-protocol";
 import {
@@ -167,19 +168,19 @@ function rejectRateLimited(
   workspaceId: string,
   gitRateLimiter: { allow(workspaceId: string): boolean }
 ): Response | null {
-  return gitRateLimiter.allow(workspaceId) ? null : context.json({ success: false, error: { code: "rate_limited" } }, 429);
+  return gitRateLimiter.allow(workspaceId) ? null : jsonError(context, 429, { code: "rate_limited" });
 }
 
 function invalidRefArg(context: Context): Response {
-  return context.json({ success: false, error: { code: "invalid_ref_arg" } }, 400);
+  return jsonError(context, 400, { code: "invalid_ref_arg" });
 }
 
 function unsupportedExecParsing(context: Context): Response {
-  return context.json({ success: false, error: { code: "exec_parsing_unavailable" } }, 501);
+  return jsonError(context, 501, { code: "exec_parsing_unavailable" });
 }
 
 function workspaceNotBound(context: Context, status: string): Response {
-  return context.json({ success: false, error: { code: "workspace_not_bound", status } }, 409);
+  return jsonError(context, 409, { code: "workspace_not_bound", status });
 }
 
 const gitDiffErrorCodes = {
@@ -406,39 +407,15 @@ function mapGitRouteError(
   }
 ) {
   if (error instanceof GitInputError) {
-    return context.json(
-      {
-        success: false,
-        error: {
-          code: codes.invalidCode
-        }
-      },
-      400
-    );
+    return jsonError(context, 400, { code: codes.invalidCode });
   }
 
   if (error instanceof GitTimeoutError) {
-    return context.json(
-      {
-        success: false,
-        error: {
-          code: codes.timeoutCode
-        }
-      },
-      504
-    );
+    return jsonError(context, 504, { code: codes.timeoutCode });
   }
 
   if (error instanceof GitCommandError) {
-    return context.json(
-      {
-        success: false,
-        error: {
-          code: codes.failureCode
-        }
-      },
-      502
-    );
+    return jsonError(context, 502, { code: codes.failureCode });
   }
 
   throw error;

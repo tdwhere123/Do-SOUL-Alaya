@@ -40,7 +40,8 @@ export function parseAcceptedMemoryUpdateInput(
   readonly target_object_id: string;
   readonly workspace_id: string;
   readonly proposed_changes: MemoryEntryMutableFields & { readonly updated_at: string };
-  readonly caused_by: string;
+  readonly buildMemoryEvent: AcceptedMemoryUpdateInput["buildMemoryEvent"];
+  readonly buildGreenRevocationEvent: AcceptedMemoryUpdateInput["buildGreenRevocationEvent"];
   readonly expected_baseline_updated_at: string | null;
 }> {
   const parsedChanges = parseUpdateFields({
@@ -58,7 +59,8 @@ export function parseAcceptedMemoryUpdateInput(
     target_object_id: parseNonEmptyString(input.target_object_id, "target_object_id"),
     workspace_id: parseWorkspaceId(input.workspace_id),
     proposed_changes: parsedChanges,
-    caused_by: parseNonEmptyString(input.caused_by, "caused_by"),
+    buildMemoryEvent: input.buildMemoryEvent,
+    buildGreenRevocationEvent: input.buildGreenRevocationEvent,
     expected_baseline_updated_at: expectedBaselineUpdatedAt
   });
 }
@@ -71,13 +73,15 @@ export function parseAcceptedPathRelationGovernanceInput(
   readonly path_id_on_create: string;
   readonly updated_at: string;
   readonly caused_by: string;
+  readonly buildEvent: AcceptedPathRelationGovernanceInput["buildEvent"];
 }> {
   return deepFreeze({
     target_object_id: parseNonEmptyString(input.target_object_id, "target_object_id"),
     workspace_id: parseWorkspaceId(input.workspace_id),
     path_id_on_create: parseNonEmptyString(input.path_id_on_create, "path_id_on_create"),
     updated_at: parseUpdatedAt(input.updated_at),
-    caused_by: parseNonEmptyString(input.caused_by, "caused_by")
+    caused_by: parseNonEmptyString(input.caused_by, "caused_by"),
+    buildEvent: input.buildEvent
   });
 }
 
@@ -116,14 +120,14 @@ export function assertAcceptedPathRelationGovernanceMatchesProposal(
   }
 }
 
-export function createAcceptedMemoryUpdateMismatch(proposalId: string): StorageError {
+function createAcceptedMemoryUpdateMismatch(proposalId: string): StorageError {
   return new StorageError(
     "CONFLICT",
     `Accepted memory update does not match proposal ${proposalId}.`
   );
 }
 
-export function createAcceptedPathRelationGovernanceMismatch(proposalId: string): StorageError {
+function createAcceptedPathRelationGovernanceMismatch(proposalId: string): StorageError {
   return new StorageError(
     "CONFLICT",
     `Accepted path relation governance update does not match proposal ${proposalId}.`
@@ -135,7 +139,7 @@ export function parseAcceptedSynthesisCreateInput(
 ): Readonly<{
   readonly workspace_id: string;
   readonly capsule: Readonly<SynthesisCapsule>;
-  readonly caused_by: string;
+  readonly event: AcceptedSynthesisCreateInput["event"];
 }> {
   let capsule: Readonly<SynthesisCapsule>;
   try {
@@ -153,7 +157,7 @@ export function parseAcceptedSynthesisCreateInput(
   return deepFreeze({
     workspace_id: workspaceId,
     capsule,
-    caused_by: parseNonEmptyString(input.caused_by, "caused_by")
+    event: input.event
   });
 }
 
@@ -169,14 +173,14 @@ export function assertAcceptedSynthesisCreateMatchesProposal(
   }
 }
 
-export function createAcceptedSynthesisCreateMismatch(proposalId: string): StorageError {
+function createAcceptedSynthesisCreateMismatch(proposalId: string): StorageError {
   return new StorageError(
     "CONFLICT",
     `Accepted synthesis create does not match proposal ${proposalId}.`
   );
 }
 
-export function proposedChangesMatch(
+function proposedChangesMatch(
   stored: Readonly<MemoryEntryMutableFields>,
   supplied: Readonly<MemoryEntryMutableFields>
 ): boolean {
@@ -210,29 +214,4 @@ export function shouldRevokeGreenForEvidenceRewrite(
   }
   const next = new Set(nextEvidenceRefs);
   return !previousEvidenceRefs.some((ref) => next.has(ref));
-}
-
-export function toUpdatedFieldNames(fields: MemoryEntryMutableFields): string[] {
-  const updatedFields: string[] = [];
-
-  if (fields.content !== undefined) {
-    updatedFields.push("content");
-  }
-  if (fields.domain_tags !== undefined) {
-    updatedFields.push("domain_tags");
-  }
-  if (fields.evidence_refs !== undefined) {
-    updatedFields.push("evidence_refs");
-  }
-  if (fields.storage_tier !== undefined) {
-    updatedFields.push("storage_tier");
-  }
-  if (fields.confidence !== undefined) {
-    updatedFields.push("confidence");
-  }
-  if (fields.retention_state !== undefined) {
-    updatedFields.push("retention_state");
-  }
-
-  return updatedFields;
 }

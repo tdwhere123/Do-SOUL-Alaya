@@ -34,21 +34,66 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
+  resolve:
+    name: Resolve release commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      commit_sha: ${{ steps.identity.outputs.commit_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Peel tag to commit SHA
+        id: identity
+        env:
+          TRIGGER_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          TAG="${RELEASE_TAG}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "FATAL: invalid release tag: ${TAG}"
+            exit 1
+          fi
+          COMMIT_SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          if [[ ! "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "FATAL: expected 40-hex commit SHA, got ${COMMIT_SHA}"
+            exit 1
+          fi
+          if [[ "$COMMIT_SHA" != "$TRIGGER_SHA" ]]; then
+            if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              echo "FATAL: github.sha ${TRIGGER_SHA} != peeled refs/tags/${TAG}^{commit} ${COMMIT_SHA}; dispatch with --ref refs/tags/${TAG} so OIDC provenance, tested commit, tarball, and release tag are identical"
+            else
+              echo "FATAL: peeled tag commit ${COMMIT_SHA} != github.sha ${TRIGGER_SHA} (tag moved between trigger and resolve)"
+            fi
+            exit 1
+          fi
+          {
+            echo "tag=${TAG}"
+            echo "commit_sha=${COMMIT_SHA}"
+          } >> "${GITHUB_OUTPUT}"
+
   quality:
     name: Build, test, hygiene
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: resolve
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.resolve.outputs.commit_sha }}
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -130,17 +175,18 @@ jobs:
     name: Windows build + test + CLI preflight
     runs-on: windows-latest
     timeout-minutes: 30
+    needs: resolve
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.resolve.outputs.commit_sha }}
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -166,12 +212,13 @@ jobs:
     name: Bench content contracts
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: resolve
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.resolve.outputs.commit_sha }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -186,16 +233,17 @@ jobs:
     name: Bench-runner public surface smoke
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: resolve
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.resolve.outputs.commit_sha }}
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -221,6 +269,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs:
+      - resolve
       - quality
       - windows-quality
       - content-contracts
@@ -232,17 +281,18 @@ jobs:
     outputs:
       tag: ${{ steps.pack.outputs.tag }}
       tarball: ${{ steps.pack.outputs.tarball }}
+      commit_sha: ${{ steps.pack.outputs.commit_sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.resolve.outputs.commit_sha }}
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -265,6 +315,12 @@ jobs:
           VERSION="${TAG#v}"
           PREFIX="do-soul-alaya-${VERSION}"
           TARBALL="${PREFIX}.tar.gz"
+          EXPECTED="${{ needs.resolve.outputs.commit_sha }}"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [[ "$HEAD_SHA" != "$EXPECTED" ]]; then
+            echo "FATAL: HEAD ${HEAD_SHA} does not match resolved commit ${EXPECTED}"
+            exit 1
+          fi
 
           # git archive HEAD captures exactly what the checked-out tag points to.
           git archive --format=tar.gz --prefix="${PREFIX}/" -o "${TARBALL}" HEAD
@@ -286,10 +342,11 @@ jobs:
           {
             echo "tag=${TAG}"
             echo "tarball=${TARBALL}"
+            echo "commit_sha=${HEAD_SHA}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Upload release assets
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
           path: |
@@ -299,7 +356,7 @@ jobs:
           retention-days: 14
 
       - name: Attest release assets
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: |
             ${{ steps.pack.outputs.tarball }}
@@ -309,23 +366,25 @@ jobs:
     name: Installer smoke from packaged assets
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: package
+    needs:
+      - resolve
+      - package
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.package.outputs.tag }}
+          ref: ${{ needs.resolve.outputs.commit_sha }}
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-assets
           path: release-assets
@@ -352,7 +411,7 @@ jobs:
           echo "SMOKE OK: tarball + install.sh + smoke-built-cli contract upholds end-to-end." >> install-smoke.txt
 
       - name: Upload install smoke evidence
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: install-smoke
           path: install-smoke.txt
@@ -370,7 +429,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-assets
           path: release-assets
@@ -381,14 +440,30 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.package.outputs.tag }}
           TARBALL: ${{ needs.package.outputs.tarball }}
+          COMMIT_SHA: ${{ needs.package.outputs.commit_sha }}
         run: |
           set -euo pipefail
           prerelease_args=()
           if [[ "$TAG" == *-* ]]; then
             prerelease_args+=(--prerelease)
           fi
+          remote_out="$(git ls-remote --exit-code "https://github.com/${GH_REPO}.git" "refs/tags/${TAG}" "refs/tags/${TAG}^{}")"
+          peeled=""
+          direct=""
+          while read -r sha ref; do
+            case "$ref" in
+              "refs/tags/${TAG}^{}") peeled="$sha" ;;
+              "refs/tags/${TAG}") direct="$sha" ;;
+            esac
+          done <<< "$remote_out"
+          remote_sha="${peeled:-$direct}"
+          if [[ "$remote_sha" != "$COMMIT_SHA" ]]; then
+            echo "FATAL: remote tag ${TAG} points to ${remote_sha:-missing}, expected ${COMMIT_SHA}"
+            exit 1
+          fi
           gh release create "$TAG" \
             --verify-tag \
+            --target "$COMMIT_SHA" \
             --title "$TAG" \
             --generate-notes \
             "${prerelease_args[@]}" \

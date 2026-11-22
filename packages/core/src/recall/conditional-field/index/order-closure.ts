@@ -13,7 +13,7 @@ import {
   type ObserverCoverage
 } from "./completeness.js";
 
-export type OrderCoveragePremise = "closed" | "open";
+type OrderCoveragePremise = "closed" | "open";
 
 export type OrderClosureInput = Readonly<{
   readonly query_id: string;

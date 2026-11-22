@@ -19,7 +19,7 @@ import {
 import type { HistoryEntry, HistoryLayout } from "./history.js";
 import { isHistoryEntrySlug } from "./history-slug.js";
 
-export interface HistorySidecar {
+interface HistorySidecar {
   readonly filename: string;
   readonly contents: string;
 }

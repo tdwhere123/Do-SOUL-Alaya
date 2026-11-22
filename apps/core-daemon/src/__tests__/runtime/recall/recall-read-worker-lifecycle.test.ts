@@ -67,7 +67,7 @@ async function harness(workerCount = 1, requestTimeoutMs = 600) {
   }
 }
 const read = (lifecycle: RecallReadWorkerLifecycle, workspaceId: string, preferred?: Worker) =>
-  lifecycle.request("memory.findByWorkspaceId", { workspaceId }, undefined, preferred);
+  lifecycle.request("constraints.findActive", { workspaceId, cap: 8 }, undefined, preferred);
 const dispatched = (events: readonly Event[], workspaceId: string) =>
   events.filter(event => event.kind === "dispatch" && event.payload?.workspaceId === workspaceId);
 
@@ -90,7 +90,7 @@ describe("recall read worker deadline and native quarantine", () => {
       expect(h.unavailable).toHaveBeenCalledExactlyOnceWith(original);
       let queuedSettled = false;
       const queued = read(h.lifecycle, "after-native-exit").finally(() => { queuedSettled = true; });
-      const queuedResult = expect(queued).resolves.toEqual([]);
+      const queuedResult = expect(queued).resolves.toEqual({ constraints: [], total_count: 0 });
       await pause(40);
       expect(queuedSettled).toBe(false);
       expect(dispatched(h.events(), "after-native-exit")).toHaveLength(0);
@@ -102,7 +102,7 @@ describe("recall read worker deadline and native quarantine", () => {
       expect(h.exited.has(original)).toBe(true);
       expect(h.events().filter(event => event.kind === "spawn")).toHaveLength(2);
       expect(dispatched(h.events(), "after-native-exit")).toHaveLength(1);
-      await expect(read(h.lifecycle, "subsequent")).resolves.toEqual([]);
+      await expect(read(h.lifecycle, "subsequent")).resolves.toEqual({ constraints: [], total_count: 0 });
     } finally { await h.cleanup(); }
   });
 
@@ -119,7 +119,7 @@ describe("recall read worker deadline and native quarantine", () => {
       expect(h.events().filter(event => event.kind === "spawn")).toHaveLength(1);
       h.database.exec("ROLLBACK");
       await expect.poll(() => h.exited.size).toBe(1);
-      await expect(read(h.lifecycle, "fresh")).resolves.toEqual([]);
+      await expect(read(h.lifecycle, "fresh")).resolves.toEqual({ constraints: [], total_count: 0 });
       expect(dispatched(h.events(), "expired-in-queue")).toHaveLength(0);
       expect(h.posts.mock.calls.some(args => args[0].payload.workspaceId === "expired-in-queue")).toBe(false);
       expect(dispatched(h.events(), "fresh")).toHaveLength(1);
@@ -155,7 +155,7 @@ describe("recall read worker deadline and native quarantine", () => {
       const failures = originals.map(worker => expect(read(h.lifecycle, "native-lock", worker)).rejects.toThrow(/timed out/));
       await expect.poll(() => h.events().filter(event => event.kind === "sql-enter").length).toBe(2);
       await Promise.all(failures);
-      const queued = ["replacement-one", "replacement-two"].map(key => expect(read(h.lifecycle, key)).resolves.toEqual([]));
+      const queued = ["replacement-one", "replacement-two"].map(key => expect(read(h.lifecycle, key)).resolves.toEqual({ constraints: [], total_count: 0 }));
       expect(h.exited.size).toBe(0);
       expect(h.events().filter(event => event.kind === "spawn")).toHaveLength(2);
       expect(dispatched(h.events(), "replacement-one")).toHaveLength(0);
@@ -171,7 +171,7 @@ describe("recall read worker deadline and native quarantine", () => {
         expect(originals).not.toContain(replacement);
         let settled = false;
         const request = read(h.lifecycle, "held-response").finally(() => { settled = true; });
-        const requestResult = expect(request).resolves.toEqual([]);
+        const requestResult = expect(request).resolves.toEqual({ constraints: [], total_count: 0 });
         await expect.poll(() => h.events().filter(event => event.kind === "response-held").length).toBe(1);
         const id = dispatched(h.events(), "held-response")[0]!.id!;
         // Deliberately inject duplicate events after actual native exit: these are
@@ -188,7 +188,7 @@ describe("recall read worker deadline and native quarantine", () => {
         replacement.postMessage({ id, operation: "fixture.releaseResponse" });
         await requestResult;
       });
-      await expect(read(h.lifecycle, "after-stale-events")).resolves.toEqual([]);
+      await expect(read(h.lifecycle, "after-stale-events")).resolves.toEqual({ constraints: [], total_count: 0 });
       expect(h.events().filter(event => event.kind === "spawn").length - 2).toBeLessThanOrEqual(2);
     } finally { await h.cleanup(); }
   });
@@ -242,7 +242,7 @@ describe("recall read worker deadline and native quarantine", () => {
       expect(new Set(requests.map(event => event.threadId)).size).toBe(1);
       expect(requests.filter(event => event.kind === "dispatch")).toHaveLength(2);
       expect(h.unavailable).toHaveBeenCalledTimes(1);
-      await expect(read(h.lifecycle, "after-concurrent-timeout")).resolves.toEqual([]);
+      await expect(read(h.lifecycle, "after-concurrent-timeout")).resolves.toEqual({ constraints: [], total_count: 0 });
     } finally { await h.cleanup(); }
   });
 
@@ -264,7 +264,7 @@ describe("recall read worker deadline and native quarantine", () => {
       expect(dispatched(h.events(), "leaked-callback")).toHaveLength(0);
       // Defining a function under ALS does not capture it; the leaked promise
       // callback above is the actual inherited-context case.
-      await expect(leaked()).resolves.toEqual([]);
+      await expect(leaked()).resolves.toEqual({ constraints: [], total_count: 0 });
       let unfinishedResult!: Promise<void>;
       await h.lifecycle.isolate(async () => {
         unfinished = read(h.lifecycle, "delay:1000");
@@ -273,7 +273,7 @@ describe("recall read worker deadline and native quarantine", () => {
       });
       await unfinishedResult;
       expect(h.unavailable).toHaveBeenCalledTimes(1);
-      await expect(read(h.lifecycle, "after-unfinished-work")).resolves.toEqual([]);
+      await expect(read(h.lifecycle, "after-unfinished-work")).resolves.toEqual({ constraints: [], total_count: 0 });
     } finally { trigger.resolve(); await callback?.catch(() => undefined); await unfinished?.catch(() => undefined); await h.cleanup(); }
   });
 });
@@ -329,7 +329,7 @@ describe("caller-linked native execution scopes", () => {
       expect(work).not.toHaveBeenCalled();
       expect(h.posts.mock.calls).toHaveLength(before);
       expect(h.unavailable).not.toHaveBeenCalled();
-      await expect(read(h.lifecycle, "independent-after-preabort")).resolves.toEqual([]);
+      await expect(read(h.lifecycle, "independent-after-preabort")).resolves.toEqual({ constraints: [], total_count: 0 });
     } finally { await h.cleanup(); }
   });
 
@@ -351,7 +351,7 @@ describe("caller-linked native execution scopes", () => {
       expect(h.unavailable).not.toHaveBeenCalled();
       expect(dispatched(h.events(), "aborted-waiter")).toHaveLength(0);
       release.resolve(); await holder;
-      await expect(read(h.lifecycle, "after-aborted-waiter")).resolves.toEqual([]);
+      await expect(read(h.lifecycle, "after-aborted-waiter")).resolves.toEqual({ constraints: [], total_count: 0 });
       expect(dispatched(h.events(), "aborted-waiter")).toHaveLength(0);
     } finally { release.resolve(); await holder.catch(() => undefined); await h.cleanup(); }
   });
@@ -375,7 +375,7 @@ describe("caller-linked native execution scopes", () => {
       expect(original.threadId).toBeGreaterThan(0);
       expect(h.unavailable).toHaveBeenCalledExactlyOnceWith(original);
       const queued = read(h.lifecycle, "after-caller-abort");
-      const result = expect(queued).resolves.toEqual([]);
+      const result = expect(queued).resolves.toEqual({ constraints: [], total_count: 0 });
       // No timer or simulated exit releases the lock/slot. Only the explicit
       // SQLite rollback below can let the original native call and Worker exit.
       expect(h.events().filter(event => event.kind === "spawn")).toHaveLength(1);
@@ -399,7 +399,7 @@ describe("caller-linked native execution scopes", () => {
       release.resolve(); await rejected;
       expect(dispatched(h.events(), "escaped-scope")).toHaveLength(0);
       expect(h.unavailable).not.toHaveBeenCalled();
-      await expect(read(h.lifecycle, "independent-after-scope-return")).resolves.toEqual([]);
+      await expect(read(h.lifecycle, "independent-after-scope-return")).resolves.toEqual({ constraints: [], total_count: 0 });
     } finally { release.resolve(); await escaped?.catch(() => undefined); await h.cleanup(); }
   });
 
@@ -422,7 +422,7 @@ describe("caller-linked native execution scopes", () => {
       expect(h.unavailable).toHaveBeenCalledExactlyOnceWith(original);
       expect(h.exited.has(original)).toBe(false);
       expect(h.database.inTransaction).toBe(true);
-      const queued = expect(read(h.lifecycle, "after-retired-dispatch")).resolves.toEqual([]);
+      const queued = expect(read(h.lifecycle, "after-retired-dispatch")).resolves.toEqual({ constraints: [], total_count: 0 });
       expect(h.events().filter(event => event.kind === "spawn")).toHaveLength(1);
       h.database.exec("ROLLBACK"); await Promise.all([queued, originalExit]);
       expect(h.exited.has(original)).toBe(true);

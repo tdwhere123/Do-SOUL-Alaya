@@ -89,7 +89,7 @@ describe("recall usage causal receipts", () => {
 
   it("binds telemetry reports to workspace, agent, and the session-backed run", async () => {
     const recorder = new InMemoryCausalUsageRecorder();
-    const deps = withDelivery(recorder, ["mem1"]);
+    const deps = withDelivery(recorder, ["mem1"], "session-1");
     const report = createReportContextUsageHandler({ deps, now: () => NOW, warn: vi.fn() });
 
     await report({
@@ -112,11 +112,13 @@ describe("recall usage causal receipts", () => {
 
 function withDelivery(
   recorder: InMemoryCausalUsageRecorder,
-  deliveredObjectIds: readonly string[]
+  deliveredObjectIds: readonly string[],
+  runId = context.runId
 ): RecallUsageHandlerDependencies {
   const deps = createDeps();
   deps.trustStateRecorder.findDeliveryById = vi.fn(async (deliveryId: string) => ({
     ...createDeliveryRecord(deliveryId),
+    run_id: runId,
     delivered_object_ids: [...deliveredObjectIds]
   }));
   return {

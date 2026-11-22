@@ -1,4 +1,4 @@
-import { bindEventPublisher, CoreError } from "@do-soul/alaya-core";
+import { CoreError, type EventPublisher } from "@do-soul/alaya-core";
 import {
   FileApprovalEventType,
   parseFileApprovalEventPayload,
@@ -21,14 +21,12 @@ export interface SoulApprovalResolution {
 }
 
 interface SoulApprovalServiceDependencies {
-  readonly eventLogRepo: Pick<EventLogRepo, "append" | "queryByEntity">;
+  readonly eventLogRepo: Pick<EventLogRepo, "queryByEntityInCurrentTransaction">;
+  readonly eventPublisher: EventPublisher;
   readonly runLookup: (runId: string) => Promise<{
     readonly run_id: string;
     readonly workspace_id: string;
   }>;
-  readonly runtimeNotifier: {
-    notifyEntry(entry: EventLogEntry): void | Promise<void>;
-  };
   readonly now?: () => string;
 }
 
@@ -55,64 +53,99 @@ async function resolveSoulApproval(
   if (run.workspace_id !== input.workspaceId) {
     throw new CoreError("NOT_FOUND", "Pending approval not found for run");
   }
-  const approvalEvents = await dependencies.eventLogRepo.queryByEntity("approval", input.approvalId);
-  const approvalState = getApprovalState(approvalEvents, input.approvalId);
-  const resolvedAt = now();
-  const entry = await bindEventPublisher({
-    eventLogRepo: dependencies.eventLogRepo,
-    runtimeNotifier: {
-      notify: () => undefined,
-      notifyEntry: (event) => dependencies.runtimeNotifier.notifyEntry(event)
-    },
-    purpose: "SoulApprovalService"
-  }).publish({
+
+  const { result: resolution } = await dependencies.eventPublisher.mutateThenAppendMany(() => {
+    const approvalEvents = dependencies.eventLogRepo.queryByEntityInCurrentTransaction(
+      "approval",
+      input.approvalId
+    );
+    const { approvalRequest } = getApprovalState(approvalEvents, {
+      approvalId: input.approvalId,
+      runId: run.run_id,
+      workspaceId: run.workspace_id
+    });
+    const resolvedAt = now();
+    const resolved: SoulApprovalResolution = {
+      approval_id: input.approvalId,
+      result,
+      resolved_at: resolvedAt
+    };
+
+    return {
+      events: [buildResolvedApprovalEvent(input, run, approvalRequest, resolvedAt, result)],
+      result: resolved
+    };
+  });
+
+  return resolution;
+}
+
+function buildResolvedApprovalEvent(
+  input: SoulApprovalActionInput,
+  run: { readonly run_id: string; readonly workspace_id: string },
+  approvalRequest: SoulApprovalRequestedPayload,
+  resolvedAt: string,
+  result: "approved" | "rejected"
+) {
+  return {
     event_type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
-    entity_type: "approval",
+    entity_type: "approval" as const,
     entity_id: input.approvalId,
     workspace_id: run.workspace_id,
     run_id: run.run_id,
     caused_by: input.causedBy,
     payload_json: {
-      message_id: approvalState.approvalRequest.message_id,
+      message_id: approvalRequest.message_id,
       approval_id: input.approvalId,
       result,
-      description: approvalState.approvalRequest.description,
+      description: approvalRequest.description,
       resolved_at: resolvedAt,
-      ...(approvalState.approvalRequest.risk_level === undefined
+      ...(approvalRequest.risk_level === undefined
         ? {}
-        : { risk_level: approvalState.approvalRequest.risk_level }),
-      ...(approvalState.approvalRequest.source_kind === undefined
+        : { risk_level: approvalRequest.risk_level }),
+      ...(approvalRequest.source_kind === undefined
         ? {}
-        : { source_kind: approvalState.approvalRequest.source_kind }),
+        : { source_kind: approvalRequest.source_kind }),
       run_id: run.run_id
     }
-  });
-
-  return {
-    approval_id: input.approvalId,
-    result,
-    resolved_at: resolvedAt
   };
 }
 
-function getApprovalState(approvalEvents: readonly EventLogEntry[], approvalId: string): {
+function getApprovalState(
+  approvalEvents: readonly EventLogEntry[],
+  scope: {
+    readonly approvalId: string;
+    readonly runId: string;
+    readonly workspaceId: string;
+  }
+): {
   readonly approvalRequest: SoulApprovalRequestedPayload;
 } {
   let approvalRequest: SoulApprovalRequestedPayload | null = null;
 
   for (const event of approvalEvents) {
-    if (event.entity_type !== "approval" || event.entity_id !== approvalId) {
+    if (
+      event.entity_type !== "approval" ||
+      event.entity_id !== scope.approvalId ||
+      event.workspace_id !== scope.workspaceId ||
+      event.run_id !== scope.runId
+    ) {
       continue;
     }
 
     if (event.event_type === FileApprovalEventType.SOUL_APPROVAL_REQUESTED) {
-      approvalRequest = parseApprovalRequestedPayload(event);
+      const requested = parseApprovalRequestedPayload(event);
+      if (requested.approval_id === scope.approvalId && requested.run_id === scope.runId) {
+        approvalRequest = requested;
+      }
       continue;
     }
 
     if (event.event_type === FileApprovalEventType.SOUL_APPROVAL_RESOLVED) {
-      validateApprovalResolvedPayload(event);
-      throw new CoreError("CONFLICT", "Approval has already been resolved");
+      const resolved = parseApprovalResolvedPayload(event);
+      if (resolved.approval_id === scope.approvalId && resolved.run_id === scope.runId) {
+        throw new CoreError("CONFLICT", "Approval has already been resolved");
+      }
     }
   }
 
@@ -133,9 +166,9 @@ function parseApprovalRequestedPayload(event: EventLogEntry): SoulApprovalReques
   }
 }
 
-function validateApprovalResolvedPayload(event: EventLogEntry): void {
+function parseApprovalResolvedPayload(event: EventLogEntry) {
   try {
-    parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_RESOLVED, toPayloadRecord(event));
+    return parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_RESOLVED, toPayloadRecord(event));
   } catch (error) {
     throw new CoreError("VALIDATION", "Invalid SOUL approval resolved payload", { cause: error });
   }

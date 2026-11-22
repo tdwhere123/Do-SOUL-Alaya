@@ -7,6 +7,7 @@ import {
 } from "../../../shared/parse-row.js";
 import type { FieldEraseBarrierRow } from "../../ports.js";
 import { scrubGovernancePrivacyClosure, type EraseAuditRedactor } from "./governance-closure.js";
+import { retainErasedEvidenceBarriers } from "./projection-invalidation.js";
 
 const idParser: RowParser<string> = {
   parse(value: unknown): string {
@@ -21,6 +22,7 @@ export function scrubDerivedPrivacyClosure(
   sourceIds: readonly string[],
   redact: EraseAuditRedactor | undefined
 ): void {
+  if (evidenceIds.length > 0) retainErasedEvidenceBarriers(database, barrier, evidenceIds);
   scrubStatementSignals(database, barrier);
   // Captured lineage outlives the member and its evidence-index/binding rows.
   const retained = database.connection.prepare(`SELECT DISTINCT p.memory_id,p.capsule_id

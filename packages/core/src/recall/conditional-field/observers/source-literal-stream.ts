@@ -91,11 +91,12 @@ function lastStarterOffset(value: string): number {
   return last;
 }
 
-function parseSourceStream(cursor: string | null): SourceStream | undefined {
+export function parseSourceStream(cursor: string | null): SourceStream | undefined {
   if (!cursor?.startsWith("o:{") || cursor.length > MAX_STREAM_CURSOR) return undefined;
   try {
     const value = JSON.parse(cursor.slice(2)) as SourceStream;
-    return typeof value.tail === "string" && Array.isArray(value.literals) ? value : undefined;
+    return typeof value.afterCursor === "string" && typeof value.tail === "string"
+      && Array.isArray(value.literals) ? value : undefined;
   } catch { return undefined; }
 }
 

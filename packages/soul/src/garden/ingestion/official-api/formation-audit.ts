@@ -28,9 +28,9 @@ import { inspectOfficialApiSemanticFactorGraphProjection } from
 // invariant: cache-compatibility decisions pin formation behavior independently of raw JSON.
 export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v12";
 
-export type OfficialApiSignalAuditDisposition = "admitted" | "deferred" | "rejected" | "invalid";
+type OfficialApiSignalAuditDisposition = "admitted" | "deferred" | "rejected" | "invalid";
 
-export type OfficialApiSignalAuditStage =
+type OfficialApiSignalAuditStage =
   | "parse"
   | "created_at"
   | "source_observation"
@@ -52,7 +52,7 @@ export interface OfficialApiSignalFormationAuditInput {
   readonly signal_id_for: (index: number) => string;
 }
 
-export interface OfficialApiSignalFormationAuditEntry {
+interface OfficialApiSignalFormationAuditEntry {
   readonly index: number;
   readonly disposition: OfficialApiSignalAuditDisposition;
   readonly stage: OfficialApiSignalAuditStage;

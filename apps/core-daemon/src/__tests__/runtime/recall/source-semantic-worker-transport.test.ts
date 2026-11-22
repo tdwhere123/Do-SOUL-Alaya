@@ -189,21 +189,24 @@ describe("source semantic worker snapshot and preparation ownership", () => {
       await h.client.readSnapshot.isolate!(async () => {
         await h.client.readSnapshot.beginDeferred();
         try {
-          expect(await h.client.memoryRepo.findByWorkspaceId(WS)).toHaveLength(1);
+          await expect(h.client.activeConstraintsPort.findActiveConstraints({ workspaceId: WS, cap: 8 }))
+            .resolves.toEqual({ constraints: [], total_count: 0 });
           const writer = initDatabase({ filename: h.filename });
           try {
             await new SqliteMemoryEntryRepo(writer).create(createMemoryEntry({ object_id: randomUUID(), workspace_id: WS,
               content: "after snapshot", activation_score: 0.5 }));
           } finally { writer.close(); closeCachedDatabase(h.filename); }
           await expect(h.client.sourceSemanticsPort!.execute(preparation())).resolves.toMatchObject({ kind: "prepare_source" });
-          expect(await h.client.memoryRepo.findByWorkspaceId(WS)).toHaveLength(1);
+          await expect(h.client.activeConstraintsPort.findActiveConstraints({ workspaceId: WS, cap: 8 }))
+            .resolves.toEqual({ constraints: [], total_count: 0 });
         } finally { await h.client.readSnapshot.rollback(); }
       });
       const snapshotCalls = posts.calls();
-      expect(snapshotCalls.map(call => call.request.operation)).toEqual(["snapshot.beginDeferred", "memory.findByWorkspaceId",
-        "conditionalField.sourceSemantics", "memory.findByWorkspaceId", "snapshot.rollback"]);
+      expect(snapshotCalls.map(call => call.request.operation)).toEqual(["snapshot.beginDeferred", "constraints.findActive",
+        "conditionalField.sourceSemantics", "constraints.findActive", "snapshot.rollback"]);
       expect(new Set(snapshotCalls.map(call => call.worker)).size).toBe(1);
-      expect(await h.client.memoryRepo.findByWorkspaceId(WS)).toHaveLength(2);
+      await expect(h.client.activeConstraintsPort.findActiveConstraints({ workspaceId: WS, cap: 8 }))
+        .resolves.toEqual({ constraints: [], total_count: 0 });
     } finally { posts.restore(); await h.cleanup(); }
   });
 
@@ -231,7 +234,8 @@ describe("source semantic worker snapshot and preparation ownership", () => {
             await expect(h.client.sourceSemanticsPort!.execute(validate)).rejects.toMatchObject({ code: "VALIDATION",
               message: "preparation handle belongs to another snapshot worker" });
             expect(posts.calls()).toHaveLength(count);
-            expect(await h.client.memoryRepo.findByWorkspaceId(WS)).toHaveLength(1);
+            await expect(h.client.activeConstraintsPort.findActiveConstraints({ workspaceId: WS, cap: 8 }))
+              .resolves.toEqual({ constraints: [], total_count: 0 });
             expect(posts.calls().at(-1)!.worker).toBe(pin);
           } finally { await h.client.readSnapshot.rollback(); }
         });

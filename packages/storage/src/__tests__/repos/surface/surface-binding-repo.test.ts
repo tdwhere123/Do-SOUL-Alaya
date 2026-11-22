@@ -139,8 +139,11 @@ describe("SqliteSurfaceBindingRepo", () => {
 
     await repo.create(createSurfaceBinding(), BINDING_ID_1);
 
+    expect(() => repo.updateState(BINDING_ID_1, "foreign-workspace", BindingState.STALE, "2026-03-22T01:00:00.000Z"))
+      .toThrowError(expect.objectContaining({ code: "NOT_FOUND" }));
     const updated = await repo.updateState(
       BINDING_ID_1,
+      "workspace-1",
       BindingState.STALE,
       "2026-03-22T01:00:00.000Z"
     );
@@ -149,7 +152,7 @@ describe("SqliteSurfaceBindingRepo", () => {
     expect(updated.binding.updated_at).toBe("2026-03-22T01:00:00.000Z");
 
     expect(() =>
-      repo.updateState(BINDING_ID_2, BindingState.ACTIVE, "2026-03-22T01:00:00.000Z")
+      repo.updateState(BINDING_ID_2, "workspace-1", BindingState.ACTIVE, "2026-03-22T01:00:00.000Z")
     ).toThrowError(expect.objectContaining({ code: "NOT_FOUND" }));
     expect(countSurfaceBindingEvents(database)).toBe(0);
   });

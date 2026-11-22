@@ -4,15 +4,10 @@ import {
   type DriftAlert,
   type DriftClassification,
   type GovernanceDriftLease,
-  type SurfaceDriftOperationType,
-  type SurfaceStatus as SurfaceStatusType
+  type SurfaceDriftOperationType
 } from "@do-soul/alaya-protocol";
 
 import { DEFAULT_SURFACE_DRIFT_LEASE_TTL_MS } from "./surface-drift-service.js";
-
-const SURFACE_STATUS_GOVERNANCE_SUBJECT = canonicalGovernanceSubject("surface_governance", {
-  entity: "status"
-}).canonical_key;
 
 export interface SurfaceDriftGovernancePort {
   acquireLease(params: {
@@ -34,17 +29,23 @@ export interface SurfaceDriftGovernancePort {
   ): Promise<Readonly<DriftAlert> | null>;
 }
 
-export interface SurfaceDriftCoordinatorDependencies {
+interface SurfaceDriftCoordinatorDependencies {
+  readonly entity: "status" | "binding";
   readonly surfaceDriftService?: SurfaceDriftGovernancePort;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }
 
 export class SurfaceDriftCoordinator {
+  private readonly affectedSubject: string;
+  private readonly logLabel: string;
   private readonly surfaceDriftService?: SurfaceDriftGovernancePort;
 
   private readonly warn: (message: string, meta: Record<string, unknown>) => void;
 
   public constructor(dependencies: SurfaceDriftCoordinatorDependencies) {
+    const { entity } = dependencies;
+    this.affectedSubject = canonicalGovernanceSubject("surface_governance", { entity }).canonical_key;
+    this.logLabel = entity === "status" ? "Surface drift" : "Surface binding drift";
     this.surfaceDriftService = dependencies.surfaceDriftService;
     this.warn = dependencies.warn;
   }
@@ -87,7 +88,7 @@ export class SurfaceDriftCoordinator {
         params.releasedBy
       );
     } catch (error) {
-      this.warn("Surface drift lease release failed after durable mutation", {
+      this.warn(`${this.logLabel} lease release failed after durable mutation`, {
         operationType: params.operationType,
         workspaceId: params.workspaceId,
         leaseId: params.leaseId,
@@ -96,48 +97,33 @@ export class SurfaceDriftCoordinator {
     }
   }
 
-  public async classifyStatusDriftSafely(params: {
+  public async classifyDriftSafely(params: {
     readonly workspaceId: string;
     readonly operationType: SurfaceDriftOperationType;
-    readonly surfaceId: string;
-    readonly fromStatus: SurfaceStatusType;
-    readonly toStatus: SurfaceStatusType;
     readonly driftType: DriftType;
-  }): Promise<void> {
-    try {
-      await this.classifyStatusDrift(params);
-    } catch (error) {
-      this.warn("Surface drift telemetry failed after durable mutation", {
-        operationType: params.operationType,
-        workspaceId: params.workspaceId,
-        surfaceId: params.surfaceId,
-        fromStatus: params.fromStatus,
-        toStatus: params.toStatus,
-        error
-      });
-    }
-  }
-
-  private async classifyStatusDrift(params: {
-    readonly workspaceId: string;
-    readonly surfaceId: string;
-    readonly fromStatus: SurfaceStatusType;
-    readonly toStatus: SurfaceStatusType;
-    readonly driftType: DriftType;
+    readonly description: string;
+    readonly warningContext?: Readonly<Record<string, unknown>>;
   }): Promise<void> {
     const driftService = this.surfaceDriftService;
-
     if (driftService === undefined) {
       return;
     }
 
-    const classification = await driftService.classifyDrift({
-      workspaceId: params.workspaceId,
-      driftType: params.driftType,
-      affectedSubject: SURFACE_STATUS_GOVERNANCE_SUBJECT,
-      description: `Surface ${params.surfaceId} status changed from ${params.fromStatus} to ${params.toStatus}`
-    });
-
-    await driftService.alertOnCriticalDrift(classification);
+    try {
+      const classification = await driftService.classifyDrift({
+        workspaceId: params.workspaceId,
+        driftType: params.driftType,
+        affectedSubject: this.affectedSubject,
+        description: params.description
+      });
+      await driftService.alertOnCriticalDrift(classification);
+    } catch (error) {
+      this.warn(`${this.logLabel} telemetry failed after durable mutation`, {
+        operationType: params.operationType,
+        workspaceId: params.workspaceId,
+        ...(params.warningContext ?? { driftType: params.driftType }),
+        error
+      });
+    }
   }
 }

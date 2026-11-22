@@ -61,7 +61,8 @@ export interface ResolutionServiceClaimServicePort {
     newState: ClaimForm["claim_status"],
     reason: string,
     causedBy: typeof TransitionCausedBy[keyof typeof TransitionCausedBy],
-    options?: {
+    options: {
+      readonly expectedFromStatus: ClaimForm["claim_status"];
       readonly additionalEventInputs?: readonly EventPublisherInput[];
       readonly additionalEventsSink?: EventLogEntry[];
       readonly effectDecisionReceipt?: EffectDecisionReceipt;

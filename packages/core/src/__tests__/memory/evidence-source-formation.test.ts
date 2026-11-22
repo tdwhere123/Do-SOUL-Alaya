@@ -1,10 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { hashDerivationJobId } from "@do-soul/alaya-protocol";
-import {
-  EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
-} from "../../memory/evidence-create/evidence-semantic-completeness.js";
-import type { OpenSemanticFactorExtractionPort } from
-  "../../semantic/open-semantic-factor-extraction-port.js";
 import { fieldContractSha256 as fieldSha256 } from "../../shared/field-hash.js";
 import { createInMemoryFieldStores } from "../../memory/evidence-create/field-stores.js";
 import { createSourceAdmissionPort } from "../../memory/evidence-create/source-admission.js";
@@ -42,18 +36,11 @@ describe("EvidenceService source formation", () => {
     expect(await service.findById(created.object_id)).not.toBeNull();
   });
 
-  it("admits source-only writes with empty semantics, unknown time, and zero provider calls", async () => {
-    const extractor = {
-      operator_id: "structured_open_semantic_factor_v1",
-      extract: vi.fn(async () => {
-        throw new Error("provider must not run");
-      })
-    } satisfies OpenSemanticFactorExtractionPort;
+  it("admits source-only writes with unknown event and validity time", async () => {
     const stores = createInMemoryFieldStores();
-    const { service, create } = createCreationHarness({
+    const { service } = createCreationHarness({
       fieldStores: stores,
-      sha256: fieldSha256,
-      semanticExtractor: extractor
+      sha256: fieldSha256
     });
 
     const created = await service.create(createEvidenceInput({
@@ -61,21 +48,10 @@ describe("EvidenceService source formation", () => {
       event_anchor: null
     }));
 
-    expect(create.mock.calls[0]?.[2]).toMatchObject({ status: "unavailable" });
-    expect(create.mock.calls[0]?.[3]).toMatchObject({
-      status: "unavailable",
-      graph: null
-    });
-    expect(extractor.extract).not.toHaveBeenCalled();
     expect(stores.listRecords("workspace-1")).toHaveLength(1);
     expect(stores.listRecords("workspace-1")[0]?.evidence_object_id).toBe(created.object_id);
     expect(stores.listRecords("workspace-1")[0]?.valid_from).toBeNull();
     expect(stores.listSpans("workspace-1").length).toBeGreaterThan(1);
-    expect(stores.listIncidences("workspace-1").some((row) => {
-      return stores.listFactors("workspace-1").some((factor) =>
-        factor.identity === row.factor_id && factor.family === "f0"
-      );
-    })).toBe(true);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
   });
 
@@ -95,11 +71,9 @@ describe("EvidenceService source formation", () => {
       start_offset: 0,
       end_offset: Buffer.byteLength(source, "utf8")
     });
-    expect(stores.listFactors("workspace-1")).toEqual(expect.arrayContaining([
-      expect.objectContaining({ family: "f0", canonical_payload: source }),
-      expect.objectContaining({ family: "f0", canonical_payload: "甲😀." }),
-      expect.objectContaining({ family: "f0", canonical_payload: "乙." })
-    ]));
+    expect(stores.listSpans("workspace-1").map((span) =>
+      Buffer.from(source, "utf8").subarray(span.start_offset, span.end_offset).toString("utf8")
+    )).toEqual(expect.arrayContaining([source, "甲😀.", "乙."]));
   });
 
   it("replays same-lineage admission and keeps independent sources distinct", async () => {
@@ -128,220 +102,6 @@ describe("EvidenceService source formation", () => {
     expect(records).toHaveLength(2);
   });
 
-  it("retains source and spans when factor incidence persistence fails", async () => {
-    const base = createInMemoryFieldStores();
-    const stores = {
-      ...base,
-      putIncidence: () => {
-        throw new Error("incidence persistence failed");
-      }
-    };
-    const { service } = createCreationHarness({
-      fieldStores: stores,
-      sha256: fieldSha256
-    });
-
-    const created = await service.create(createEvidenceInput({
-      excerpt: "Atomic source formation."
-    }));
-
-    expect(await service.findById(created.object_id)).not.toBeNull();
-    expect(base.listRecords("workspace-1")).toHaveLength(1);
-    expect(base.listSpans("workspace-1").length).toBeGreaterThan(0);
-    expect(base.listFactors("workspace-1")).toEqual([]);
-    expect(base.listIncidences("workspace-1")).toEqual([]);
-  });
-
-  it("replays factor formation without duplicating descriptors or incidences", async () => {
-    const stores = createInMemoryFieldStores();
-    const { service } = createCreationHarness({
-      fieldStores: stores,
-      sha256: fieldSha256,
-      generateObjectId: sequentialIds()
-    });
-    const sourceHash = "sha256:" + "ef".repeat(32);
-    const input = createEvidenceInput({ excerpt: "Replayable formation.", source_hash: sourceHash });
-
-    await service.create(input);
-    const firstFactorCount = stores.listFactors("workspace-1").length;
-    const firstIncidenceCount = stores.listIncidences("workspace-1").length;
-    await service.create(input);
-
-    expect(stores.listRecords("workspace-1")).toHaveLength(1);
-    expect(stores.listFactors("workspace-1")).toHaveLength(firstFactorCount);
-    expect(stores.listIncidences("workspace-1")).toHaveLength(firstIncidenceCount);
-  });
-
-  it("does not nominate pending F3 work when no semantic capture exists", async () => {
-    const base = createInMemoryFieldStores();
-    const stores = {
-      ...base,
-      putJob: () => {
-        throw new Error("no F3 receipt should be written");
-      }
-    };
-    const { service } = createCreationHarness({
-      fieldStores: stores,
-      sha256: fieldSha256
-    });
-
-    const created = await service.create(createEvidenceInput({
-      excerpt: "Durable basis survives optional derivation."
-    }));
-
-    expect(await service.findById(created.object_id)).not.toBeNull();
-    expect(base.listRecords("workspace-1")).toHaveLength(1);
-    expect(base.listSpans("workspace-1").length).toBeGreaterThan(0);
-    expect(base.listFactors("workspace-1").length).toBeGreaterThan(0);
-    expect(base.listIncidences("workspace-1").length).toBeGreaterThan(0);
-  });
-
-  it("keeps a formed graph unavailable when no formed fact frame exists", async () => {
-    const stores = createInMemoryFieldStores();
-    const { service, create } = createCreationHarness({
-      fieldStores: stores,
-      sha256: fieldSha256
-    });
-    const source = "Atlas supports research.";
-    const producer = "structured_open_semantic_factor_v1";
-
-    await service.create(createEvidenceInput({ excerpt: source }), [], undefined, {
-      schema_version: 1,
-      producer_operator_id: producer,
-      source_text: source,
-      graph: semanticGraph(source)
-    });
-
-    const capture = create.mock.calls[0]?.[3];
-    expect(capture).toMatchObject({ status: "unavailable", graph: null });
-    const identity = hashDerivationJobId({
-      purpose: "f3_semantic_capture",
-      operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
-      input_evidence_ids: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"]
-    }, fieldSha256);
-    expect(stores.getJob("workspace-1", identity)).toBeNull();
-    expect(stores.listFactors("workspace-1").filter(({ family }) => family === "f3"))
-      .toEqual([]);
-  });
-
-  it("certifies a source-bound binary proposition against its fact frame", async () => {
-    const stores = createInMemoryFieldStores();
-    const { service, create } = createCreationHarness({
-      fieldStores: stores,
-      sha256: fieldSha256
-    });
-    const source = "Atlas supports research.";
-
-    await service.create(
-      createEvidenceInput({ excerpt: source }),
-      [],
-      evidenceFactFrame(source),
-      semanticProposal(source, binarySemanticGraph())
-    );
-
-    const capture = create.mock.calls[0]?.[3];
-    expect(capture).toMatchObject({ status: "formed" });
-    expect(stores.listFactors("workspace-1")).toEqual(expect.arrayContaining([
-      expect.objectContaining({ family: "f3", canonical_payload: "atlas" }),
-      expect.objectContaining({ family: "f3", canonical_payload: "research" })
-    ]));
-    expect(stores.getJob("workspace-1", hashDerivationJobId({
-      purpose: "f3_semantic_capture",
-      operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
-      input_evidence_ids: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"]
-    }, fieldSha256))).toMatchObject({
-      status: "succeeded",
-      operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID
-    });
-  });
-
-  it("independently forms the complete source while retaining an incomplete nomination", async () => {
-    const stores = createInMemoryFieldStores();
-    const { service, create } = createCreationHarness({
-      fieldStores: stores,
-      sha256: fieldSha256
-    });
-    const source = "Atlas supports research.";
-
-    await service.create(
-      createEvidenceInput({ excerpt: source }),
-      [],
-      evidenceFactFrame(source),
-      semanticProposal(source, semanticGraph(source))
-    );
-
-    expect(create.mock.calls[0]?.[3]).toMatchObject({
-      status: "formed",
-      graph: { propositions: [{ arguments: [
-        { position: 0, binding_identity: "subject", reference_id: "argument_0" },
-        { position: 1, binding_identity: "value", reference_id: "argument_1" }
-      ] }] }
-    });
-    expect(create.mock.calls[0]?.[4]).toMatchObject({
-      upstream_semantic_formation: { graph: { propositions: [{ arguments: [expect.anything()] }] } }
-    });
-    expect(stores.getJob("workspace-1", hashDerivationJobId({
-      purpose: "f3_semantic_capture",
-      operator_id: EVIDENCE_OSF_SEMANTIC_COMPLETENESS_OPERATOR_ID,
-      input_evidence_ids: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"]
-    }, fieldSha256))).not.toBeNull();
-  });
-
-  it.each([
-    ["swapped positions", [1, 0]],
-    ["duplicate positions", [0, 0]]
-  ])("does not inherit %s from a nomination into independent source structure", async (_name, positions) => {
-    const stores = createInMemoryFieldStores();
-    const { service, create } = createCreationHarness({
-      fieldStores: stores,
-      sha256: fieldSha256
-    });
-    const source = "Atlas supports research.";
-    const graph = binarySemanticGraph(positions);
-
-    await service.create(createEvidenceInput({ excerpt: source }), [],
-      evidenceFactFrame(source), semanticProposal(source, graph));
-
-    expect(create.mock.calls[0]?.[3]).toMatchObject({ status: "formed",
-      graph: { propositions: [{ arguments: [
-        { position: 0, binding_identity: "subject", reference_id: "argument_0" },
-        { position: 1, binding_identity: "value", reference_id: "argument_1" }
-      ] }] } });
-    expect(create.mock.calls[0]?.[4]?.upstream_semantic_formation).toBeDefined();
-  });
-
-  it("does not persist F3 lineage for rejected or unavailable semantic formation", async () => {
-    const source = "Atlas supports research.";
-    for (const admission of [{ kind: "rejected" } as const, undefined]) {
-      const stores = createInMemoryFieldStores();
-      const { service, create } = createCreationHarness({
-        fieldStores: stores,
-        sha256: fieldSha256
-      });
-
-      await service.create(
-        createEvidenceInput({ excerpt: source }),
-        [],
-        undefined,
-        admission
-      );
-
-      expect(create.mock.calls[0]?.[3]).toMatchObject({
-        status: admission === undefined ? "unavailable" : "rejected",
-        graph: null,
-        producer_operator_id: null
-      });
-      expect(
-        stores.listFactors("workspace-1").filter((factor) => factor.family === "f3")
-      ).toEqual([]);
-      expect(stores.getJob("workspace-1", hashDerivationJobId({
-        purpose: "f3_semantic_capture",
-        operator_id: "structured_open_semantic_factor_v1",
-        input_evidence_ids: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"]
-      }, fieldSha256))).toBeNull();
-    }
-  });
-
   it("persists root evidence when optional projection planning is invalid", async () => {
     const stores = createInMemoryFieldStores();
     const { service, create } = createCreationHarness({
@@ -359,7 +119,7 @@ describe("EvidenceService source formation", () => {
 
     expect(await service.findById(created.object_id)).not.toBeNull();
     expect(create).toHaveBeenCalledWith(
-      created, [], expect.anything(), expect.anything(), expect.anything(), false
+      created, [], false
     );
   });
 });
@@ -378,95 +138,5 @@ function sequentialIds(): () => string {
       throw new Error("test object id exhausted");
     }
     return id;
-  };
-}
-
-function semanticGraph(_source: string) {
-  return {
-    schema_version: 2 as const,
-    source_kind: "evidence" as const,
-    factors: [
-      semanticFactor("atlas", "Atlas", "atlas"),
-      semanticFactor("research", "research", "research")
-    ],
-    variables: [],
-    result_variable_ids: [],
-    propositions: [{
-      proposition_id: "supports-research",
-      predicate_factor_id: "research",
-      arguments: [{
-        position: 0,
-        binding_identity: "giver",
-        reference_kind: "factor" as const,
-        reference_id: "atlas"
-      }]
-    }]
-  };
-}
-
-function evidenceFactFrame(source: string) {
-  return {
-    schema_version: 1 as const,
-    producer_operator_id: "structured_fact_frame_v1",
-    source_assertion: source,
-    fact_frame: {
-      schema_version: 1 as const,
-      slots: [
-        { role: "subject" as const, text: "Atlas" },
-        { role: "relation" as const, text: "supports" },
-        { role: "value" as const, text: "research" }
-      ]
-    }
-  };
-}
-
-function semanticProposal(source: string, graph: ReturnType<typeof semanticGraph>) {
-  return {
-    schema_version: 1 as const,
-    producer_operator_id: "structured_open_semantic_factor_v1",
-    source_text: source,
-    graph
-  };
-}
-
-function binarySemanticGraph(positions: readonly number[] = [0, 1]) {
-  return {
-    schema_version: 2 as const,
-    source_kind: "evidence" as const,
-    factors: [
-      semanticFactor("atlas", "Atlas", "atlas"),
-      semanticFactor("supports", "supports", "supports"),
-      semanticFactor("research", "research", "research")
-    ],
-    variables: [],
-    result_variable_ids: [],
-    propositions: [{
-      proposition_id: "atlas-supports-research",
-      predicate_factor_id: "supports",
-      arguments: [{
-        position: positions[0]!,
-        binding_identity: "subject",
-        reference_kind: "factor" as const,
-        reference_id: "atlas"
-      }, {
-        position: positions[1]!,
-        binding_identity: "recipient",
-        reference_kind: "factor" as const,
-        reference_id: "research"
-      }]
-    }]
-  };
-}
-
-function semanticFactor(
-  factorId: string,
-  surface: string,
-  semanticIdentity: string
-) {
-  return {
-    factor_id: factorId,
-    surface,
-    source_occurrence: 0,
-    semantic_identity: semanticIdentity
   };
 }

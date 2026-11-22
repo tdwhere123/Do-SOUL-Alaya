@@ -59,7 +59,8 @@ export interface ArbitrationServiceClaimServicePort {
     newState: ClaimLifecycleStateType,
     reason: string,
     causedBy: TransitionCausedBy,
-    options?: {
+    options: {
+      readonly expectedFromStatus: ClaimLifecycleStateType;
       readonly skipSlotElection?: boolean;
       readonly additionalEventInputs?: readonly EventPublisherInput[];
       readonly transactionGuard?: ElectionTransactionGuard;

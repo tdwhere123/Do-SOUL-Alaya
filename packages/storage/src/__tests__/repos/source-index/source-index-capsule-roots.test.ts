@@ -99,7 +99,7 @@ describe("native retained capsule SourceIndex roots", () => {
 
   it.each(["revision", "archive", "tombstone", "delete"])("invalidates capsule projections on native %s", async mutation => {
     const env = setup(); const root = await capsule(env); const { generation, documents } = buildReady(env);
-    if (mutation === "delete") await new SqliteEvidenceCapsuleRepo(env.database).deleteById(root.object_id);
+    if (mutation === "delete") await new SqliteEvidenceCapsuleRepo(env.database).deleteById(root.object_id, WORKSPACE);
     else env.database.connection.prepare(mutation === "revision"
       ? "UPDATE evidence_capsules SET updated_at='2090-01-01T00:00:00Z' WHERE object_id=?"
       : "UPDATE evidence_capsules SET lifecycle_state=? WHERE object_id=?")
@@ -151,7 +151,7 @@ describe("native retained capsule SourceIndex roots", () => {
         semantic_anchor: { topic: "Proposed source interpretation", keywords: [], summary: "Unreviewed interpretation hypothesis" },
         event_anchor: null, physical_anchor: null, evidence_health_state: "questionable", gist: "provenance gist",
         excerpt: body, source_hash: sourceHash, run_id: "run-1", workspace_id: WORKSPACE, surface_id: null
-      }, [], undefined, undefined, undefined, true);
+      }, [], true);
       if (order === "source-first") {
         const record = publishSource(env, body);
         const first = buildReady(env);

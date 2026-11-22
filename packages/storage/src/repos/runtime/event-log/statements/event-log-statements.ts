@@ -3,26 +3,22 @@ import {
   prepareEventLogEntityQueryStatements,
   prepareEventLogGovernancePredicateStatements,
   prepareEventLogMutationStatements,
-  prepareEventLogRevisionStatements,
   prepareEventLogRunQueryStatements,
   prepareEventLogWorkspaceQueryStatements,
   type EventLogEntityQueryStatements,
   type EventLogGovernancePredicateStatements,
   type EventLogMutationStatements,
-  type EventLogRevisionStatements,
   type EventLogRunQueryStatements,
   type EventLogWorkspaceQueryStatements
 } from "./event-log-statement-groups.js";
 
-export type { SqliteStatement } from "./event-log-statement-groups.js";
 
 export interface EventLogStatements
   extends EventLogMutationStatements,
     EventLogEntityQueryStatements,
     EventLogRunQueryStatements,
     EventLogWorkspaceQueryStatements,
-    EventLogGovernancePredicateStatements,
-    EventLogRevisionStatements {}
+    EventLogGovernancePredicateStatements {}
 
 export function prepareEventLogStatements(db: StorageDatabase): EventLogStatements {
   return {
@@ -30,7 +26,6 @@ export function prepareEventLogStatements(db: StorageDatabase): EventLogStatemen
     ...prepareEventLogEntityQueryStatements(db),
     ...prepareEventLogRunQueryStatements(db),
     ...prepareEventLogWorkspaceQueryStatements(db),
-    ...prepareEventLogGovernancePredicateStatements(db),
-    ...prepareEventLogRevisionStatements(db)
+    ...prepareEventLogGovernancePredicateStatements(db)
   };
 }

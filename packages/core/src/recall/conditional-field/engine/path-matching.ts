@@ -52,7 +52,7 @@ export type NamedKindOverlay = Readonly<Record<string, Readonly<{
   readonly soft_structural?: true;
 }>>>;
 
-export type RelationTransferAdmission = Readonly<{
+type RelationTransferAdmission = Readonly<{
   readonly query_id: string;
   readonly instance_id: string;
   readonly revision_id: string | undefined;
@@ -81,7 +81,7 @@ export function relationPhysicalCandidates(programKind: string): readonly string
   return [programKind, ...(SUPPORTED_RELATION_ALIASES[programKind] ?? [])];
 }
 
-export function overlayBlocksTransfer(
+function overlayBlocksTransfer(
   overlay: NamedKindOverlay,
   storedPredicate: string,
   programKind: string
@@ -90,7 +90,7 @@ export function overlayBlocksTransfer(
   return declared?.applicable === false;
 }
 
-export function relationStrength(
+function relationStrength(
   relation: QueryRelation,
   overlay: NamedKindOverlay,
   storedPredicate: string,
@@ -146,7 +146,7 @@ function admitHardIdentityTransfer(admission: RelationTransferAdmission): Admitt
   };
 }
 
-export function unifyAdvance(
+function unifyAdvance(
   from: ProductStateKey,
   relation: QueryRelation,
   row: AdjacencyRow,

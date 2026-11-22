@@ -167,7 +167,7 @@ it("distinguishes bounded-out from valid-empty and scrubs capsule and canonical 
       .toEqual([root.object_id]);
     expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_projections WHERE root_key=?")
       .get(hits.find(row => row.source.target.root_id === derived.record_id)!.source.root_key)).toEqual({ n: 0 });
-    await new SqliteEvidenceCapsuleRepo(database).deleteById(root.object_id);
+    await new SqliteEvidenceCapsuleRepo(database).deleteById(root.object_id, WORKSPACE);
     expect(index.readLexicalCandidates(WORKSPACE, "部署", 8, queryBudget).candidates).toEqual([]);
     expect(database.connection.prepare("SELECT count(*) AS n FROM source_index_lexical_projections WHERE root_key=?")
       .get(hits.find(row => row.source.target.root_id === root.object_id)!.source.root_key)).toEqual({ n: 0 });

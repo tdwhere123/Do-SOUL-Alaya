@@ -1,4 +1,5 @@
 import type { SqliteConnection } from "../../../sqlite/db.js";
+import { GardenEventType } from "@do-soul/alaya-protocol";
 
 export interface GardenTaskSqliteStatement {
   run(...args: readonly unknown[]): { readonly changes: number };
@@ -120,6 +121,13 @@ ${PENDING_PRIORITY_ORDER_SQL}      LIMIT ?
     `
 };
 
+const NO_STATEMENT_EXTRACTION_RECEIPT = `NOT EXISTS (
+  SELECT 1 FROM event_log extraction
+  WHERE extraction.entity_type = 'garden_task' AND extraction.entity_id = garden_tasks.id
+    AND extraction.workspace_id = garden_tasks.workspace_id
+    AND extraction.event_type = '${GardenEventType.SOUL_GARDEN_STATEMENT_SESSION_EXTRACTED}'
+)`;
+
 const GARDEN_TASK_CLAIM_SQL: SqlDefinitionMap<GardenTaskClaimStatements> = {
   claimStatement: `
       UPDATE garden_tasks
@@ -137,7 +145,7 @@ const GARDEN_TASK_CLAIM_SQL: SqlDefinitionMap<GardenTaskClaimStatements> = {
           claimed_at = NULL,
           completed_at = ?,
           last_error_text = ?
-      WHERE id = ? AND status = 'pending'
+      WHERE id = ? AND status = 'pending' AND ${NO_STATEMENT_EXTRACTION_RECEIPT}
     `,
   releaseClaimStatement: `
       UPDATE garden_tasks
@@ -183,13 +191,13 @@ const GARDEN_TASK_MAINTENANCE_SQL: SqlDefinitionMap<GardenTaskMaintenanceStateme
   peekExpiredUnclaimedStatement: `
       SELECT${GARDEN_TASK_SELECT_COLUMNS}
       FROM garden_tasks
-      WHERE status = 'pending' AND kind = ? AND created_at < ?
+      WHERE status = 'pending' AND kind = ? AND created_at < ? AND ${NO_STATEMENT_EXTRACTION_RECEIPT}
       ORDER BY created_at ASC, id ASC
       LIMIT ?
     `,
   expireUnclaimedStatement: `
       DELETE FROM garden_tasks
-      WHERE id = ? AND status = 'pending'
+      WHERE id = ? AND status = 'pending' AND ${NO_STATEMENT_EXTRACTION_RECEIPT}
     `
 };
 

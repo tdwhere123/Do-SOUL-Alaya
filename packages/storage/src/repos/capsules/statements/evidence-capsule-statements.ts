@@ -6,8 +6,6 @@ export type SqliteStatement = BetterSqlite3.Statement;
 
 export interface EvidenceCapsuleStatements {
   readonly createStatement: SqliteStatement;
-  readonly createFactFrameFormationStatement: SqliteStatement;
-  readonly createSemanticFactorFormationStatement: SqliteStatement;
   readonly findByIdStatement: SqliteStatement;
   readonly archiveSourceInterpretationStatement: SqliteStatement;
   readonly findByArtifactRefStatement: SqliteStatement;
@@ -19,7 +17,6 @@ export interface EvidenceCapsuleStatements {
   readonly findByWorkspaceIdStatement: SqliteStatement;
   readonly findByWorkspaceIdPagedStatement: SqliteStatement;
   readonly pageCapsuleOnlyRootsStatement: SqliteStatement;
-  readonly findByHealthStatement: SqliteStatement;
   readonly findByHealthPagedStatement: SqliteStatement;
   readonly updateHealthStatement: SqliteStatement;
   readonly createSearchProjectionStatement: SqliteStatement;
@@ -34,12 +31,6 @@ export interface EvidenceCapsuleStatements {
 export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceCapsuleStatements {
   return {
     createStatement: db.connection.prepare(CREATE_EVIDENCE_CAPSULE_SQL),
-    createFactFrameFormationStatement: db.connection.prepare(
-      CREATE_EVIDENCE_FACT_FRAME_FORMATION_SQL
-    ),
-    createSemanticFactorFormationStatement: db.connection.prepare(
-      CREATE_EVIDENCE_SEMANTIC_FACTOR_FORMATION_SQL
-    ),
     findByIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byId", "limitOne")),
     archiveSourceInterpretationStatement: db.connection.prepare(`UPDATE evidence_capsules
       SET lifecycle_state = 'archived', updated_at = ?
@@ -57,7 +48,6 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
       findEvidenceCapsuleSql("byWorkspace", "paged")
     ),
     pageCapsuleOnlyRootsStatement: db.connection.prepare(PAGE_CAPSULE_ONLY_ROOTS_SQL),
-    findByHealthStatement: db.connection.prepare(findEvidenceCapsuleSql("byHealth")),
     findByHealthPagedStatement: db.connection.prepare(
       findEvidenceCapsuleSql("byHealth", "paged")
     ),
@@ -144,35 +134,6 @@ const CREATE_EVIDENCE_CAPSULE_SQL = `
         retained_content_bytes,
         retained_source_event_time
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`;
-
-const CREATE_EVIDENCE_FACT_FRAME_FORMATION_SQL = `
-      INSERT INTO evidence_fact_frame_formations (
-        evidence_object_id,
-        workspace_id,
-        schema_version,
-        operator_id,
-        status,
-        producer_operator_id,
-        source_hash,
-        fact_frame_json,
-        capture_digest
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`;
-
-const CREATE_EVIDENCE_SEMANTIC_FACTOR_FORMATION_SQL = `
-      INSERT INTO evidence_semantic_factor_formations (
-        evidence_object_id,
-        workspace_id,
-        schema_version,
-        operator_id,
-        status,
-        producer_operator_id,
-        source_sha256,
-        graph_json,
-        capture_digest,
-        semantic_completeness_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const UPDATE_EVIDENCE_HEALTH_SQL = `

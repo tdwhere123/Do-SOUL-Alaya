@@ -1,6 +1,5 @@
 [
   "packages/storage/src/repos/capsules/embedding/evidence-recall-embedding-repo.ts",
-  "packages/storage/src/repos/capsules/reads/object-key-source-reader.ts",
   "packages/storage/src/repos/capsules/reads/recall-qualified-evidence-reader.ts",
   "packages/storage/src/repos/capsules/synthesis-capsule-repo.ts",
   "packages/storage/src/repos/control/engine-binding-repo.ts",

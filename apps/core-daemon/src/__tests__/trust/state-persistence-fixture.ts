@@ -1,0 +1,273 @@
+import { existsSync } from "node:fs";
+
+import { mkdtemp, rm } from "node:fs/promises";
+
+import { tmpdir } from "node:os";
+
+import { join } from "node:path";
+
+import { PassThrough } from "node:stream";
+
+import { afterEach, expect } from "vitest";
+
+import {
+  FormationKind,
+  MemoryDimension,
+  RecallContextEventType,
+  RunMode,
+  RunState,
+  ScopeClass,
+  SourceKind,
+  StorageTier,
+  WorkspaceKind,
+  WorkspaceState,
+  type MemoryEntry,
+  type TrustSummary
+} from "@do-soul/alaya-protocol";
+
+import {
+  initDatabase,
+  createGardenBackgroundDataPorts,
+  getCurrentSchemaSummary,
+  SqliteMemoryEntryRepo,
+  SqliteEventLogRepo,
+  SqliteRunRepo,
+  SqliteWorkspaceRepo
+} from "@do-soul/alaya-storage";
+
+import { createAlayaCliBridge } from "../../cli/bridge.js";
+
+import { registerAlayaCliCommands } from "../../cli/register.js";
+
+import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
+import { seedSourceBoundRecall } from "../support/seed-source-bound-recall.js";
+
+export const tempDirs: string[] = [];
+
+export const originalDataDir = process.env.DATA_DIR;
+
+export const originalAlayaConfigDir = process.env.ALAYA_CONFIG_DIR;
+
+export const INTEGRATION_TEST_TIMEOUT_MS = 30_000;
+
+export interface AuditLinkRow {
+  readonly delivery_id: string;
+  readonly audit_event_id: string;
+}
+
+export interface EventIdRow {
+  readonly event_id: string;
+}
+
+export async function callRuntimeMemoryTool<TOutput = unknown>(
+  runtime: AlayaDaemonRuntime,
+  toolName: string,
+  args: unknown
+): Promise<TOutput> {
+  const result = await runtime.services.mcpMemoryToolHandler.call({
+    toolName,
+    arguments: args,
+    context: {
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      agentTarget: "codex",
+      sessionId: "run-1",
+      surfaceId: "attached-agent-proof"
+    }
+  });
+
+  if (!result.ok) {
+    throw new Error(`${toolName} failed [${result.error.code}]: ${result.error.message}`);
+  }
+  expect(result).toMatchObject({ ok: true, tool_name: toolName });
+
+  return result.output as TOutput;
+}
+
+export async function readCodexStatus(runtime: AlayaDaemonRuntime): Promise<TrustSummary> {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const bridge = createAlayaCliBridge(runtime, {
+    stdin: new PassThrough(),
+    stdout,
+    stderr,
+    isTTY: false
+  });
+  registerAlayaCliCommands(bridge, runtime);
+
+  const result = await bridge.dispatch(["status", "--agent", "codex", "--json"]);
+  expect(result.exitCode).toBe(0);
+
+  const report = result.json as {
+    readonly trust: readonly TrustSummary[];
+  };
+  const summary = report.trust.find((candidate) => candidate.agent_target === "codex");
+  expect(summary).toBeDefined();
+  return summary!;
+}
+
+export async function seedRecallFixture(dataDir: string, memory: MemoryEntry = createMemoryEntry()): Promise<void> {
+  const database = initDatabase({ filename: join(dataDir, "alaya.db") });
+  try {
+    const workspaceRepo = new SqliteWorkspaceRepo(database);
+    const runRepo = new SqliteRunRepo(database);
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+
+    await workspaceRepo.create({
+      workspace_id: "workspace-1",
+      name: "workspace one",
+      root_path: "/tmp/alaya-workspace-1",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+    await runRepo.create({
+      run_id: "run-1",
+      workspace_id: "workspace-1",
+      title: "attached-agent proof run",
+      goal: null,
+      run_mode: RunMode.CHAT,
+      engine_binding_id: null,
+      engine_class: null,
+      run_state: RunState.IDLE,
+      current_surface_id: null
+    });
+    await memoryRepo.create(memory);
+    seedSourceBoundRecall({
+      database,
+      workspaceId: memory.workspace_id,
+      runId: memory.run_id,
+      evidenceId: memory.evidence_refs[0]!,
+      factorValue: "pnpm",
+      body: memory.content,
+      recordedAt: memory.created_at
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function seedCrossWorkspaceFixture(dataDir: string): Promise<void> {
+  const database = initDatabase({ filename: join(dataDir, "alaya.db") });
+  try {
+    const workspaceRepo = new SqliteWorkspaceRepo(database);
+    const runRepo = new SqliteRunRepo(database);
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+
+    for (const workspaceId of ["workspace-1", "workspace-2"]) {
+      await workspaceRepo.create({
+        workspace_id: workspaceId,
+        name: workspaceId,
+        root_path: `/tmp/alaya-${workspaceId}`,
+        workspace_kind: WorkspaceKind.LOCAL_REPO,
+        default_engine_binding: null,
+        workspace_state: WorkspaceState.ACTIVE
+      });
+      await runRepo.create({
+        run_id: workspaceId === "workspace-1" ? "run-1" : "run-2",
+        workspace_id: workspaceId,
+        title: `${workspaceId} run`,
+        goal: null,
+        run_mode: RunMode.CHAT,
+        engine_binding_id: null,
+        engine_class: null,
+        run_state: RunState.IDLE,
+        current_surface_id: null
+      });
+    }
+
+    await memoryRepo.create(createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      workspace_id: "workspace-2",
+      run_id: "run-2",
+      storage_tier: StorageTier.COLD,
+      activation_score: 0.1,
+      last_used_at: "2026-04-01T00:00:00.000Z",
+      last_hit_at: "2026-04-01T00:00:00.000Z"
+    }));
+  } finally {
+    database.close();
+  }
+}
+
+export function readSchemaSummary(dataDir: string): ReturnType<typeof getCurrentSchemaSummary> {
+  const database = initDatabase({ filename: join(dataDir, "alaya.db") });
+  try {
+    return getCurrentSchemaSummary(database);
+  } finally {
+    database.close();
+  }
+}
+
+export function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+  return {
+    object_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+    object_kind: "memory_entry",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-05-01T00:00:00.000Z",
+    updated_at: "2026-05-01T00:00:00.000Z",
+    created_by: "attached-agent-proof",
+    dimension: MemoryDimension.PREFERENCE,
+    source_kind: SourceKind.USER,
+    formation_kind: FormationKind.EXPLICIT,
+    scope_class: ScopeClass.PROJECT,
+    content: "Use pnpm for all workspace commands.",
+    domain_tags: ["tooling", "workflow"],
+    evidence_refs: ["11111111-1111-4111-8111-111111111102"],
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    surface_id: null,
+    storage_tier: StorageTier.HOT,
+    activation_score: 0.9,
+    retention_score: 0.9,
+    manifestation_state: "excerpt",
+    retention_state: "working",
+    decay_profile: "stable",
+    confidence: 1,
+    last_used_at: null,
+    last_hit_at: null,
+    reinforcement_count: 0,
+    contradiction_count: 0,
+    superseded_by: null,
+    ...overrides
+  };
+}
+
+export async function createTempDataDir(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "alaya-trust-state-"));
+  tempDirs.push(directory);
+  return directory;
+}
+
+export function setDataDir(dataDir: string): void {
+  process.env.DATA_DIR = dataDir;
+  // Override ALAYA_CONFIG_DIR so any user-installed alaya.toml on the
+  // host machine cannot leak through resolveConfiguredDatabasePath
+  // (which prefers TOML db_path over DATA_DIR).
+  process.env.ALAYA_CONFIG_DIR = dataDir;
+}
+
+export function restoreDataDir(): void {
+  if (originalDataDir === undefined) {
+    delete process.env.DATA_DIR;
+  } else {
+    process.env.DATA_DIR = originalDataDir;
+  }
+
+  if (originalAlayaConfigDir === undefined) {
+    delete process.env.ALAYA_CONFIG_DIR;
+    return;
+  }
+
+  process.env.ALAYA_CONFIG_DIR = originalAlayaConfigDir;
+}
+
+afterEach(async () => {
+  restoreDataDir();
+
+  for (const directory of tempDirs.splice(0)) {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+

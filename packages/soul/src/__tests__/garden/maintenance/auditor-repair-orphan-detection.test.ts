@@ -70,8 +70,8 @@ describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each s
       },
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
-        renewGreenPassiveStable: vi.fn(async () => undefined),
-        requestActiveVerification: vi.fn(async () => undefined),
+        renewGreenPassiveStable: vi.fn(() => true),
+        requestActiveVerification: vi.fn(() => true),
         revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
@@ -162,8 +162,8 @@ describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each s
       orphanDetectionPort,
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
-        renewGreenPassiveStable: vi.fn(async () => undefined),
-        requestActiveVerification: vi.fn(async () => undefined),
+        renewGreenPassiveStable: vi.fn(() => true),
+        requestActiveVerification: vi.fn(() => true),
         revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
@@ -242,8 +242,8 @@ describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each s
       },
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
-        renewGreenPassiveStable: vi.fn(async () => undefined),
-        requestActiveVerification: vi.fn(async () => undefined),
+        renewGreenPassiveStable: vi.fn(() => true),
+        requestActiveVerification: vi.fn(() => true),
         revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {
@@ -296,8 +296,8 @@ describe("Auditor 4B", () => {  it("dispatches pointer_healing and clears each s
       orphanDetectionPort,
       greenMaintenancePort: {
         findExpiringGreenStatuses: vi.fn(async () => []),
-        renewGreenPassiveStable: vi.fn(async () => undefined),
-        requestActiveVerification: vi.fn(async () => undefined),
+        renewGreenPassiveStable: vi.fn(() => true),
+        requestActiveVerification: vi.fn(() => true),
         revokeGreen: vi.fn(() => ({ affected: 0 }))
       },
       bootstrappingPort: {

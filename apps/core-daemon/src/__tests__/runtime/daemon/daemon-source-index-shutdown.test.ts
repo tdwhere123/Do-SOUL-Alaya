@@ -30,7 +30,6 @@ describe("idle source index shutdown", () => {
       },
       securityStatusService: { close: vi.fn() },
       daemonMcpRuntimeRegistry: { close: vi.fn(async () => undefined) },
-      globalMemoryRecallInvalidationSubscription: null,
       sourceIndexProducer: producer,
       database: { close: () => { order.push("database-closed"); environment.database.close(); } },
       temporalRuntimeLease: { release: async () => { order.push("lease-released"); } },

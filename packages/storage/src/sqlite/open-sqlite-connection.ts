@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
+import { withSqliteBusyRetry } from "./sqlite-busy-retry.js";
 
 type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 type OpenOptions = ConstructorParameters<typeof BetterSqlite3>[1];
@@ -21,6 +22,34 @@ export class SqliteConnectionCleanupError extends StorageError {
 const OPEN_RETRY_BUDGET_MS = 2_000;
 const OPEN_RETRY_SLEEP_MS = 50;
 const SQLITE_JOURNAL_RESERVE = "-journal".length;
+export const READ_ONLY_BUSY_TIMEOUT_MS = 5_000;
+
+export function openReadOnlySqliteConnection(filename: string): SqliteConnection {
+  if (filename === ":memory:" || filename.trim().length === 0) {
+    throw new StorageError(
+      "DATABASE_OPEN_FAILED",
+      "Read-only SQLite open requires an existing on-disk database file."
+    );
+  }
+  let connection: SqliteConnection;
+  try {
+    connection = openSqliteConnection(filename, { readonly: true, fileMustExist: true });
+  } catch (error) {
+    throw new StorageError("DATABASE_OPEN_FAILED", `Failed to open read-only database: ${filename}`, error);
+  }
+  try {
+    withSqliteBusyRetry(() => {
+      // Timeout first: query_only can SQLITE_BUSY while a peer holds IMMEDIATE.
+      connection.pragma(`busy_timeout = ${READ_ONLY_BUSY_TIMEOUT_MS}`);
+      connection.pragma("query_only = ON");
+    });
+    return connection;
+  } catch (error) {
+    try { connection.close(); }
+    catch (closeError) { throw new SqliteConnectionCleanupError(connection, error, closeError); }
+    throw error;
+  }
+}
 
 /** Windows MAX_PATH counts the journal sidecar. A long absolute path needs the extended prefix. */
 export function sqliteHostFilename(filename: string, platform: NodeJS.Platform = process.platform): string {

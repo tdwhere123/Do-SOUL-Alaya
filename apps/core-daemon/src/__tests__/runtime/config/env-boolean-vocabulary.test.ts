@@ -4,7 +4,6 @@ import {
   ENV_BOOLEAN_TRUE_TOKENS,
   ENV_BOOLEAN_VOCABULARY_ERROR
 } from "@do-soul/alaya-protocol";
-import { assertInspectDaemonUrl } from "../../../cli/inspect/inspect-daemon-client.js";
 import {
   ALAYA_EDGE_CLASSIFY_HOST_WORKER_ENV,
   ALAYA_EDGE_PRODUCER_LLM_ENABLED_ENV,
@@ -25,9 +24,6 @@ describe("public env boolean vocabulary", () => {
     expect(isWildcardBindOptInEnabled({ ALAYA_ALLOW_WILDCARD_BIND: token })).toBe(true);
     expect(() => validateDaemonEnv({ ALAYA_ALLOW_REMOTE_DAEMON: token })).not.toThrow();
     expect(() => validateDaemonEnv({ ALAYA_ALLOW_WILDCARD_BIND: token })).not.toThrow();
-    expect(() =>
-      assertInspectDaemonUrl("http://evil.example:5173", { ALAYA_ALLOW_REMOTE_DAEMON: token })
-    ).not.toThrow();
     expect(
       shouldEnableE2eEventTriggers({
         NODE_ENV: "test",
@@ -77,9 +73,6 @@ describe("public env boolean vocabulary", () => {
       .toThrow(VOCABULARY_ERROR);
     expect(() => validateDaemonEnv({ ALAYA_ALLOW_WILDCARD_BIND: "2" }))
       .toThrow(VOCABULARY_ERROR);
-    expect(() =>
-      assertInspectDaemonUrl("http://evil.example:5173", { ALAYA_ALLOW_REMOTE_DAEMON: "2" })
-    ).toThrow(VOCABULARY_ERROR);
     expect(() =>
       shouldEnableE2eEventTriggers({
         NODE_ENV: "test",

@@ -33,7 +33,6 @@ import {
   type ReconciliationVerdictApplier
 } from "./reconciliation-service-internal.js";
 import {
-  buildProjectionMergeFields,
   buildUpdateFields,
   updateFieldsMatch,
   type ReconciliationMemoryUpdateFields
@@ -248,11 +247,6 @@ export class ReconciliationService {
     if (decision.kind === "noop" && decision.survivingObjectId !== undefined) {
       // NOOP creates nothing, but the verdict still feeds the bench sidecar remap.
       await applyVerdict(decision);
-      await this.applyNoopProjectionMerge(
-        input.workspaceId,
-        decision.survivingObjectId,
-        input.incomingProjectionFields
-      );
       await this.auditDrop(input, decision.survivingObjectId, decision.bestSimilarity);
       return decision;
     }
@@ -272,14 +266,15 @@ export class ReconciliationService {
       return await this.demoteUpdateToCandidate(input, decision, applyVerdict);
     }
     const { incomingEvidenceRef } = await applyVerdict(decision);
-    const applied = await this.applyUpdate(
-      input.workspaceId,
-      targetObjectId,
-      input.incomingContent.trim(),
-      input.incomingDomainTags,
-      incomingEvidenceRef,
-      input.incomingProjectionFields
-    );
+    const applied = incomingEvidenceRef !== undefined && incomingEvidenceRef.trim().length > 0 &&
+      await this.applyUpdate(
+        input.workspaceId,
+        targetObjectId,
+        input.incomingContent.trim(),
+        input.incomingDomainTags,
+        incomingEvidenceRef,
+        input.incomingProjectionFields
+      );
     if (applied) {
       return decision;
     }
@@ -339,7 +334,7 @@ export class ReconciliationService {
     targetObjectId: string,
     incomingContent: string,
     incomingDomainTags: readonly string[],
-    incomingEvidenceRef: string | undefined,
+    incomingEvidenceRef: string,
     incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
   ): Promise<boolean> {
     const existing = await this.findUpdateTarget(workspaceId, targetObjectId);
@@ -399,30 +394,6 @@ export class ReconciliationService {
         error: errorMessage(error)
       });
       throw error;
-    }
-  }
-
-  private async applyNoopProjectionMerge(
-    workspaceId: string,
-    targetObjectId: string,
-    incomingProjectionFields: ReconciliationMemoryProjectionFields | undefined
-  ): Promise<void> {
-    try {
-      const existing = await this.memoryRepo.findByIds(workspaceId, [targetObjectId]);
-      const row = existing[0];
-      if (row === undefined || row.lifecycle_state === "archived") {
-        return;
-      }
-      const fields = buildProjectionMergeFields(row, incomingProjectionFields);
-      if (Object.keys(fields).length === 0) {
-        return;
-      }
-      await this.memoryUpdate.update(targetObjectId, fields, "reconciliation_projection_merge");
-    } catch (error) {
-      this.warn("reconciliation NOOP projection merge failed", {
-        object_id: targetObjectId,
-        error: errorMessage(error)
-      });
     }
   }
 

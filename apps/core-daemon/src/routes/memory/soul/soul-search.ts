@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { Context, Hono } from "hono";
+import type { Hono } from "hono";
 import { capableRecallConsumerDeclaration, CoreError, type WorkspaceService } from "@do-soul/alaya-core";
 import { toPublicToolError } from "@do-soul/alaya-protocol";
+import { HTTP_REVIEWER_AGENT_TARGET } from "../../../mcp-memory/proposal/reviewer-surfaces.js";
 import type { McpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
-import { isRequestBodyTooLargeError, throwInvalidRequestBody } from "../../shared/shared.js";
+import { jsonError, mcpToolErrorStatus, readJsonObject } from "../../shared/shared.js";
 
 export interface SoulSearchRouteServices {
   readonly workspaceService: WorkspaceService;
@@ -13,7 +14,7 @@ export interface SoulSearchRouteServices {
   readonly mcpMemoryToolHandler: McpMemoryToolHandler;
 }
 
-// HTTP route surface for the Inspector NL+time search bar.
+// HTTP route surface for the loopback NL+time search endpoint.
 //
 //   POST /workspaces/:wsId/soul/search
 //     body: { text: string, since?: string|null, until?: string|null,
@@ -31,15 +32,12 @@ export function registerSoulSearchRoutes(app: Hono, services: SoulSearchRouteSer
 
     const body = await readJsonObject(context);
     if (body === null) {
-      return context.json({ success: false, error: "invalid JSON body" }, 400);
+      return jsonError(context, 400, "invalid JSON body");
     }
 
     const text = typeof body.text === "string" ? body.text.trim() : "";
     if (text.length === 0) {
-      return context.json(
-        { success: false, error: "text is required" },
-        400
-      );
+      return jsonError(context, 400, "text is required");
     }
     const maxResults = clampMaxResults(body.max_results);
     // invariant: malformed `since` / `until` / `time_field` reach the route
@@ -54,10 +52,7 @@ export function registerSoulSearchRoutes(app: Hono, services: SoulSearchRouteSer
       until = parseOptionalIsoDatetime(body.until);
     } catch (error) {
       if (error instanceof CoreError && error.code === "VALIDATION") {
-        return context.json(
-          { success: false, error: "invalid datetime", error_code: error.code },
-          400
-        );
+        return jsonError(context, 400, "invalid datetime", { error_code: error.code });
       }
       throw error;
     }
@@ -67,10 +62,7 @@ export function registerSoulSearchRoutes(app: Hono, services: SoulSearchRouteSer
     } else if (body.time_field === "last_used_at" || body.time_field === "created_at") {
       timeField = body.time_field;
     } else {
-      return context.json(
-        { success: false, error: "time_field must be 'created_at' or 'last_used_at'" },
-        400
-      );
+      return jsonError(context, 400, "time_field must be 'created_at' or 'last_used_at'");
     }
 
     const args: Record<string, unknown> = {
@@ -91,21 +83,16 @@ export function registerSoulSearchRoutes(app: Hono, services: SoulSearchRouteSer
       context: {
         workspaceId,
         runId: null,
-        agentTarget: "inspector",
-        sessionId: `inspector-${randomUUID()}`
+        agentTarget: HTTP_REVIEWER_AGENT_TARGET,
+        sessionId: `${HTTP_REVIEWER_AGENT_TARGET}-${randomUUID()}`
       }
     });
 
     if (!result.ok) {
-      const status =
-        result.error.code === "VALIDATION"
-          ? 400
-          : result.error.code === "NOT_FOUND"
-            ? 404
-            : 500;
-      return context.json(
-        { success: false, error: toPublicToolError(result.error.code, result.error.message) },
-        status
+      return jsonError(
+        context,
+        mcpToolErrorStatus(result.error.code),
+        toPublicToolError(result.error.code, result.error.message)
       );
     }
     return context.json({ success: true, data: result.output }, 200);
@@ -133,19 +120,4 @@ function parseOptionalIsoDatetime(raw: unknown): string | null | undefined {
   // 400 for non-string inputs that the schema would otherwise see as
   // "absent".
   return trimmed;
-}
-
-async function readJsonObject(context: Context): Promise<Record<string, unknown> | null> {
-  try {
-    const parsed: unknown = await context.req.json();
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch (error) {
-    if (isRequestBodyTooLargeError(error)) {
-      throwInvalidRequestBody(error);
-    }
-    return null;
-  }
 }

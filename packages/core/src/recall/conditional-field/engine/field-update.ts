@@ -82,6 +82,7 @@ export function bindEngineState(state: BindableState): FieldEngineState {
   const residuals = solverResourceResiduals(semanticResiduals, bound.memory_exhausted);
   const { proven_binding: _proven, binding_delta: _delta, ...chargedRest } = charged;
   const retainedIndex = charged.retained_index ?? indexFieldRetention(charged);
+  const solverSteps = bound.binding.kind === "bound" ? bound.binding.solver_steps : 0;
   const next: FieldEngineState = {
     ...chargedRest,
     ...retainedIndex.rows,
@@ -91,7 +92,8 @@ export function bindEngineState(state: BindableState): FieldEngineState {
       + bound.solver_retained_bytes - (charged.solver_retained_bytes ?? 0),
     solver_retained_bytes: bound.solver_retained_bytes,
     memory_exhausted: bound.memory_exhausted,
-    solver_completed_work: (state.solver_completed_work ?? 0) + (bound.binding.kind === "bound" ? bound.binding.solver_steps : 0),
+    solver_completed_work: (state.solver_completed_work ?? 0) + solverSteps,
+    solver_retained_work: (state.solver_retained_work ?? 0) + solverSteps,
     remaining_exploration: bound.exploration,
     remaining_reserve: bound.reserve,
     remaining_work: Object.freeze(

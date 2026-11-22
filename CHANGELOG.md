@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 44.0.0, engine gateway 4.0.1
+## Unreleased — protocol 45.0.0, engine gateway 4.0.1
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -17,6 +17,10 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `4.0.1`; app packages remain `0.3.11`.
 Pins hono `4.13.16` and `@hono/node-server` `2.1.6` (advisory-clean for published moderate GHSAs).
+
+Protocol `45.0.0` records a **SemVer major** under invariant §25 (`ORDINARY_NATIVE_FIELD_RESULT_VERSION` remains `"ordinary-native-field.v16"`):
+- **Clean-break surface normalization, formation/factor retirement & zero unused package exports (`@do-soul/alaya-protocol` `45.0.0`):**
+  removes the Memory Inspector web/server packages (`@do-soul/alaya-inspector`, `@do-soul/alaya-inspector-web`) and `alaya inspect` in favor of MCP (`stdio`), CLI, and the loopback Daemon HTTP JSON API; registers all 39 `RuntimeGovernanceEventType` variants in `RuntimeGovernanceEventUnionSchema`, replaces `Buffer` usage in `packages/protocol` with `TextEncoder`, and unifies `WorkspaceListScope` fail-closed grant filtering; retires `factor_descriptors`, `factor_incidences`, `evidence_fact_frame_formations`, and `evidence_semantic_factor_formations` (SQLite migrations `048`–`052`) along with superseded OSF/file-tool/streaming schemas and unused cross-package barrel exports (`unused-package-exports` baseline reduced to `0`).
 
 Protocol `44.0.0` records a **SemVer major** under invariant §25 (`ORDINARY_NATIVE_FIELD_RESULT_VERSION` remains `"ordinary-native-field.v16"`):
 - **Lossless page-local `SourceDisclosure` Codec v2 delta wire encoding & Page-1 fixed-fragment `Delta + Next` packing (`@do-soul/alaya-protocol` `44.0.0`):**
@@ -118,7 +122,7 @@ commit durable projection repair intent atomically with their state, and seriali
 generation activation, audit and request acknowledgement. EventPublisher rejects asynchronous transaction callbacks,
 including apply callbacks. Receipt-first native source audit remains distinct from
 atomic generation/usage audit; notification failure does not undo committed state.
-See `docs/handbook/runtime-transactions.md` for retry and recovery ownership.
+See `docs/handbook/architecture.md#runtime-write-model` for retry and recovery ownership.
 
 Inspector `soul.open_pointer` copy uses strict `object_id`. MCP bridge executes
 published `garden.*` catalog tools through the soul handler. Both are adapter

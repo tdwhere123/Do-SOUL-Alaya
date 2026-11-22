@@ -58,7 +58,7 @@ function packageBuiltRelease() {
   for (const script of ["configured-paths.mjs", "resolve-live-db-path.mjs", "vacuum-into.mjs"]) {
     copyFileSync(path.join(repo, "scripts", script), path.join(tree, "scripts", script));
   }
-  const packages = ["apps/core-daemon", "apps/inspector",
+  const packages = ["apps/core-daemon",
     ...readdirSync(path.join(repo, "packages")).map(name => `packages/${name}`)];
   for (const relative of packages) {
     const source = path.join(repo, relative);

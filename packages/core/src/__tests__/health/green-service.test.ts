@@ -563,4 +563,80 @@ it("reevaluate() marks grace entered because valid_until expired", async () => {
       }
     });
   });
+
+  it("grant() resets consecutiveNoGo on commit before async notification so concurrent NO_GO is preserved", async () => {
+    const targetObjectId = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
+    const { service, notifyEntry } = createHarness();
+    await service.runVerification({
+      targetObjectId,
+      workspaceId: "workspace-1",
+      verdict: VerificationVerdict.NO_GO,
+      microCorrectionHint: "retry",
+      necessaryPatch: null
+    });
+    expect(service.consecutiveNoGo.get(targetObjectId)).toBe(1);
+
+    let releaseNotify!: () => void;
+    const notifyStarted = new Promise<void>((resolve) => {
+      notifyEntry.mockImplementationOnce(async () => {
+        expect(service.consecutiveNoGo.has(targetObjectId)).toBe(false);
+        resolve();
+        await new Promise<void>((done) => {
+          releaseNotify = done;
+        });
+      });
+    });
+
+    const grantPromise = service.grant({
+      targetObjectId,
+      workspaceId: "workspace-1",
+      basis: VerificationBasis.USER_RECONFIRM,
+      validUntil: null,
+      verifiedBy: "user"
+    });
+    await notifyStarted;
+
+    await service.runVerification({
+      targetObjectId,
+      workspaceId: "workspace-1",
+      verdict: VerificationVerdict.NO_GO,
+      microCorrectionHint: "concurrent no-go during notify",
+      necessaryPatch: null
+    });
+    releaseNotify();
+    await grantPromise;
+
+    expect(service.consecutiveNoGo.get(targetObjectId)).toBe(1);
+  });
+
+  it("pierce(REVIEW_OVERDUE) does not revoke when concurrent grant or setGrace already renewed the status", async () => {
+    const targetObjectId = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
+    const renewedEligible = createHarness({
+      existingStatus: createGreenStatus({
+        green_state: "eligible",
+        valid_until: "2026-03-23T00:00:00.000Z"
+      })
+    });
+    const afterGrant = await renewedEligible.service.pierce({
+      targetObjectId,
+      workspaceId: "workspace-1",
+      reason: RevokeReason.REVIEW_OVERDUE
+    });
+    expect(afterGrant?.green_state).toBe("eligible");
+    expect(renewedEligible.events).toHaveLength(0);
+
+    const renewedGrace = createHarness({
+      existingStatus: createGreenStatus({
+        green_state: "grace",
+        valid_until: "2026-03-25T00:00:00.000Z"
+      })
+    });
+    const afterGraceExtension = await renewedGrace.service.pierce({
+      targetObjectId,
+      workspaceId: "workspace-1",
+      reason: RevokeReason.REVIEW_OVERDUE
+    });
+    expect(afterGraceExtension?.green_state).toBe("grace");
+    expect(renewedGrace.events).toHaveLength(0);
+  });
 });

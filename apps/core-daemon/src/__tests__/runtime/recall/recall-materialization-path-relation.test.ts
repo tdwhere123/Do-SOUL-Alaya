@@ -60,11 +60,12 @@ describe("Garden temporal relation runtime", () => {
         pathFailureHealthInboxPort: { recordPathRelationFailure: async () => undefined },
         pathRelationRepo: new SqlitePathRelationRepo(database),
         proposalRepo: new SqliteProposalRepo(database),
-        relationAssertionRepo: new SqliteRelationAssertionRepo(database),
         evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database),
         runtimeNotifier,
         warn: vi.fn()
-      } as unknown as Parameters<typeof createPathRelationRuntime>[0]);
+      } as unknown as Parameters<typeof createPathRelationRuntime>[0], new RelationAssertionService({
+        repo: new SqliteRelationAssertionRepo(database), eventPublisher, eventHistory: eventLogRepo
+      }));
       pathRelationEvictionTimer = runtime.pathRelationEvictionTimer;
 
       expect(runtime.temporalRelationAssertionPort.admit).toEqual(expect.any(Function));
@@ -221,7 +222,6 @@ async function createNominationHarness(
     pathFailureHealthInboxPort: { recordPathRelationFailure: async () => undefined },
     pathRelationRepo: new SqlitePathRelationRepo(database),
     proposalRepo,
-    relationAssertionRepo: relationRepo,
     evidenceCapsuleRepo: evidenceRepo,
     runtimeNotifier,
     warn: vi.fn()
@@ -231,7 +231,9 @@ async function createNominationHarness(
     relationRepo,
     proposalRepo,
     sourceEventId: sourceEvent.event_id,
-    runtime: createPathRelationRuntime(runtimeInput)
+    runtime: createPathRelationRuntime(runtimeInput, new RelationAssertionService({
+      repo: relationRepo, eventPublisher, eventHistory: eventLogRepo
+    }))
   };
 }
 

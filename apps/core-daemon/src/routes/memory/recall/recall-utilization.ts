@@ -1,10 +1,9 @@
 import type { Hono } from "hono";
-import { CoreError, type WorkspaceService } from "@do-soul/alaya-core";
 import {
+  CoreError,
   rollUpUtilizationBucketsByCohort,
-  type UtilizationBucketDelivery,
-  type UtilizationBucketReport
-} from "@do-soul/alaya-eval";
+  type WorkspaceService
+} from "@do-soul/alaya-core";
 import {
   RecallContextEventType,
   SoulSingleUsedAnchorPayloadSchema,
@@ -42,20 +41,6 @@ export interface SingleUsedAnchorTelemetryEmitter {
   emitMany?(inputs: readonly SingleUsedAnchorEmitInput[]): Promise<void>;
 }
 
-export interface RecallUtilizationCohortRow {
-  readonly workspace_id: string;
-  readonly agent_target: string;
-  readonly buckets: {
-    readonly no_recall: number;
-    readonly empty_recall: number;
-    readonly delivered_not_reported: number;
-    readonly reported_skipped_or_na: number;
-    readonly reported_used: number;
-  };
-  readonly delivery_total: number;
-  readonly single_used_anchor_count: number;
-}
-
 export function registerRecallUtilizationRoutes(
   app: Hono,
   services: RecallUtilizationRouteServices
@@ -86,9 +71,9 @@ export function registerRecallUtilizationRoutes(
     const reports = projectReports(usageRows);
 
     const rows = rollUpUtilizationBucketsByCohort({
-      deliveries: deliveries as readonly (UtilizationBucketDelivery & { readonly workspace_id: string })[],
-      reports: reports as readonly (UtilizationBucketReport & { readonly workspace_id: string })[]
-    }) satisfies readonly RecallUtilizationCohortRow[];
+      deliveries,
+      reports
+    });
 
     if (services.singleUsedAnchorEmitter !== undefined) {
       await emitSingleUsedAnchorTelemetry({

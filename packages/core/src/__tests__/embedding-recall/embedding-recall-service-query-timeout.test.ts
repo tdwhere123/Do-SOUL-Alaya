@@ -30,53 +30,19 @@ describe("EmbeddingRecallService queryTimeoutMs configuration", () => {
     });
   }
 
-  it("uses the 2500ms default when queryTimeoutMs is not configured", () => {
+  it.each([
+    { label: "uses the 2500ms default when queryTimeoutMs is not configured", timeoutMs: undefined, expectedMs: 2500 },
+    { label: "respects an explicit queryTimeoutMs override", timeoutMs: 800, expectedMs: 800 },
+    { label: "clamps very large queryTimeoutMs to the 5000ms ceiling", timeoutMs: 60_000, expectedMs: 5000 },
+    { label: "clamps very small queryTimeoutMs to the 50ms floor", timeoutMs: 1, expectedMs: 50 },
+    { label: "falls back to default when queryTimeoutMs is non-finite or non-positive", timeoutMs: 0, expectedMs: 2500 }
+  ])("$label", ({ timeoutMs, expectedMs }) => {
     const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
-    const service = buildServiceWithTimeout({ embedTexts });
+    const service = buildServiceWithTimeout({ timeoutMs, embedTexts });
     service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
     expect(embedTexts).toHaveBeenCalledWith(
       ["hello"],
-      expect.objectContaining({ timeoutMs: 2500 })
-    );
-  });
-
-  it("respects an explicit queryTimeoutMs override", () => {
-    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
-    const service = buildServiceWithTimeout({ timeoutMs: 800, embedTexts });
-    service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
-    expect(embedTexts).toHaveBeenCalledWith(
-      ["hello"],
-      expect.objectContaining({ timeoutMs: 800 })
-    );
-  });
-
-  it("clamps very large queryTimeoutMs to the 5000ms ceiling", () => {
-    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
-    const service = buildServiceWithTimeout({ timeoutMs: 60_000, embedTexts });
-    service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
-    expect(embedTexts).toHaveBeenCalledWith(
-      ["hello"],
-      expect.objectContaining({ timeoutMs: 5000 })
-    );
-  });
-
-  it("clamps very small queryTimeoutMs to the 50ms floor", () => {
-    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
-    const service = buildServiceWithTimeout({ timeoutMs: 1, embedTexts });
-    service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
-    expect(embedTexts).toHaveBeenCalledWith(
-      ["hello"],
-      expect.objectContaining({ timeoutMs: 50 })
-    );
-  });
-
-  it("falls back to default when queryTimeoutMs is non-finite or non-positive", () => {
-    const embedTexts = vi.fn(async () => [new Float32Array([0, 1])]);
-    const service = buildServiceWithTimeout({ timeoutMs: 0, embedTexts });
-    service.prepareQueryEmbedding({ workspaceId: "ws-1", runId: null, queryText: "hello" });
-    expect(embedTexts).toHaveBeenCalledWith(
-      ["hello"],
-      expect.objectContaining({ timeoutMs: 2500 })
+      expect.objectContaining({ timeoutMs: expectedMs })
     );
   });
 });

@@ -1,20 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
-import { type SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
+import { SqliteEventLogRepo, type SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
 import { ReconciliationService } from "../../governance/reconciliation/reconciliation-service.js";
 import { authorizedDurableRewrite, baseInput, createDeps, type DecideFn } from "./reconciliation-service.test-support.js";
 import {
   closeReconciliationTestDatabases,
   createReconciliationMemoryRepo,
+  createReconciliationSqliteHarness,
   seedReconciliationEntry as seedEntry
 } from "./reconciliation-real-sqlite.test-support.js";
-
-// Real-sqlite e2e: canonical_entities (the durable recall key) must reach the
-// survivor memory row on every reconciliation verdict — created on ADD, replaced
-// on UPDATE, backfilled-but-not-overwritten on NOOP. Persistence is the real repo
-// + real migrations; only the decider/keyword/event ports are stubbed (no real
-// LLM exists in a unit context). canonical_entities rides the unified projection-
-// fields channel (incomingProjectionFields), not a private side-channel.
 
 const UPDATED_AT = "2026-06-30T00:00:00.000Z";
 
@@ -139,31 +133,40 @@ describe("reconciliation canonical_entities survivor persistence", () => {
     expect(row.canonical_entities).toEqual(["alice", "berlin"]);
   });
 
-  it("backfills a NOOP survivor's missing canonical_entities from the incoming signal", async () => {
-    const repo = await createReconciliationMemoryRepo();
+  it("audits an LLM NOOP and preserves every field of the surviving memory", async () => {
+    const { database, memoryRepo: repo } = await createReconciliationSqliteHarness();
     const seeded = seedEntry({ content: "The user lives in Berlin.", canonical_entities: null });
     await repo.create(seeded);
+    const original = await repo.findById(seeded.object_id);
 
-    const { deps, append } = wireRepoDeps(repo, [seeded]);
+    const eventLog = new SqliteEventLogRepo(database);
+    const { deps, decide } = wireRepoDeps(repo, [seeded], {
+      eventLog,
+      thresholds: { similarityFloor: 0.2 }
+    });
+    decide.mockResolvedValue({ kind: "noop", targetObjectId: seeded.object_id, reason: "duplicate fact" });
     const service = new ReconciliationService(deps);
 
     const decision = await service.runWithDecision(
       {
         ...baseInput,
-        incomingContent: "The user lives in Berlin.",
+        incomingContent: "The user still lives in Berlin today.",
         incomingDomainTags: ["residence"],
-        incomingProjectionFields: { canonical_entities: ["alice", "berlin"] }
+        incomingProjectionFields: { canonical_entities: ["alice", "berlin"], time_precision: "day" }
       },
       applyUpdateVerdict
     );
 
     expect(decision.kind).toBe("noop");
-    const row = (await repo.findByIds("workspace-1", [seeded.object_id]))[0]!;
-    expect(row.canonical_entities).toEqual(["alice", "berlin"]);
-    expect(append).toHaveBeenCalledTimes(1);
+    expect(decide).toHaveBeenCalledOnce();
+    await expect(repo.findById(seeded.object_id)).resolves.toEqual(original);
+    await expect(eventLog.queryByWorkspace("workspace-1")).resolves.toEqual([
+      expect.objectContaining({ caused_by: "reconciliation_noop",
+        payload_json: expect.objectContaining({ triage_result: "dropped", surviving_object_id: seeded.object_id }) })
+    ]);
   });
 
-  it("does not overwrite a NOOP survivor's existing canonical_entities (backfill-only)", async () => {
+  it("preserves a NOOP survivor's existing canonical_entities", async () => {
     const repo = await createReconciliationMemoryRepo();
     const seeded = seedEntry({
       content: "The user lives in Berlin.",

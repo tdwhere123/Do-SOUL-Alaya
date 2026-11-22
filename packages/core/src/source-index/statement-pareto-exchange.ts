@@ -144,9 +144,12 @@ export function quoteStatementParetoExchange(roots: number, statements: number):
   const vetoPairs = maxH * Math.max(0, maxH - 1);
   const dominance = 2 * n * (2 * R + maxH * (3 * n + 4) + 2)
     + 3 * n * domPairs + n * maxH * (maxH + 1) + 4 * n * n * vetoPairs;
+  const headSize = Math.min(5, R);
+  const matching = maxH === 0 ? 0 : R * n + (1 + 2 * n * maxH) * headSize * (2 * n + 2);
   return {
-    work_units: setupAndSort + dpWork + dominance,
+    work_units: setupAndSort + dpWork + dominance + matching,
     memory_bytes: 2048 + R * (256 + 32 * n) + n * 384
+      + (matching === 0 ? 0 : 128 + 48 * R + 64 * headSize + 16 * n)
       + (n >= 2 ? (R <= PACKED_POOL_LIMIT ? 1024 + M * 48 : 1024 + M * 32 + R * n * (1 << (n - 1)) * (160 + n * 16)) : 0)
   };
 }
@@ -164,6 +167,30 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
   const quote = quoteStatementParetoExchange(sizedRoots, association.statements);
   meter.charge(quote.work_units, quote.memory_bytes, "statement relation witness exchange");
   if (relations.every(row => row.every(value => value === null))) return { executed: true, swapped: false };
+  const n = association.statements;
+  const rows = rankWitnessRows(association, pool);
+  const { ranks, marginal, match } = rows;
+  const placed = new Set((match?.roots ?? []).filter((id): id is string => id !== null && head.includes(id)));
+  const tailRows = Int32Array.from(tail, id => rows.rootRow.get(id) ?? -1);
+  const placement = { ...rows, head, tail, tailRows, relations, n, placed,
+    coverageRows: association.coverage, agreedSet: new Set(agreed),
+    marginalSet: new Set(marginal.filter((id): id is string => id !== null)),
+    slotDominated: new Int8Array(head.length).fill(-1),
+    preservingRank: preserveHeadMatching(head, n, rows.coverageMask) };
+  const tryPlace: TryPlace = (incoming, column, veto = false) => {
+    if (!placeWitness(placement, incoming, column, veto)) return false;
+    placed.add(incoming);
+    return true;
+  };
+  let swapped = false;
+  for (const [column, id] of (match?.roots ?? []).entries()) {
+    if (id !== null && !head.includes(id) && tryPlace(id, column)) swapped = true;
+  }
+  if (association.spans !== undefined && placeDerivedWitnesses(ranks, head, placed, tryPlace)) swapped = true;
+  return { executed: true, swapped };
+}
+
+function rankWitnessRows(association: StatementAssociation, pool: readonly string[]) {
   const n = association.statements;
   const uniquePool: string[] = [];
   const posMap = new Map<string, number>();
@@ -184,83 +211,123 @@ export function exchangeStatementParetoSecondary(input: Readonly<{
     .sort((left, right) => coverage(right, column)! - coverage(left, column)! || posMap.get(left)! - posMap.get(right)!));
   const marginal = ranks.map(row => row[0] ?? null);
   const match = n >= 2 ? matchQuantileAssignment(uniquePool, posMap, ranks, marginal, n) : null;
-  const placed = new Set((match?.roots ?? []).filter((id): id is string => id !== null && head.includes(id)));
-  const agreedSet = new Set(agreed);
-  const marginalSet = new Set(marginal.filter((id): id is string => id !== null));
-  const tailRows = new Int32Array(tail.length);
-  for (let i = 0; i < tail.length; i++) tailRows[i] = rootRow.get(tail[i]!) ?? -1;
-  const slotDominated = new Int8Array(head.length).fill(-1);
-  let exchanged = false;
-
-  const tryPlace = (incoming: string, column: number, vetoDominatedVictim = false): boolean => {
-    const at = tail.indexOf(incoming);
-    if (at < 0) return false;
-    const unprotected: SlotCandidate[] = [];
-    for (let slot = head.length - 1; slot >= 1; slot--) {
-      const occupant = head[slot]!;
-      if (agreedSet.has(occupant) || marginalSet.has(occupant) || placed.has(occupant)) continue;
-      const occRow = rootRow.get(occupant);
-      if (occRow === undefined) continue;
-      const occCov = association.coverage[occRow]!;
-      const occRel = relations[occRow]!;
-      if (!hasAnyWitness(occCov, n) || !passesPossibleGuard(occCov, n, column,
-        d => possible(occupant, d), coverage(incoming, column) !== null)) continue;
-      let cachedDom = slotDominated[slot]!;
-      if (cachedDom < 0) {
-        cachedDom = isSlotDominated(occCov, occRel, association.coverage, relations, tailRows, n) ? 1 : 0;
-        slotDominated[slot] = cachedDom;
-      }
-      const dominated = cachedDom === 1;
-      if (!vetoDominatedVictim) {
-        if (!dominated) continue;
-        swapHeadTail(head, tail, tailRows, slotDominated, rootRow, slot, at);
-        exchanged = true;
-        return true;
-      }
-      unprotected.push({ slot, occupant, occCov, dominated });
-    }
-    if (!vetoDominatedVictim) return false;
-    const chosen = unprotected.find(s => s.dominated
-      && !unprotected.some(o => o.slot !== s.slot && vetoesVictim(o, s, n, possible)));
-    if (chosen === undefined) return false;
-    swapHeadTail(head, tail, tailRows, slotDominated, rootRow, chosen.slot, at);
-    exchanged = true;
-    return true;
+  const masks = new Int32Array(uniquePool.length);
+  for (let i = 0; i < uniquePool.length; i++) {
+    let mask = 0;
+    for (let column = 0; column < n; column++) if (coverage(uniquePool[i]!, column) !== null) mask |= 1 << column;
+    masks[i] = mask;
+  }
+  const coverageMask = (id: string): number => {
+    const pos = posMap.get(id);
+    return pos === undefined ? 0 : masks[pos]!;
   };
+  return { rootRow, coverage, possible, ranks, marginal, match, coverageMask };
+}
 
-  if (match !== null) {
-    for (const [column, id] of match.roots.entries()) {
-      if (id !== null && !head.includes(id) && tryPlace(id, column)) placed.add(id);
+function preserveHeadMatching(head: readonly string[], n: number, coverageMask: (id: string) => number) {
+  let currentRank: number | undefined;
+  const nextRank = (slot: number, incoming: string): number => {
+    currentRank ??= headMatchingRank(head, n, coverageMask);
+    return headMatchingRank(head.map((id, index) => index === slot ? incoming : id), n, coverageMask);
+  };
+  return {
+    canPreserveHeadMatching: (slot: number, incoming: string): boolean => nextRank(slot, incoming) >= currentRank!,
+    commitHeadSwap: (slot: number, incoming: string): void => { currentRank = nextRank(slot, incoming); }
+  };
+}
+
+type TryPlace = (incoming: string, column: number, veto?: boolean) => boolean;
+type WitnessPlacement = Pick<ReturnType<typeof rankWitnessRows>, "rootRow" | "coverage" | "possible"> & Readonly<{
+  head: string[]; tail: string[]; tailRows: Int32Array; slotDominated: Int8Array; n: number;
+  agreedSet: ReadonlySet<string>; marginalSet: ReadonlySet<string>; placed: ReadonlySet<string>;
+  coverageRows: StatementAssociation["coverage"]; relations: NonNullable<StatementAssociation["relations"]>;
+  preservingRank: ReturnType<typeof preserveHeadMatching>;
+}>;
+
+function placeWitness(placement: WitnessPlacement, incoming: string, column: number, veto: boolean): boolean {
+  const { head, tail, tailRows, slotDominated, n, rootRow, coverage, coverageRows, relations, possible,
+    agreedSet, marginalSet, placed, preservingRank } = placement;
+  const at = tail.indexOf(incoming);
+  if (at < 0) return false;
+  const unprotected: SlotCandidate[] = [];
+  for (let slot = head.length - 1; slot >= 1; slot--) {
+    const occupant = head[slot]!;
+    if (agreedSet.has(occupant) || marginalSet.has(occupant) || placed.has(occupant)) continue;
+    const occRow = rootRow.get(occupant);
+    if (occRow === undefined) continue;
+    const occCov = coverageRows[occRow]!, occRel = relations[occRow]!;
+    if (!hasAnyWitness(occCov, n) || !passesPossibleGuard(occCov, n, column,
+      d => possible(occupant, d), coverage(incoming, column) !== null)) continue;
+    if (slotDominated[slot]! < 0) {
+      slotDominated[slot] = isSlotDominated(occCov, occRel, coverageRows, relations, tailRows, n) ? 1 : 0;
+    }
+    const dominated = slotDominated[slot] === 1;
+    if (veto) unprotected.push({ slot, occupant, occCov, dominated });
+    else if (dominated && preservingRank.canPreserveHeadMatching(slot, incoming)) {
+      swapHeadTail(head, tail, tailRows, slotDominated, rootRow, slot, at);
+      preservingRank.commitHeadSwap(slot, incoming);
+      return true;
     }
   }
-  if (association.spans !== undefined) {
-    const secondPassColumns: number[] = [];
-    for (const [column, ranked] of ranks.entries()) {
-      const top = ranked[0], candidate = ranked[1];
-      if (top === undefined || candidate === undefined || !head.includes(top)) continue;
-      if (head.includes(candidate)) {
-        placed.add(candidate);
-        secondPassColumns.push(column);
+  if (!veto) return false;
+  const chosen = unprotected.find(s => s.dominated
+    && !unprotected.some(o => o.slot !== s.slot && vetoesVictim(o, s, n, possible))
+    && preservingRank.canPreserveHeadMatching(s.slot, incoming));
+  if (chosen === undefined) return false;
+  swapHeadTail(head, tail, tailRows, slotDominated, rootRow, chosen.slot, at);
+  preservingRank.commitHeadSwap(chosen.slot, incoming);
+  return true;
+}
+
+function placeDerivedWitnesses(ranks: readonly (readonly string[])[], head: readonly string[],
+  placed: Set<string>, tryPlace: TryPlace): boolean {
+  let swapped = false;
+  const secondPassColumns: number[] = [];
+  for (const [column, ranked] of ranks.entries()) {
+    const top = ranked[0], candidate = ranked[1];
+    if (top === undefined || candidate === undefined || !head.includes(top)) continue;
+    if (head.includes(candidate)) {
+      placed.add(candidate);
+      secondPassColumns.push(column);
+    } else if (tryPlace(candidate, column, true)) swapped = true;
+  }
+  for (const column of secondPassColumns) {
+    const ranked = ranks[column]!;
+    for (let k = 2; k < ranked.length; k++) {
+      const id = ranked[k]!;
+      if (head.includes(id)) {
+        placed.add(id);
         continue;
       }
-      if (tryPlace(candidate, column, true)) placed.add(candidate);
-    }
-    for (const column of secondPassColumns) {
-      const ranked = ranks[column]!;
-      let candidate: string | undefined;
-      for (let k = 2; k < ranked.length; k++) {
-        const id = ranked[k]!;
-        if (head.includes(id)) {
-          placed.add(id);
-          continue;
-        }
-        candidate = id;
-        break;
-      }
-      if (candidate !== undefined && tryPlace(candidate, column, true)) placed.add(candidate);
+      if (tryPlace(id, column, true)) swapped = true;
+      break;
     }
   }
-  return { executed: true, swapped: exchanged };
+  return swapped;
+}
+
+function headMatchingRank(head: readonly string[], n: number, coverageMask: (id: string) => number): number {
+  const matched: (string | undefined)[] = Array(n).fill(undefined);
+  let visited = 0;
+  const augment = (id: string): boolean => {
+    const edges = coverageMask(id);
+    for (let available = edges & ~visited; available !== 0; available = edges & ~visited) {
+      const bit = available & -available;
+      visited |= bit;
+      const column = 31 - Math.clz32(bit);
+      const incumbent = matched[column];
+      if (incumbent !== undefined && !augment(incumbent)) continue;
+      matched[column] = id;
+      return true;
+    }
+    return false;
+  };
+  let rank = 0;
+  for (const id of new Set(head)) {
+    visited = 0;
+    if (augment(id)) rank++;
+  }
+  return rank;
 }
 
 type SlotCandidate = Readonly<{

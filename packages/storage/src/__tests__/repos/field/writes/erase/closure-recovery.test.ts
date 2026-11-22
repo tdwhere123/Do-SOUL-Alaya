@@ -64,7 +64,7 @@ it("commits bounded scrub batches with their cursor, rolls back an interrupted b
   expect(remaining(database)).toBe(38);
   const checkpoint = progress(database);
   expect(checkpoint.filter(row => row.dirty === 0)).toHaveLength(32);
-  expect(checkpoint[31]).toMatchObject({ barrier_id: "barrier-031", dirty: 0, rule_version: 2 });
+  expect(checkpoint[31]).toMatchObject({ barrier_id: "barrier-031", dirty: 0, rule_version: 3 });
   database.connection.exec(`CREATE TRIGGER interrupt_erase BEFORE UPDATE OF source_body ON source_records
     WHEN OLD.source_id = 'source-35' BEGIN SELECT RAISE(ABORT, 'interrupted scrub'); END`);
   expect(() => erase.repairSourceClosureBatch()).toThrow();
@@ -79,7 +79,7 @@ it("commits bounded scrub batches with their cursor, rolls back an interrupted b
   expect(replay).toHaveBeenCalledTimes(38);
   expect(replay.mock.calls[0]![0].barrier_id).toBe("barrier-032");
   expect(remaining(reopened)).toBe(0);
-  expect(progress(reopened).every(row => row.rule_version === 2 && row.dirty === 0)).toBe(true);
+  expect(progress(reopened).every(row => row.rule_version === 3 && row.dirty === 0)).toBe(true);
   replay.mockClear();
   resumed.repairExistingSourceClosures();
   expect(replay).not.toHaveBeenCalled();
@@ -103,12 +103,14 @@ it("skips clean history on a second startup but invalidates a checkpoint for cha
   expect(progress(reopened).filter(row => row.dirty === 1).map(row => row.barrier_id)).toEqual(["barrier-000"]);
   erase.repairExistingSourceClosures();
   expect(capsule(reopened)).toEqual({ gist: "erased", lifecycle_state: "tombstone" });
+  expect(reopened.connection.prepare("SELECT evidence_id, barrier_id FROM source_erase_evidence_barriers").all())
+    .toEqual([{ evidence_id: "legacy-capsule", barrier_id: "barrier-000" }]);
   expect(apply).toHaveBeenCalledTimes(1);
   apply.mockClear();
   reopened.connection.prepare("UPDATE source_erase_closure_progress SET rule_version = 0").run();
   erase.repairExistingSourceClosures();
   expect(apply).toHaveBeenCalledTimes(3);
-  expect(progress(reopened).every(row => row.rule_version === 2 && row.dirty === 0)).toBe(true);
+  expect(progress(reopened).every(row => row.rule_version === 3 && row.dirty === 0)).toBe(true);
 });
 
 it("repairs only the dirtied receipt plus unfinished receipts when another connection adds attribution between batches", () => {

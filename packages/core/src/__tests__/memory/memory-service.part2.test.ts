@@ -40,14 +40,15 @@ it("writes soul.memory.updated before persistence and runtime notification with 
         updateWithinTransaction: vi.fn((_objectId, fields, callbacks) => {
           callbacks.beforeUpdate?.();
           order.push("repo_update");
-          callbacks.afterUpdate?.();
-          return Object.freeze({
+          const updated = Object.freeze({
             ...existing,
             content: fields.content ?? existing.content,
             evidence_refs: fields.evidence_refs ?? existing.evidence_refs,
             updated_at: fields.updated_at,
             storage_tier: fields.storage_tier ?? existing.storage_tier
           });
+          callbacks.afterUpdate?.(updated);
+          return updated;
         }),
         archive: vi.fn(async () => {
           throw new Error("not used");
@@ -147,7 +148,7 @@ it("persists projection-only updates through the production service boundary", a
         time_precision: "day",
         time_source: "explicit"
       },
-      "reconciliation_projection_merge"
+      "reviewed_update"
     );
 
     expect(evidenceFindByIdSpy).not.toHaveBeenCalled();
@@ -184,7 +185,7 @@ it("persists canonical_entities and records it as an updated field", async () =>
     await service.update(
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       { canonical_entities: ["alice", "berlin"] },
-      "reconciliation_projection_merge"
+      "reviewed_update"
     );
 
     expect(repoUpdateSpy).toHaveBeenCalledWith(
@@ -215,7 +216,7 @@ it.each([
     await service.update(
       "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       update,
-      "reconciliation_projection_merge"
+      "reviewed_update"
     );
 
     expect(repoUpdateSpy).toHaveBeenCalledWith(

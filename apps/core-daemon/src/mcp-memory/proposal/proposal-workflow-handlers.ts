@@ -150,7 +150,7 @@ async function resolveProposalReview(
     scopedProposal,
     request,
     context,
-    now: input.now,
+    now: () => reviewedAt,
     generateObjectId: input.generateObjectId
   });
   const karmaMutation = buildProposalReviewKarmaMutation(

@@ -29,20 +29,15 @@ import {
 const SCHEMA = CONDITIONAL_FIELD_SCHEMA_VERSION;
 
 export type {
-  ObservationMeasurement,
   StoredEmbeddingVector,
   StoredPairMeasurement
 } from "./measure-stored.js";
-export { hasMeasurementProducer, queryDigestOf } from "./measure-stored.js";
+export { hasMeasurementProducer } from "./measure-stored.js";
 export type {
-  EmbeddingObserverPage,
-  LexicalObserverPage,
   NativeSourceNomination,
   ObserveConditionalFieldInput,
   ObserverActionResult,
   ObserverReaders,
-  ObserverWorkReceipt,
-  RelationObserverPage,
   RelationObserverRow,
   SourceObserverPage,
   SourceObserverRow,
@@ -50,17 +45,6 @@ export type {
   SourceRootObserverPage,
   SourceRootObserverRow
 } from "./observe-ports.js";
-export {
-  DEFAULT_SOURCE_BYTE_LIMIT,
-  SOURCE_IDENTITY_HYDRATE_RESERVE
-} from "./observe-ports.js";
-export {
-  collectObserved,
-  finish,
-  pageLimit,
-  unavailableOrNotApplicable,
-  workReceipt
-} from "./observe-collect.js";
 
 
 export function toSourceObserverRow(row: Readonly<{

@@ -51,9 +51,6 @@ export function createProjectionRebuildingFieldStores(input: Readonly<{
     runAtomicWithOutcome,
     putRecord: (record, contentBytes) => persistWithRebuildIntent(
       record.workspace_id, record.recorded_at, () => input.delegate.putRecord(record, contentBytes)
-    ),
-    putIncidence: incidence => persistWithRebuildIntent(
-      incidence.workspace_id, incidence.recorded_at, () => input.delegate.putIncidence(incidence)
     )
   };
 }

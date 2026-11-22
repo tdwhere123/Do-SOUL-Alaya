@@ -1,7 +1,6 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { resolveCoreDaemonPackageRoot } from "./build-info.js";
 
-export function resolveCoreDaemonFilesDirectory(): string {
-  const currentDirectory = dirname(fileURLToPath(import.meta.url));
-  return resolve(currentDirectory, "../data/files");
+export function resolveCoreDaemonFilesDirectory(moduleUrl: string = import.meta.url): string {
+  return resolve(resolveCoreDaemonPackageRoot(moduleUrl), "data", "files");
 }

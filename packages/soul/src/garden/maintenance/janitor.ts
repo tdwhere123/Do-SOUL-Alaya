@@ -3,17 +3,14 @@ import {
   GardenRole,
   GardenTaskKind,
   GardenTier,
-  MemoryGovernanceEventType,
-  SoulMemoryStateChangedPayloadSchema,
-  SoulMemoryTierChangedPayloadSchema,
   type AuditorEventLogPort,
-  type EventLogEntry,
   type GardenRoleValue,
   type GardenTaskDescriptor,
   type GardenTaskKindValue,
   type GardenTaskResult,
   type GardenTierValue
 } from "@do-soul/alaya-protocol";
+import { buildTtlCleanupEvents, buildHotIndexDemotionEvents, type EventLogDraft } from "./janitor-event-drafts.js";
 import {
   runJanitorRetentionDecayScan,
   type JanitorRetentionDecayPort
@@ -49,7 +46,7 @@ export interface HotDemotionCandidate {
   readonly activation_score: number;
 }
 
-export interface JanitorHotDemotionCriteria {
+interface JanitorHotDemotionCriteria {
   readonly maxLastHitAgeMs: number;
   readonly minActivationScore: number;
 }
@@ -65,14 +62,12 @@ export interface JanitorMemoryTieringPort {
   demoteToCold(workspaceId: string, memoryEntryIds: readonly string[]): readonly string[];
 }
 
-type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
-
 interface JanitorSweepResult {
   readonly affectedIds: readonly string[];
   readonly auditEntries: readonly string[];
 }
 
-export interface LowActivityMemoryRecord {
+interface LowActivityMemoryRecord {
   readonly memory_id: string;
 }
 
@@ -82,7 +77,7 @@ export interface LowActivityMemoryRecord {
 // guarded active->dormant transition that resolves "skipped" (no audit, no
 // throw) when the row is not active anymore. The sweep counts only "demoted"
 // rows and CONTINUES past a skip so one racy candidate cannot abort the batch.
-export type DormantDemotionOutcome = "demoted" | "skipped";
+type DormantDemotionOutcome = "demoted" | "skipped";
 
 export interface JanitorDormantDemotionPort {
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly LowActivityMemoryRecord[]>;
@@ -216,12 +211,12 @@ export class Janitor {
 
   private async executeTtlCleanup(task: GardenTaskDescriptor, completedAt: string): Promise<GardenTaskResult> {
     const expiredObjects = await this.cleanupPort.findExpiredObjects(task.workspace_id, completedAt);
-    const objectIds = expiredObjects.slice(0, JANITOR_CONSTANTS.BATCH_SIZE).map((entry) => entry.object_id);
+    const expiredBatch = expiredObjects.slice(0, JANITOR_CONSTANTS.BATCH_SIZE);
+    const objectIds = expiredBatch.map((entry) => entry.object_id);
 
     if (objectIds.length > 0) {
-      const expiredBatch = expiredObjects.slice(0, JANITOR_CONSTANTS.BATCH_SIZE);
       await this.publishEventLogsMutation(
-        this.buildTtlCleanupEvents(task, expiredBatch, completedAt),
+        buildTtlCleanupEvents(task, expiredBatch, completedAt),
         () => this.cleanupPort.removeExpiredObjects(task.workspace_id, objectIds)
       );
     }
@@ -237,7 +232,7 @@ export class Janitor {
     task: GardenTaskDescriptor,
     completedAt: string
   ): Promise<GardenTaskResult> {
-    const retentionAudit = await runJanitorRetentionDecayScan(
+    const retentionAuditEntry = await runJanitorRetentionDecayScan(
       this.retentionDecayPort,
       task.workspace_id
     );
@@ -251,7 +246,7 @@ export class Janitor {
       selectedIds.length === 0 ? [] : await this.applyHotIndexDemotion(task, selectedIds);
 
     const result = this.createSuccessResult(task, completedAt, objectIds, [
-      retentionAudit,
+      retentionAuditEntry,
       `hot_index_demotion: demoted ${objectIds.length} entries to cold storage tier in ${task.workspace_id}`
     ]);
     await this.scheduler.reportCompletion(result);
@@ -268,7 +263,7 @@ export class Janitor {
   ): Promise<readonly string[]> {
     const requestedIds = [...new Set(selectedIds)];
     await this.publishEventLogsMutation(
-      this.buildHotIndexDemotionEvents(task, requestedIds, this.now()),
+      buildHotIndexDemotionEvents(task, requestedIds, this.now()),
       () => {
         const appliedIds = this.tieringPort.demoteToCold(task.workspace_id, requestedIds);
         const appliedSet = new Set(appliedIds);
@@ -282,59 +277,6 @@ export class Janitor {
       }
     );
     return requestedIds;
-  }
-
-  private buildTtlCleanupEvents(
-    task: GardenTaskDescriptor,
-    expiredObjects: readonly ExpiredControlPlaneObject[],
-    occurredAt: string
-  ): readonly EventLogDraft[] {
-    return expiredObjects.map((expired) => ({
-      event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
-      entity_type: expired.object_kind,
-      entity_id: expired.object_id,
-      workspace_id: task.workspace_id,
-      run_id: task.run_id,
-      caused_by: this.role,
-      payload_json: SoulMemoryStateChangedPayloadSchema.parse({
-        object_id: expired.object_id,
-        object_kind: expired.object_kind,
-        workspace_id: task.workspace_id,
-        run_id: task.run_id,
-        from_state: "active",
-        to_state: "expired",
-        reason_code: "ttl_cleanup",
-        caused_by: "system",
-        evidence_refs: null,
-        occurred_at: occurredAt
-      })
-    }));
-  }
-
-  private buildHotIndexDemotionEvents(
-    task: GardenTaskDescriptor,
-    objectIds: readonly string[],
-    occurredAt: string
-  ): readonly EventLogDraft[] {
-    return objectIds.map((memoryId) => ({
-      event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_CHANGED,
-      entity_type: "memory_entry",
-      entity_id: memoryId,
-      workspace_id: task.workspace_id,
-      run_id: task.run_id,
-      caused_by: this.role,
-      payload_json: SoulMemoryTierChangedPayloadSchema.parse({
-        object_id: memoryId,
-        object_kind: "memory_entry",
-        workspace_id: task.workspace_id,
-        run_id: task.run_id,
-        from_tier: "hot",
-        to_tier: "cold",
-        reason: "hot_index_demotion",
-        task_id: task.task_id,
-        occurred_at: occurredAt
-      })
-    }));
   }
 
   private async publishEventLogsMutation(
@@ -469,7 +411,9 @@ export class Janitor {
   // entries and freshly tombstoned ids (appended to objects_affected). Skips any
   // candidate whose disposition is null — that memory stays dormant (reversible)
   // because it is neither compressed into a live capsule nor judged useless.
-  private async runDispositionSweep(task: GardenTaskDescriptor): Promise<JanitorSweepResult> {
+  private async runDispositionSweep(
+    task: GardenTaskDescriptor
+  ): Promise<JanitorSweepResult> {
     if (this.dispositionSweepPort === undefined) {
       return {
         affectedIds: [],
@@ -496,13 +440,8 @@ export class Janitor {
           continue;
         }
       }
-      // invariant: a candidate that left dormant OR became explicitly protected
-      // between selection and its turn resolves "skipped" (the tombstone authority
-      // refused it as a benign concurrent-mutation race). The loop CONTINUES so one
-      // racy candidate cannot abort the batch nor erase the in-batch audit trail of
-      // candidates already tombstoned this pass; only actually-tombstoned rows enter
-      // objects_affected. A genuine error still rejects to run()'s failure path.
-      // Mirrors executeDormantDemotion / executeTombstoneGc skip-and-continue.
+      // The mutation authority can refuse a stale or newly protected candidate.
+      // Keep earlier mutations in the result and count only successful tombstones.
       const outcome = await this.dispositionSweepPort.autonomousTombstone(candidate, task.task_id);
       if (outcome.status === "tombstoned") {
         tombstoned.push(candidate.memory_id);

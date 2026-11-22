@@ -105,7 +105,7 @@ export function createOpenSemanticFactorQueryCompiler(input: Readonly<{
   };
 }
 
-export function buildOpenSemanticFactorQueryUserPrompt(
+function buildOpenSemanticFactorQueryUserPrompt(
   sourceText: string,
   obligation: Readonly<QueryFactFrameOsfObligation>
 ): string {
@@ -153,7 +153,7 @@ function requiredGraphLayout(obligation: Readonly<QueryFactFrameOsfObligation>) 
   };
 }
 
-export function openSemanticFactorQueryRequestTemplatePreimage(): string {
+function openSemanticFactorQueryRequestTemplatePreimage(): string {
   const sourceText = "What did A give?";
   const body = {
     schema_version: 2 as const,

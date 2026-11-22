@@ -156,7 +156,7 @@ describe("Janitor", () => {
     expect(removeExpiredObjects).toHaveBeenCalledWith("workspace-1", ["gap-1"]);
   });
 
-  it("runs hot index demotion with threshold criteria and demotes candidate ids", async () => {
+  it("reports skipped retention decay and preserves the applied hot demotions", async () => {
     const { tieringPort, scheduler, janitor } = createJanitor({
       hotCandidates: [
         { memory_entry_id: "memory-1", last_access_at: "2026-03-10T00:00:00.000Z", activation_score: 0.1 },
@@ -173,6 +173,7 @@ describe("Janitor", () => {
     expect(tieringPort.demoteToCold).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-2"]);
     expect(result).toMatchObject({
       success: true,
+      outcome: "completed",
       objects_affected: ["memory-1", "memory-2"],
       audit_entries: [
         "[SKIPPED] retention_decay_scan: port not wired",
@@ -194,6 +195,7 @@ describe("Janitor", () => {
     const result = await janitor.run(createTask({ task_kind: GardenTaskKind.HOT_INDEX_DEMOTION }));
 
     expect(scanRetentionDecay).toHaveBeenCalledWith("workspace-1");
+    expect(result.outcome).toBe("completed");
     expect(result.audit_entries[0]).toContain("retention_decay_scan: updated 3 hot memories");
     expect(tieringPort.demoteToCold).not.toHaveBeenCalled();
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);

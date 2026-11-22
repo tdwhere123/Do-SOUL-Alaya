@@ -3,7 +3,6 @@ import type { StorageDatabase } from "../../../sqlite/db.js";
 import {
   SqliteFieldCausalUsageRepo,
   SqliteFieldDerivationJobRepo,
-  SqliteFieldFactorRepo,
   SqliteFieldProjectionGenerationRepo,
   SqliteFieldProofEffectRepo,
   SqliteFieldSourceRecordRepo,
@@ -11,14 +10,11 @@ import {
 } from "../../../repos/field/index.js";
 import {
   fieldSha256,
-  hashedFactor,
   hashedEffect,
   hashedEffectFromRecords,
   hashedGeneration,
-  hashedIncidence,
   hashedJob,
   hashedRecord,
-  hashedSpan,
   hashedUsage,
   openFieldDatabase
 } from "./field-contract-fixture.js";
@@ -107,22 +103,6 @@ describe("field contract repos", () => {
     ])).toThrow(/mixed generation/u);
   });
 
-  it("stores incidences under workspace-qualified keys", () => {
-    const { records, spans, factors } = createRepos();
-    const record = records.insert(hashedRecord("workspace-1", "body"));
-    const span = spans.insert(hashedSpan("workspace-1", record.record_id));
-    const factor = factors.insertDescriptor(hashedFactor("workspace-1", "token"));
-    const incidence = factors.insertIncidence(hashedIncidence(
-      "workspace-1",
-      span.span_id,
-      factor.factor_id,
-      "workspace-1"
-    ));
-    expect(factors.findIncidence("workspace-1", incidence.incidence_id)?.scope)
-      .toBe("workspace-1");
-    expect(factors.findIncidence("workspace-2", incidence.incidence_id)).toBeNull();
-  });
-
   it("rejects delivery learning and keeps causal usage workspace-local", () => {
     const { usage } = createRepos();
     const causal = usage.insert(hashedUsage("workspace-1", "use-1"));
@@ -172,17 +152,11 @@ describe("field contract repos", () => {
     ).map((row) => row.causal_key)).toEqual(["visible"]);
   });
 
-  it("lists workspace rows through parsers and refuses a null-payload factor wildcard", () => {
-    const { records, factors } = createRepos();
+  it("lists workspace source records through the parser", () => {
+    const { records } = createRepos();
     const record = records.insert(hashedRecord("workspace-1", "listed body"));
-    const live = factors.insertDescriptor(hashedFactor("workspace-1", "atlas"));
     expect(records.listByWorkspace("workspace-1").map((row) => row.record_id))
       .toEqual([record.record_id]);
-    expect(factors.listDescriptors("workspace-1")).toEqual([live]);
-    expect(() => factors.insertDescriptor({
-      ...live,
-      canonical_payload: null
-    })).toThrow(/factor|payload|VALIDATION/u);
   });
 
   it("revalidates durable source witnesses at the effect commit boundary", () => {
@@ -287,7 +261,6 @@ function createRepos() {
     database,
     records: new SqliteFieldSourceRecordRepo(database, fieldSha256),
     spans: new SqliteFieldSourceSpanRepo(database, fieldSha256),
-    factors: new SqliteFieldFactorRepo(database, fieldSha256),
     jobs: new SqliteFieldDerivationJobRepo(database, fieldSha256),
     generations: new SqliteFieldProjectionGenerationRepo(database, fieldSha256),
     usage: new SqliteFieldCausalUsageRepo(database, fieldSha256),

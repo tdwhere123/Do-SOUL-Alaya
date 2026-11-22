@@ -88,13 +88,14 @@ export const OFFICIAL_API_SOURCE_ASSERTION_REPAIR_SYSTEM_PROMPT = joinPrompt([
   "The repair pass does not lower the durability threshold; return an empty interpretations array when the assertion is not durable."
 ]);
 
-const SYSTEM_PROMPTS_BY_SHA256 = createPromptRegistry();
+let systemPromptsBySha256: ReadonlyMap<string, string> | undefined;
 
 /** Frozen snapshot verification resolves its own prompt instead of current code state. */
 export function resolveOfficialApiSystemPrompt(
   systemPromptSha256: string
 ): string | undefined {
-  return SYSTEM_PROMPTS_BY_SHA256.get(systemPromptSha256);
+  systemPromptsBySha256 ??= createPromptRegistry();
+  return systemPromptsBySha256.get(systemPromptSha256);
 }
 
 function createPromptRegistry(): ReadonlyMap<string, string> {

@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { CoreError } from "@do-soul/alaya-core";
 import { diagnosticWarn } from "@do-soul/alaya-protocol";
 
@@ -34,6 +35,79 @@ export async function parseJsonBody<T>(
   }
 
   return validate === undefined ? body : validate(body);
+}
+
+export function parseRequiredString(value: unknown, message: string): string {
+  if (typeof value !== "string") {
+    throw new CoreError("VALIDATION", message);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new CoreError("VALIDATION", message);
+  }
+  return trimmed;
+}
+
+export async function readJsonObject(context: Context): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed: unknown = await context.req.json();
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    if (isRequestBodyTooLargeError(error)) {
+      throwInvalidRequestBody(error);
+    }
+    return null;
+  }
+}
+
+export async function parseJsonObject(
+  readJson: () => Promise<unknown>,
+  objectMessage = "Invalid request body"
+): Promise<Record<string, unknown>> {
+  const body = await parseJsonBody(readJson);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new CoreError("VALIDATION", objectMessage);
+  }
+  return body as Record<string, unknown>;
+}
+
+export function jsonError(
+  context: Context,
+  status: ContentfulStatusCode,
+  error: string | object,
+  extra?: Readonly<Record<string, unknown>>
+): Response {
+  return context.json({ success: false, error, ...extra }, status);
+}
+
+export function mcpToolErrorStatus(code: string): 400 | 404 | 500 | 503 {
+  switch (code) {
+    case "VALIDATION":
+      return 400;
+    case "NOT_FOUND":
+      return 404;
+    case "NEEDS_CONTEXT":
+      return 503;
+    default:
+      return 500;
+  }
+}
+
+export async function resolveListAndCount<T>(
+  listPromise: Promise<readonly T[]>,
+  countPromise: Promise<number>
+): Promise<readonly [readonly T[], number]> {
+  const [listResult, countResult] = await Promise.allSettled([listPromise, countPromise]);
+  if (listResult.status === "rejected") {
+    throw listResult.reason;
+  }
+  if (countResult.status === "rejected") {
+    throw countResult.reason;
+  }
+  return [listResult.value, countResult.value] as const;
 }
 
 export function throwInvalidRequestBody(error: unknown): never {
@@ -144,22 +218,10 @@ export async function rejectUnexpectedRequestBody(context: Context): Promise<Res
   }
 
   if (outcome === "too_large") {
-    return context.json(
-      {
-        success: false,
-        error: REQUEST_BODY_TOO_LARGE_MESSAGE
-      },
-      413
-    );
+    return jsonError(context, 413, REQUEST_BODY_TOO_LARGE_MESSAGE);
   }
 
-  return context.json(
-    {
-      success: false,
-      error: REQUEST_BODY_NOT_ALLOWED_MESSAGE
-    },
-    400
-  );
+  return jsonError(context, 400, REQUEST_BODY_NOT_ALLOWED_MESSAGE);
 }
 
 async function inspectUnexpectedRequestBody(context: Context): Promise<"none" | "unexpected" | "too_large"> {

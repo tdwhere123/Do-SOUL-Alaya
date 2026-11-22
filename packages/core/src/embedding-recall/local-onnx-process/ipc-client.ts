@@ -76,7 +76,7 @@ export function isLocalOnnxEmbeddingChildExitedError(
   return error instanceof LocalOnnxEmbeddingChildExitedError;
 }
 
-export function resolveLocalOnnxEmbeddingChildScript(
+function resolveLocalOnnxEmbeddingChildScript(
   fromUrl: string = import.meta.url
 ): string {
   const candidates = [

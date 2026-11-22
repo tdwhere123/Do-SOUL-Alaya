@@ -106,10 +106,11 @@ describe("conditional-field result encoding", () => {
     const framed = frameEncodedIndex(index, results);
     expect(framed.entries[0]?.target).toEqual(results[0]?.target);
     expect(framed.completeness.payload).toBe("partial");
-    const omitted = encodeIndexResults(index, new Map([[indexEntryCacheKey(entry), "😀😀"]]), disclosureBytes,
+    const omittedBytes = Buffer.byteLength("[payload omitted]");
+    const omitted = encodeIndexResults(index, new Map(), disclosureBytes + omittedBytes,
       { [indexEntryCacheKey(entry)]: { source_disclosure: disclosure } });
     expect(omitted[0]).toMatchObject({ content_preview: "[payload omitted]",
-      budget_state: { token_estimate: disclosureBytes, remaining_tokens: 0 },
+      budget_state: { token_estimate: disclosureBytes + omittedBytes, remaining_tokens: 0 },
       source_disclosure: disclosure });
   });
   it("rejects a missing authoritative index before recording any delivery", async () => {
@@ -176,12 +177,17 @@ describe("conditional-field result encoding", () => {
       }],
       representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
     };
-    const results = encodeIndexResults(index, new Map([["memory-1", "too large"]]), 1);
+    const omittedBytes = Buffer.byteLength("[payload omitted]");
+    const results = encodeIndexResults(index, new Map(), omittedBytes);
     expect(results).toHaveLength(1);
     expect(results[0]?.object_id).toBe(index.entries[0]?.object_id);
     expect(results[0]?.content_preview).toBe("[payload omitted]");
     expect(frameEncodedIndex(index, results).entries).toEqual(index.entries);
     expect(frameEncodedIndex(index, results).completeness.payload).toBe("omitted");
+    const dropped = encodeIndexResults(index, new Map([["memory-1", "too large"]]), 1);
+    expect(dropped).toEqual([]);
+    expect(frameEncodedIndex(index, dropped).entries).toEqual(index.entries);
+    expect(frameEncodedIndex(index, dropped).completeness.payload).toBe("omitted");
   });
 
   it("truncates the first preview to fit remaining tokens instead of omitting the row", () => {

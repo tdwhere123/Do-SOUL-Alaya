@@ -4,14 +4,6 @@
     "review_at": 500,
     "fail_at": 800,
     "classifications": {
-      "apps/inspector/web/src/test/setup.ts": {
-        "kind": "test_support",
-        "reason": "Vite test setup lives outside __tests__ and is not production behavior."
-      },
-      "apps/inspector/web/src/vite-env.d.ts": {
-        "kind": "generated",
-        "reason": "Vite owns this generated ambient declaration."
-      },
       "apps/bench-runner/src/runs/extraction/cache/semantic-artifact/store.ts": {
         "kind": "handwritten",
         "reason": "Single exclusive semantic-artifact publication owner (reserve, admit, inspect, overlay digest)."
@@ -55,11 +47,7 @@
     "misc",
     "common"
   ],
-  "existing_ownership_directory_exceptions": {
-    "apps/inspector/web/src/utils": [
-      "apps/inspector/web/src/utils/graph.ts"
-    ]
-  },
+  "existing_ownership_directory_exceptions": {},
   "forbidden_rollout_directory_patterns": [
     "^card(?:[-_]?[0-9].*)?$",
     "^band(?:[0-9]+|[-_][a-z0-9].*)?$",
@@ -106,7 +94,8 @@
       "root": "packages/eval",
       "package": "@do-soul/alaya-eval",
       "allowed_workspace_packages": [
-        "@do-soul/alaya-protocol"
+        "@do-soul/alaya-protocol",
+        "@do-soul/alaya-core"
       ]
     },
     {
@@ -136,8 +125,7 @@
         "@do-soul/alaya-engine-gateway",
         "@do-soul/alaya-eval",
         "@do-soul/alaya-soul",
-        "@do-soul/alaya-storage",
-        "@do-soul/alaya-inspector"
+        "@do-soul/alaya-storage"
       ]
     },
     {
@@ -152,23 +140,7 @@
         "@do-soul/alaya-eval",
         "@do-soul/alaya-soul",
         "@do-soul/alaya-storage",
-        "@do-soul/alaya-inspector",
         "@do-soul/alaya"
-      ]
-    },
-    {
-      "root": "apps/inspector",
-      "package": "@do-soul/alaya-inspector",
-      "allowed_workspace_packages": [
-        "@do-soul/alaya-protocol",
-        "@do-soul/alaya-eval"
-      ]
-    },
-    {
-      "root": "apps/inspector/web",
-      "package": "@do-soul/alaya-inspector-web",
-      "allowed_workspace_packages": [
-        "@do-soul/alaya-protocol"
       ]
     }
   ],
@@ -180,9 +152,7 @@
     "packages/engine-gateway/src",
     "packages/soul/src",
     "packages/storage/src",
-    "apps/core-daemon/src",
-    "apps/inspector/src",
-    "apps/inspector/web/src"
+    "apps/core-daemon/src"
   ],
   "artifact_scan_exempt_roots": [
     "packages/eval/src",
@@ -194,7 +164,6 @@
   ],
   "existing_artifact_reference_exceptions": {},
   "retired_import_paths": [
-    "apps/inspector/web/src/utils/parse-search-query",
     "packages/protocol/src/shared/cjk-segmentation",
     "packages/core/src/recall/shadow",
     "packages/core/src/recall/decision/prefix-capture/envelope",
@@ -1146,26 +1115,26 @@
     {
       "specifier": "@do-soul/alaya-protocol",
       "path": "packages/protocol/src/index.ts",
-      "expected_count": 3243,
-      "expected_sha256": "36184618202bb73904b8fc481982dfd5a3d43c18d0916b92e8f4becace83000a"
+      "expected_count": 3129,
+      "expected_sha256": "7136ff3dbe606ebcc8ba2bce7aa5e13cf51b880e875125204cefee365d915912"
     },
     {
       "specifier": "@do-soul/alaya-graph-algorithms",
       "path": "packages/graph-algorithms/src/index.ts",
-      "expected_count": 37,
-      "expected_sha256": "d703eb62da5a17882380bcd203fbdeddaa986608e8e080f029468e3e571caf9d"
+      "expected_count": 24,
+      "expected_sha256": "f37d8d3c4b5f092db356640115eff9a5b3de921b35c6327fa43d02763d398679"
     },
     {
       "specifier": "@do-soul/alaya-cjk-segmentation",
       "path": "packages/cjk-segmentation/src/index.ts",
-      "expected_count": 12,
-      "expected_sha256": "0960acf1775c845ad3e6f5cd6914dcb30e1c3ab3bfa133684f241842b423f486"
+      "expected_count": 11,
+      "expected_sha256": "4248855c05ab6e8727899abf43f702ae7e009b87e8c6ad715931bc830a243be7"
     },
     {
       "specifier": "@do-soul/alaya-core",
       "path": "packages/core/src/index.ts",
-      "expected_count": 1039,
-      "expected_sha256": "49daf184ca658cc33a6883f8a14833445035eccffbbe364e9215f737928f7fe2"
+      "expected_count": 1011,
+      "expected_sha256": "3504d694bb51337ae117c851f917af0db96391ed6f8283a311f7508899a79064"
     },
     {
       "specifier": "@do-soul/alaya-engine-gateway",
@@ -1176,8 +1145,8 @@
     {
       "specifier": "@do-soul/alaya-eval",
       "path": "packages/eval/src/index.ts",
-      "expected_count": 134,
-      "expected_sha256": "e107429b8716aa3cddddd391873cd16374b5e2ef15db339cc3fdac44c7d80eb0"
+      "expected_count": 125,
+      "expected_sha256": "a00dc9219eed28ba5b2771b26068d65033cf103473e7a480f0cd462631a419fd"
     },
     {
       "specifier": "@do-soul/alaya-eval/authority",
@@ -1188,20 +1157,20 @@
     {
       "specifier": "@do-soul/alaya-eval/internal",
       "path": "packages/eval/src/internal.ts",
-      "expected_count": 56,
-      "expected_sha256": "0dae7389226f271db4e45f4ac7016f3c8151d260df98ee831460845e21b16014"
+      "expected_count": 53,
+      "expected_sha256": "a986b0f3add8a3a86fcc4d480e76cd1152c1edb4fe4276c55262b736e12d5ddc"
     },
     {
       "specifier": "@do-soul/alaya-soul",
       "path": "packages/soul/src/index.ts",
-      "expected_count": 360,
-      "expected_sha256": "97207eccdffa7651e679052d3cd5e28cd593324a79abe8a48433c102038a2146"
+      "expected_count": 201,
+      "expected_sha256": "38fdd021d2c35673976276663fca893d8fa7bacbf2372cffead58c312bcecc97"
     },
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
-      "expected_count": 331,
-      "expected_sha256": "d289c6cba3c611ef37958c644e2b7c2e25194d914c6ce2e2ca2356c3369c2dfa"
+      "expected_count": 329,
+      "expected_sha256": "49bc2be44d1368e8a8ad90b95bc494912efff8bea4e9f846ca0b862cb9819619"
     },
     {
       "specifier": "@do-soul/alaya",
@@ -1232,17 +1201,11 @@
       "path": "apps/core-daemon/src/recall/recall-bound-execution.ts",
       "expected_count": 4,
       "expected_sha256": "ef7cf9de347cea788e114f3d05f881f2495a38849a5f5ea530068c3701c0aafb"
-    },
-    {
-      "specifier": "@do-soul/alaya-inspector/server",
-      "path": "apps/inspector/src/runtime/server.ts",
-      "expected_count": 3,
-      "expected_sha256": "0809572981bc25f476a744854d2d6fe7bcef38da8de2b5c3d0626fafd2b732cc"
     }
   ],
   "private_barrel_snapshot": {
-    "expected_count": 38,
-    "expected_sha256": "23b272755a93dafc2879937fb219d610fded3286304523333ddd4d69be35ab60"
+    "expected_count": 37,
+    "expected_sha256": "45b151f6ee49006651fd94317a82f6d0e6c35ad88026341a595fa59a7860e6e7"
   },
   "existing_duplicate_export_authorities": [],
   "existing_index_to_index_edges": [
@@ -1255,8 +1218,6 @@
     "packages/eval/src/index.ts -> packages/eval/src/cli/index.ts",
     "packages/protocol/src/index.ts -> packages/protocol/src/recall/conditional-field/index.ts",
     "packages/protocol/src/index.ts -> packages/protocol/src/recall/field-contract/index.ts",
-    "packages/soul/src/garden/index.ts -> packages/protocol/src/index.ts",
-    "packages/soul/src/index.ts -> packages/protocol/src/index.ts",
     "packages/soul/src/index.ts -> packages/soul/src/garden/index.ts",
     "packages/storage/src/index.ts -> packages/storage/src/repos/capsules/index.ts",
     "packages/storage/src/index.ts -> packages/storage/src/repos/control/index.ts",

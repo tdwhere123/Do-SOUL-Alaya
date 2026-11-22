@@ -5,17 +5,23 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CoreError,
   RECALL_SOURCE_EVIDENCE_INCOMPATIBLE_MESSAGE,
-  RecallService
+  RecallService,
+  recallExecutionRetention
 } from "@do-soul/alaya-core";
 import {
   ControlPlaneObjectKind,
+  InformationIndexSchema,
+  QUERY_PROPOSAL_MAX_AST_DEPTH,
+  QUERY_PROPOSAL_MAX_AST_NODES,
   RetentionPolicy,
   SoulMemorySearchRequestSchema,
   TaskObjectSurfaceSchema,
-  unavailableSourceQueryPreparation
+  unavailableSourceQueryPreparation,
+  type InformationIndex
 } from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase,
@@ -27,8 +33,21 @@ import { removeTempDirectorySync } from "../../../../../../packages/storage/src/
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { runOperation } from "../../../runtime/recall-read-worker/dispatch.js";
 import {
+  ConditionalFieldRecallWorkerPayloadSchema,
   RECALL_READ_WORKER_PROTOCOL_VERSION
 } from "../../../runtime/recall-read-worker/protocol.js";
+import { normalizeRequestTimeoutMs } from "../../../runtime/recall-read-worker/client-config.js";
+import {
+  claimDeliverySettlement,
+  createDeliverySettlement,
+  finishDeliverySettlement
+} from "../../../runtime/recall-read-worker/delivery-settlement.js";
+import {
+  acknowledgeWorkerDelivery,
+  discardWorkerDelivery,
+  prepareWorkerDelivery
+} from "../../../runtime/recall-read-worker/prepared-delivery.js";
+import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import {
   conditionalRecallPayload,
   createQueryOnlyRuntime,
@@ -115,13 +134,13 @@ describe("RecallReadWorkerClient", () => {
         const timerDelayPromise = new Promise<number>((resolve) => {
           setTimeout(() => resolve(performance.now() - startedAt), 0);
         });
-        const rowsPromise = client.memoryRepo.findByWorkspaceId(workspaceId, "hot", {
-          limit: rowCount,
-          offset: 0
+        const rowsPromise = client.activeConstraintsPort.findActiveConstraints({
+          workspaceId,
+          cap: rowCount
         });
 
         await expect(timerDelayPromise).resolves.toBeLessThan(50);
-        await expect(rowsPromise).resolves.toHaveLength(rowCount);
+        await expect(rowsPromise).resolves.toMatchObject({ constraints: expect.any(Array) });
       } finally {
         await client.close();
       }
@@ -133,38 +152,6 @@ describe("RecallReadWorkerClient", () => {
       removeTempDirectorySync(directory);
     }
   }, process.platform === "win32" ? 120_000 : 30_000);
-
-  it("rejects worker page requests above the bounded read limit", async () => {
-    assertBuiltWorker();
-    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-page-test-"));
-    const database = initDatabase({ filename: join(directory, "alaya.db") });
-
-    try {
-      const client = createRecallReadWorkerClient({
-        databaseFilename: database.filename,
-        workerUrl: builtWorkerUrl
-      });
-      expect(client).not.toBeNull();
-      if (client === null) {
-        return;
-      }
-
-      try {
-        await expect(
-          client.memoryRepo.findByWorkspaceId("workspace-1", "hot", {
-            limit: 5001,
-            offset: 0
-          })
-        ).rejects.toThrow("page.limit must be an integer between 0 and 5000");
-      } finally {
-        await client.close();
-      }
-    } finally {
-      database.close();
-      closeCachedDatabase(database.filename);
-      removeTempDirectorySync(directory);
-    }
-  }, 30_000);
 
   it.skipIf(process.platform === "win32")(
     "restarts the worker after a request timeout",
@@ -183,7 +170,7 @@ describe("RecallReadWorkerClient", () => {
         '  parentPort?.on("message", () => {});',
         '} else {',
         '  parentPort?.on("message", ({ id, operation }) => {',
-        '    parentPort?.postMessage({ id, ok: true, result: operation === "close" ? null : [] });',
+        '    parentPort?.postMessage({ id, ok: true, result: operation === "close" || operation === "ready" ? null : [] });',
         '  });',
         '}',
         ''
@@ -202,13 +189,8 @@ describe("RecallReadWorkerClient", () => {
         return;
       }
 
-      await expect(
-        client.memoryRepo.findByWorkspaceId("workspace-1", "hot", {
-          limit: 1,
-          offset: 0
-        })
-      ).rejects.toThrow("timed out after 1000ms");
-      await expect(client.memoryRepo.findByWorkspaceId("workspace-1")).resolves.toEqual([]);
+      await expect(client.ready()).rejects.toThrow("timed out after 1000ms");
+      await expect(client.ready()).resolves.toBeUndefined();
     } finally {
       await client?.close();
       removeTempDirectorySync(directory);
@@ -236,7 +218,7 @@ describe("RecallReadWorkerClient", () => {
       }
 
       await expect(client.close()).resolves.toBeUndefined();
-      await expect(client.memoryRepo.findByWorkspaceId("workspace-1")).rejects.toThrow(
+      await expect(client.ready()).rejects.toThrow(
         "recall read worker is closed"
       );
     } finally {
@@ -272,33 +254,15 @@ describe("RecallReadWorkerClient", () => {
 
       try {
         const responses = await collectWorkerResponses(worker, [
-          {
-            protocol_version: 1,
-            id: 11,
-            operation: "memory.findByWorkspaceId",
-            payload: {
-              workspaceId,
-              page: { limit: 40, offset: 0 }
-            }
-          },
-          {
-            protocol_version: 1,
-            id: 12,
-            operation: "memory.findByWorkspaceId",
-            payload: {
-              workspaceId,
-              page: { limit: 40, offset: 0 }
-            }
-          },
+          { protocol_version: 1, id: 11, operation: "ready", payload: {} },
+          { protocol_version: 1, id: 12, operation: "ready", payload: {} },
           { protocol_version: 1, id: 13, operation: "ready", payload: {} }
         ]);
 
         expect(responses.map((response) => response.id)).toEqual([11, 12, 13]);
-        expect(responses[0]).toMatchObject({ ok: true, result: expect.any(Array) });
-        expect(responses[1]).toMatchObject({ ok: true, result: expect.any(Array) });
+        expect(responses[0]).toMatchObject({ ok: true, result: null });
+        expect(responses[1]).toMatchObject({ ok: true, result: null });
         expect(responses[2]).toMatchObject({ ok: true, result: null });
-        expect((responses[0]?.result as readonly unknown[]).length).toBe(40);
-        expect((responses[1]?.result as readonly unknown[]).length).toBe(40);
       } finally {
         await worker.terminate();
       }
@@ -359,15 +323,15 @@ describe("RecallReadWorkerClient", () => {
         worker.postMessage({
           protocol_version: 1,
           id: 43,
-          operation: "memory.findByIds",
-          payload: { workspaceId: "workspace-1", objectIds: [] }
+          operation: "ready",
+          payload: {}
         });
       });
 
       expect(validResponse).toEqual({
         id: 43,
         ok: true,
-        result: []
+        result: null
       });
     } finally {
       await worker.terminate();
@@ -603,4 +567,217 @@ async function collectWorkerResponses(
   });
   await done;
   return responses;
+}
+
+
+const timeoutEnvName = "ALAYA_RECALL_READ_WORKER_REQUEST_TIMEOUT_MS";
+const originalTimeoutEnv = process.env[timeoutEnvName];
+
+describe("recall read worker request timeout", () => {
+  afterEach(() => {
+    if (originalTimeoutEnv === undefined) delete process.env[timeoutEnvName];
+    else process.env[timeoutEnvName] = originalTimeoutEnv;
+  });
+
+  it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
+    "rejects an explicit Node timer delay outside the supported integer range: %s",
+    (value) => {
+      expect(() => normalizeRequestTimeoutMs(value)).toThrow(
+        "recall read worker request timeout must be a safe integer between 1 and 2147483647"
+      );
+    }
+  );
+
+  it("rejects an invalid configured environment delay instead of silently using the default", () => {
+    process.env[timeoutEnvName] = "0.5";
+    expect(() => normalizeRequestTimeoutMs(undefined)).toThrow(
+      "recall read worker request timeout must be a safe integer between 1 and 2147483647"
+    );
+  });
+
+  it("uses the default only when neither an explicit nor environment delay is configured", () => {
+    delete process.env[timeoutEnvName];
+    expect(normalizeRequestTimeoutMs(undefined)).toBe(30_000);
+  });
+});
+
+it("lets cancellation win only before the atomic issuance claim", () => {
+  const early = new AbortController();
+  const cancelled = createDeliverySettlement(early.signal);
+  early.abort();
+  expect(claimDeliverySettlement(cancelled.buffer)).toBe(false);
+  cancelled.dispose();
+  const late = new AbortController();
+  const issuing = createDeliverySettlement(late.signal);
+  expect(claimDeliverySettlement(issuing.buffer)).toBe(true);
+  late.abort();
+  finishDeliverySettlement(issuing.buffer, true);
+  expect(() => claimDeliverySettlement(issuing.buffer)).toThrow(expect.objectContaining({ code: "CONFLICT" }));
+  issuing.dispose();
+});
+
+it.each([true, false])("refuses a consumed arbitration claim as a domain conflict after committed=%s", committed => {
+  const settlement = createDeliverySettlement();
+  expect(claimDeliverySettlement(settlement.buffer)).toBe(true);
+  expect(() => claimDeliverySettlement(settlement.buffer)).toThrow(CoreError);
+  finishDeliverySettlement(settlement.buffer, committed);
+  expect(() => claimDeliverySettlement(settlement.buffer)).toThrow(expect.objectContaining({ code: "CONFLICT",
+    message: "Recall acknowledgment arbitration already consumed" }));
+  settlement.dispose();
+});
+
+const preparedIndex = { entries: [] } as unknown as InformationIndex;
+
+describe("worker recall delivery acknowledgment", () => {
+  it("settles from the stored index without parsing an acknowledge index payload", () => {
+    const runtime = {} as RecallReadWorkerRuntime;
+    const issue = vi.fn();
+    const receipt = { schema_version: 1 as const };
+    const preparationId = prepareWorkerDelivery(runtime, {
+      index: preparedIndex,
+      execution_receipt: receipt,
+      issue
+    } as never, {});
+    const parse = vi.spyOn(InformationIndexSchema, "parse");
+    const settled = acknowledgeWorkerDelivery(runtime, {
+      preparation_id: preparationId,
+      issued_entry_ids: [],
+      previews: {}
+    });
+    expect(settled).toBe(receipt);
+    expect(issue).toHaveBeenCalledWith({ index: preparedIndex, previews: new Map(), metadata: {} });
+    expect(parse).not.toHaveBeenCalled();
+    parse.mockRestore();
+  });
+
+  it("releases the prepared field charge once the delivery is acknowledged", () => {
+    const runtime = {} as RecallReadWorkerRuntime;
+    const before = recallExecutionRetention.snapshot().retained_bytes;
+    const preparationId = prepareWorkerDelivery(runtime, {
+      index: preparedIndex, execution_receipt: { schema_version: 1 as const }, issue: vi.fn(),
+      execution_id: "released-on-settle", retained_bytes: 4_000_000
+    } as never, {});
+    expect(recallExecutionRetention.snapshot().retained_bytes - before).toBeGreaterThan(4_000_000);
+    acknowledgeWorkerDelivery(runtime, { preparation_id: preparationId, issued_entry_ids: [], previews: {} });
+    expect(recallExecutionRetention.snapshot().retained_bytes - before).toBeLessThan(10_000);
+    recallExecutionRetention.invalidate("released-on-settle");
+  });
+
+  it("releases the prepared field on discard without issuing", () => {
+    const runtime = {} as RecallReadWorkerRuntime;
+    const issue = vi.fn();
+    const before = recallExecutionRetention.snapshot().retained_bytes;
+    const preparationId = prepareWorkerDelivery(runtime, {
+      index: preparedIndex, execution_receipt: { schema_version: 1 as const }, issue,
+      execution_id: "released-on-discard", retained_bytes: 4_000_000
+    } as never, {});
+    expect(discardWorkerDelivery(runtime, preparationId)).toBeNull();
+    expect(issue).not.toHaveBeenCalled();
+    expect(recallExecutionRetention.snapshot().retained_bytes - before).toBe(0);
+    expect(() => acknowledgeWorkerDelivery(runtime, {
+      preparation_id: preparationId, issued_entry_ids: [], previews: {}
+    })).toThrow(/expired or discarded/);
+    expect(discardWorkerDelivery(runtime, "unknown-preparation")).toBeNull();
+    recallExecutionRetention.invalidate("released-on-discard");
+  });
+
+  it("refuses ACK and discard from a different runtime without issuing, then the owner can still settle", () => {
+    const owner = {} as RecallReadWorkerRuntime;
+    const stranger = {} as RecallReadWorkerRuntime;
+    const issue = vi.fn();
+    const receipt = { schema_version: 1 as const };
+    const preparationId = prepareWorkerDelivery(owner, {
+      index: preparedIndex, execution_receipt: receipt, issue, execution_id: "foreign-runtime-settle"
+    } as never, {});
+    const foreignAck = () => acknowledgeWorkerDelivery(stranger, {
+      preparation_id: preparationId, issued_entry_ids: [], previews: {}
+    });
+    const foreignDiscard = () => discardWorkerDelivery(stranger, preparationId);
+    for (const run of [foreignAck, foreignDiscard]) {
+      try {
+        run();
+        expect.fail("expected CONFLICT");
+      } catch (error) {
+        expect(error).toBeInstanceOf(CoreError);
+        expect((error as CoreError).code).toBe("CONFLICT");
+        expect((error as Error).message).toMatch(/belongs to another runtime/);
+      }
+    }
+    expect(issue).not.toHaveBeenCalled();
+    expect(acknowledgeWorkerDelivery(owner, {
+      preparation_id: preparationId, issued_entry_ids: [], previews: {}
+    })).toBe(receipt);
+    expect(issue).toHaveBeenCalledOnce();
+    recallExecutionRetention.invalidate("foreign-runtime-settle");
+  });
+});
+
+const PROPOSAL_DIGEST = `sha256:${"a".repeat(64)}`;
+const PROPOSAL_NOW = "2026-09-10T00:00:00.000Z";
+
+describe("worker proposal structural budget", () => {
+  it("rejects the same oversize and deep proposal programs as MCP", () => {
+    const deep = nestedClosures(QUERY_PROPOSAL_MAX_AST_DEPTH + 1);
+    const wide = bushyProgram(QUERY_PROPOSAL_MAX_AST_NODES + 1);
+    expect(ConditionalFieldRecallWorkerPayloadSchema.safeParse(proposalPayload(deep)).success).toBe(false);
+    expect(ConditionalFieldRecallWorkerPayloadSchema.safeParse(proposalPayload(wide)).success).toBe(false);
+    expect(ConditionalFieldRecallWorkerPayloadSchema.safeParse(
+      proposalPayload(nestedClosures(QUERY_PROPOSAL_MAX_AST_DEPTH))
+    ).success).toBe(true);
+  });
+});
+
+function proposalPayload(program: unknown) {
+  return {
+    workspace_id: "ws",
+    query_text: "needle",
+    budget: {
+      schema_version: 1 as const,
+      work_units: 10_000,
+      memory_bytes: 1_000_000,
+      page_budget: 800,
+      finalization_reserve: 100,
+      min_envelope: 10
+    },
+    snapshot_id: PROPOSAL_DIGEST,
+    interpretation_clock: PROPOSAL_NOW,
+    as_of: PROPOSAL_NOW,
+    expires_at: "2027-01-01T00:00:00.000Z",
+    lifetime_now: PROPOSAL_NOW,
+    protocol_version: 1 as const,
+    supports_source_evidence: true,
+    supported_result_kinds: ["memory_entry", "source_evidence"] as const,
+    authorized_scopes: { mode: "unrestricted" as const },
+    interpretation_proposal: {
+      schema_version: 1,
+      original_query_digest: PROPOSAL_DIGEST,
+      producer_id: "compiler.ordinary.v1",
+      program
+    }
+  };
+}
+
+function nestedClosures(depth: number): unknown {
+  let node: unknown = { schema_version: 1, kind: "epsilon" };
+  for (let index = 1; index < depth; index += 1) {
+    node = {
+      schema_version: 1,
+      kind: "closure",
+      product_state_sufficient: true,
+      body: node
+    };
+  }
+  return node;
+}
+
+function bushyProgram(nodes: number): unknown {
+  if (nodes <= 1) return { schema_version: 1, kind: "epsilon" };
+  const fanout = Math.min(1000, nodes - 1);
+  const base = Math.floor((nodes - 1) / fanout);
+  const extra = (nodes - 1) % fanout;
+  const steps: unknown[] = [];
+  for (let index = 0; index < fanout; index += 1) {
+    steps.push(bushyProgram(base + (index < extra ? 1 : 0)));
+  }
+  return { schema_version: 1, kind: "sequence", steps };
 }

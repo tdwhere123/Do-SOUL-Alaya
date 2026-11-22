@@ -30,6 +30,7 @@ import {
   type UsageReport
 } from "@do-soul/alaya-protocol";
 import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
+import { requireUsageDeliveryScope } from "../../trust/state.js";
 import {
   sourceMetadataForRecallResult,
   resolveMcpDegradationReason,
@@ -115,7 +116,7 @@ export interface RecallUsageHandlerDependencies {
       options?: Readonly<{
         readonly expectedWorkspaceId?: string;
         readonly expectedAgentTarget?: string;
-        readonly expectedRunId?: string;
+        readonly expectedRunId?: string | null;
       }>
     ): Promise<UsageProofRecord>;
     findDeliveryById(deliveryId: string): Promise<Readonly<ContextDeliveryRecord> | null>;
@@ -297,13 +298,19 @@ function buildRecallDelivery(
       delivery_id: deliveryId,
       agent_target: context.agentTarget,
       workspace_id: context.workspaceId,
-      run_id: context.runId,
+      run_id: recallDeliveryRunId(context),
       delivered_object_ids: deliveredObjectIds,
       delivered_objects: deliveredObjects,
       witness_exposures: witnessExposures(recallResult.index),
       delivered_at: params.now()
     }
   };
+}
+
+function recallDeliveryRunId(context: RecallUsageToolCallContext): string | null {
+  // Local tools generate a fresh invocation ID on every command. Their runless
+  // deliveries are bound to the workspace and agent by the opaque delivery ID.
+  return context.runId ?? (context.sessionId.startsWith("tools-cli-") ? null : context.sessionId);
 }
 
 function buildRecallResponse(
@@ -346,47 +353,40 @@ export function createReportContextUsageHandler(params: Readonly<{
   ) {
     const reportedAt = params.now();
     validateUsageStateConsistency(request);
-    const linkedDelivery = await deps.trustStateRecorder.findDeliveryById(request.delivery_id);
+    const { delivery_id, delivered_objects, per_anchor_usage, witness_reports, reason } = request;
+    const scope = {
+      expectedWorkspaceId: context.workspaceId,
+      expectedAgentTarget: context.agentTarget,
+      expectedRunId: recallDeliveryRunId(context)
+    };
+    const linkedDelivery = requireUsageDeliveryScope(
+      delivery_id, await deps.trustStateRecorder.findDeliveryById(delivery_id), scope
+    );
     await validateReportedRecallHits(deps, request, context.workspaceId, linkedDelivery);
     throwIfAborted(context.abortSignal);
     const usageState = resolveUsageState(request);
-    const usedObjectIds = resolveUsedObjectIds(request);
-    const usedObjects = resolveUsedObjectIdentities(request);
-    // Discarded attribution is not a second usage write; recordUsage already owns the proof.
-    await deps.trustStateRecorder.recordUsage(
-      {
-        delivery_id: request.delivery_id,
-        usage_state: usageState,
-        used_object_ids: usedObjectIds,
-        ...(request.witness_reports === undefined ? {} : { witness_reports: request.witness_reports }),
-        ...(request.delivered_objects === undefined || request.delivered_objects.length === 0
-          ? {}
-          : { used_objects: usedObjects }),
-        trust_mode: "automatic",
-        ...(request.per_anchor_usage === undefined
-          ? {}
-          : { per_anchor_usage: request.per_anchor_usage }),
-        reason: request.reason ?? null,
-        reported_at: reportedAt
-      },
-      {
-        expectedWorkspaceId: context.workspaceId,
-        expectedAgentTarget: context.agentTarget,
-        expectedRunId: context.runId ?? context.sessionId
-      }
-    );
+    await deps.trustStateRecorder.recordUsage({
+      delivery_id,
+      usage_state: usageState,
+      used_object_ids: resolveUsedObjectIds(request),
+      ...(witness_reports === undefined ? {} : { witness_reports }),
+      ...(delivered_objects === undefined || delivered_objects.length === 0
+        ? {}
+        : { used_objects: resolveUsedObjectIdentities(request) }),
+      trust_mode: "automatic",
+      ...(per_anchor_usage === undefined ? {} : { per_anchor_usage }),
+      reason: reason ?? null,
+      reported_at: reportedAt
+    }, scope);
     throwIfAborted(context.abortSignal);
     await emitContextUsageReportedTelemetry(params, {
-      deliveryId: request.delivery_id,
+      deliveryId: delivery_id,
       usageState,
       occurredAt: reportedAt,
       context,
       linkedDelivery
     });
-    return SoulReportContextUsageResponseSchema.parse({
-      delivery_id: request.delivery_id,
-      status: "recorded"
-    });
+    return SoulReportContextUsageResponseSchema.parse({ delivery_id, status: "recorded" });
   };
 }
 

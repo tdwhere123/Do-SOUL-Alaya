@@ -68,7 +68,7 @@ export function searchEvidenceByKeywordField(
   );
 }
 
-export function collectEvidenceKeywordLaneRows(
+function collectEvidenceKeywordLaneRows(
   statements: EvidenceCapsuleStatements,
   workspaceId: string,
   porterTokens: readonly string[],

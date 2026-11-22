@@ -147,7 +147,7 @@ export function resolveOfficialApiSourceLocatorQuote(
   );
 }
 
-export function locatorAssertionUniquelyCommitsToQuote(
+function locatorAssertionUniquelyCommitsToQuote(
   sourceText: string,
   assertion: string,
   proposedText: string

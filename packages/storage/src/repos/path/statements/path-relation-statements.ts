@@ -8,7 +8,7 @@ import {
   findByBackingObjectIdSql
 } from "./path-relation-sql.js";
 
-export interface SqliteStatement {
+interface SqliteStatement {
   readonly source: string;
   run(...args: readonly unknown[]): { readonly changes: number };
   get(...args: readonly unknown[]): unknown;

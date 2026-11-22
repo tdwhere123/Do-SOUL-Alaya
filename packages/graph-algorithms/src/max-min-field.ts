@@ -1,3 +1,4 @@
+import { requireGrade } from "./bottleneck-hypergraph.js";
 import { PersistentStringMap } from "./persistent-string-map.js";
 import { MaxMinWorkQueue } from "./max-min-work-queue.js";
 
@@ -29,9 +30,10 @@ export interface MaxMinInput {
 export interface MaxMinPreparedGraph {
   readonly nodeIds: PersistentStringMap<true>;
   readonly edges: PersistentStringMap<MaxMinOutgoingEdges>;
+  readonly maxStrength: number;
 }
 
-export class MaxMinOutgoingEdges {
+class MaxMinOutgoingEdges {
   public constructor(public readonly length = 0, private readonly items = new PersistentStringMap<MaxMinTransition>()) {}
   public at(offset: number): MaxMinTransition | undefined { return this.items.get(String(offset)); }
   public append(edge: MaxMinTransition): MaxMinOutgoingEdges {
@@ -43,12 +45,15 @@ export function extendMaxMinGraph(prior: MaxMinPreparedGraph | undefined,
   nodeIds: readonly string[], transitions: readonly MaxMinTransition[]): MaxMinPreparedGraph {
   let nodes = prior?.nodeIds ?? new PersistentStringMap<true>();
   let edges = prior?.edges ?? new PersistentStringMap<MaxMinOutgoingEdges>();
+  let maxStrength = prior?.maxStrength ?? 0;
   for (const id of nodeIds) nodes = nodes.with(id, true);
   for (const edge of transitions) {
     if (!nodes.has(edge.from) || !nodes.has(edge.to)) continue;
-    edges = edges.with(edge.from, (edges.get(edge.from) ?? new MaxMinOutgoingEdges()).append(edge));
+    const strength = requireGrade(edge.strength, Number.MAX_SAFE_INTEGER);
+    maxStrength = Math.max(maxStrength, edge.strength);
+    edges = edges.with(edge.from, (edges.get(edge.from) ?? new MaxMinOutgoingEdges()).append({ ...edge, strength }));
   }
-  return { nodeIds: nodes, edges };
+  return { nodeIds: nodes, edges, maxStrength };
 }
 
 export interface MaxMinResult {
@@ -64,21 +69,25 @@ export interface MaxMinResult {
 
 export function solveMaxMinField(input: MaxMinInput): MaxMinResult {
   const changedValues = new Map<string, number>();
-  const top = requireIntegerTop(input.top, input.bottom);
+  const top = input.top;
+  if (input.bottom !== 0 || !Number.isSafeInteger(top) || top < 0) {
+    throw new Error("max-min top must be a safe nonnegative integer with bottom 0");
+  }
+  if (input.preparedGraph !== undefined) requireGrade(input.preparedGraph.maxStrength, top);
   const nodeIds = input.preparedGraph === undefined ? uniqueNodeIds(input.nodeIds) : [];
-  const values = initialValues(input.preparedGraph?.nodeIds ?? new Set(nodeIds), input.seeds, input.bottom, top, input.priorValues, changedValues);
+  const values = initialValues(input.preparedGraph?.nodeIds ?? new Set(nodeIds), input.seeds, top, input.priorValues, changedValues);
   const retainedTransitions = input.preparedGraph === undefined
-    ? legalTransitions(nodeIds, input.transitions, input.bottom, top) : input.transitions;
+    ? legalTransitions(nodeIds, input.transitions, top) : input.transitions;
+  const workQueue = initialQueue(values, changedValues, top, input.workQueue, input.worklist);
   const relaxed = relaxMaxMin(
     values,
     input.preparedGraph?.edges ?? adjacency(retainedTransitions),
-    input.worklist,
     input.workLimit,
-    input.workQueue,
+    workQueue,
     changedValues
   );
   return {
-    values: relaxed.values,
+    values: bindTrustedTop(relaxed.values, top),
     changedValues,
     retainedTransitions,
     get remainingWorklist() { return [...relaxed.workQueue]; },
@@ -88,43 +97,43 @@ export function solveMaxMinField(input: MaxMinInput): MaxMinResult {
   };
 }
 
-function requireIntegerTop(top: number, bottom: 0): number {
-  if (bottom !== 0 || !Number.isInteger(top) || top < 0) {
-    throw new Error("max-min top must be a nonnegative integer with bottom 0");
-  }
-  return top;
-}
-
 function uniqueNodeIds(nodeIds: readonly string[]): readonly string[] {
   return [...new Set(nodeIds)];
 }
 
-function clampInteger(value: number, bottom: number, top: number): number {
-  if (!Number.isFinite(value)) return bottom;
-  const integer = Math.trunc(value);
-  if (integer < bottom) return bottom;
-  if (integer > top) return top;
-  return integer;
+function trustedTop(values: PersistentStringMap<number>): number | undefined {
+  const bound = (values as PersistentStringMap<number> & { readonly top?: unknown }).top;
+  return typeof bound === "number" && Number.isSafeInteger(bound) ? bound : undefined;
+}
+
+function bindTrustedTop(values: PersistentStringMap<number>, top: number): PersistentStringMap<number> {
+  if (trustedTop(values) === top) return values;
+  Object.defineProperty(values, "top", { value: top, configurable: true, enumerable: false, writable: false });
+  return values;
 }
 
 function initialValues(
   nodeIds: Readonly<{ has(key: string): boolean }>,
   seeds: ReadonlyMap<string, number>,
-  bottom: 0,
   top: number,
   priorValues: ReadonlyMap<string, number> | undefined,
   changedValues: Map<string, number>
 ): PersistentStringMap<number> {
-  let values = priorValues instanceof PersistentStringMap ? priorValues : new PersistentStringMap<number>();
-  for (const [nodeId, value] of priorValues instanceof PersistentStringMap ? [] : priorValues ?? []) {
+  const bound = priorValues instanceof PersistentStringMap ? trustedTop(priorValues) : undefined;
+  if (bound !== undefined && bound !== top) {
+    throw new RangeError(`max-min trusted state top ${bound} disagrees with ${top}`);
+  }
+  const reuse = priorValues instanceof PersistentStringMap && bound === top;
+  let values = reuse ? priorValues : new PersistentStringMap<number>();
+  for (const [nodeId, value] of reuse ? [] : priorValues ?? []) {
     if (!nodeIds.has(nodeId)) continue;
-    const clamped = clampInteger(value, bottom, top);
+    const grade = requireGrade(value, top);
     const current = values.get(nodeId);
-    if (current === undefined || clamped > current) values = values.with(nodeId, clamped);
+    if (current === undefined || grade > current) values = values.with(nodeId, grade);
   }
   for (const [nodeId, value] of seeds) {
     if (!nodeIds.has(nodeId)) continue;
-    const grade = clampInteger(value, bottom, top);
+    const grade = requireGrade(value, top);
     if (!values.has(nodeId) || grade > values.get(nodeId)!) {
       values = values.with(nodeId, grade);
       changedValues.set(nodeId, grade);
@@ -136,7 +145,6 @@ function initialValues(
 function legalTransitions(
   nodeIds: readonly string[],
   transitions: readonly MaxMinTransition[],
-  bottom: 0,
   top: number
 ): readonly MaxMinTransition[] {
   const nodeSet = new Set(nodeIds);
@@ -146,7 +154,7 @@ function legalTransitions(
     legal.push({
       from: transition.from,
       to: transition.to,
-      strength: clampInteger(transition.strength, bottom, top)
+      strength: requireGrade(transition.strength, top)
     });
   }
   return legal;
@@ -162,21 +170,23 @@ function adjacency(
   return edges;
 }
 
+function initialQueue(values: ReadonlyMap<string, number>, raisedSeeds: ReadonlyMap<string, number>, top: number,
+  retainedQueue: MaxMinWorkQueue | undefined, worklist: readonly MaxMinWorkItem[] | undefined): MaxMinWorkQueue {
+  let queue = retainedQueue ?? new MaxMinWorkQueue();
+  for (const item of worklist ?? []) queue = queue.push({ ...item, strength: requireGrade(item.strength, top) });
+  const pendingSeeds = retainedQueue === undefined && worklist === undefined ? values : raisedSeeds;
+  for (const [nodeId, strength] of pendingSeeds) queue = queue.push({ nodeId, strength });
+  return queue;
+}
+
 function relaxMaxMin(
   priorValues: PersistentStringMap<number>,
   edges: ReadonlyMap<string, MaxMinOutgoingEdges>,
-  worklist: readonly MaxMinWorkItem[] | undefined,
   workLimit: number | undefined,
-  retainedQueue: MaxMinWorkQueue | undefined,
+  heap: MaxMinWorkQueue,
   changedValues: Map<string, number>
 ): { values: PersistentStringMap<number>; workQueue: MaxMinWorkQueue; steps: number; complete: boolean } {
   let values = priorValues;
-  let heap = retainedQueue ?? new MaxMinWorkQueue();
-  if (worklist !== undefined) {
-    for (const item of worklist) heap = heap.push(item);
-  } else if (retainedQueue === undefined) {
-    for (const [nodeId, value] of values) heap = heap.push({ strength: value, nodeId });
-  }
   let steps = 0;
   while (heap.size > 0) {
     if (workLimit !== undefined && steps >= workLimit) {

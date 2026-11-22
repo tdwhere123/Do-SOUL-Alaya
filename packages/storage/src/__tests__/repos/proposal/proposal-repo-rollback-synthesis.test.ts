@@ -5,6 +5,8 @@ import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
 
 import {
   countMemoryUpdatedEvents,
+  acceptedMemoryEvents,
+  acceptedSynthesisEvent,
   countProposalEvents,
   countSynthesisCapsules,
   countSynthesisCreatedEvents,
@@ -53,7 +55,7 @@ describe("SqliteProposalRepo rollback and synthesis workflows", () => {
           workspace_id: "workspace-1",
           proposed_changes: { content: "Use yarn for workspace commands." },
           updated_at: "2026-03-21T03:00:00.000Z",
-          caused_by: `proposal_accept:${proposal.proposal_id}`
+          ...acceptedMemoryEvents(proposal.proposal_id, ["content"])
         },
         { reviewerIdentity: "user:alice" }
       )
@@ -93,7 +95,7 @@ describe("SqliteProposalRepo rollback and synthesis workflows", () => {
           workspace_id: "workspace-1",
           proposed_changes: { content: "Use pnpm for workspace commands." },
           updated_at: "2026-03-21T03:00:00.000Z",
-          caused_by: `proposal_accept:${proposal.proposal_id}`
+          ...acceptedMemoryEvents(proposal.proposal_id, ["content"])
         },
         { reviewerIdentity: "user:alice" }
       )
@@ -171,11 +173,6 @@ describe("SqliteProposalRepo rollback and synthesis workflows", () => {
     const proposal = createProposal();
 
     await expect(
-      repo.updateResolution("missing-proposal", "accepted", "2026-03-21T03:00:00.000Z")
-    ).rejects.toMatchObject({
-      code: "NOT_FOUND"
-    });
-    await expect(
       repo.updatePendingResolution("missing-proposal", "accepted", "2026-03-21T03:00:00.000Z")
     ).rejects.toMatchObject({
       code: "NOT_FOUND"
@@ -226,7 +223,7 @@ describe("SqliteProposalRepo rollback and synthesis workflows", () => {
       {
         workspace_id: "workspace-1",
         capsule,
-        caused_by: `proposal_accept:${proposal.proposal_id}`
+        event: acceptedSynthesisEvent(capsule)
       },
       { reviewerIdentity: "user:alice" }
     );
@@ -271,7 +268,7 @@ describe("SqliteProposalRepo rollback and synthesis workflows", () => {
       {
         workspace_id: "workspace-1",
         capsule,
-        caused_by: `proposal_accept:${proposal.proposal_id}`
+        event: acceptedSynthesisEvent(capsule)
       }
     );
 
@@ -324,7 +321,7 @@ describe("SqliteProposalRepo rollback and synthesis workflows", () => {
         {
           workspace_id: "workspace-1",
           capsule,
-          caused_by: `proposal_accept:${proposal.proposal_id}`
+          event: acceptedSynthesisEvent(capsule)
         }
       )
     ).rejects.toMatchObject({ code: "CONFLICT" });

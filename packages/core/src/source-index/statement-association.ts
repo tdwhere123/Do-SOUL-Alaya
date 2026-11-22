@@ -3,6 +3,7 @@ import { EVIDENCE_CONDITION_LIMITS, hostOccurrenceIsMessage, sourceIndexNativeRo
   type QuestionTimePreference, type SourceIndexLexicalCandidate, type SourceIndexQueryVector, type SourceIndexStatementWitnessRead,
   type SourceIndexTarget, type SourceSemanticResourceBudget, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { sourceEmbeddingInputDigest } from "../embedding-recall/source-embedding-runtime.js";
+import { evidenceOpening, openingRankWork, openingStatements } from "./statement-opening-rank.js";
 
 /** A statement key reaches its raw root once per lexical lane, like a best vector window. */
 export function collapseStatementCandidates(candidates: readonly SourceIndexLexicalCandidate[],
@@ -94,9 +95,10 @@ export function quoteStatementAssociation(roots: number, windows: number, dimens
   const retainedKeys = Math.min(windows, roots * STATEMENT_ASSOCIATION_KEYS_PER_ROOT);
   const statements = EVIDENCE_CONDITION_LIMITS.max_conditions;
   const relationWork = retainedKeys * dimensions * (statements + 1);
-  return { work_units: windows * dimensions + retainedKeys * (dimensions * 3 + 16) + roots * roots + relationWork,
+  return { work_units: windows * dimensions + retainedKeys * (dimensions * 3 + 16) + roots * roots + relationWork
+      + openingRankWork(roots, statements),
     memory_bytes: windows * retentionBytes(dimensions) + retainedKeys * (dimensions * 84 + 1088)
-      + roots * roots * 128 + 4096 + retainedKeys * dimensions * 4 };
+      + roots * roots * 128 + 4096 + retainedKeys * dimensions * 4 + roots * (16 + statements * 16) };
 }
 
 /** Exact statement scoring over retained keys plus the retained per-root coverage frame. */
@@ -106,9 +108,11 @@ function coverageCost(keyDimensions: number, demandDimensions: number, roots: nu
   const cells = statements * ((spans ? 2 : 1) + (relations ? 1 : 0)) + 1;
   const finiteness = keyDimensions + demandDimensions;
   const relationDots = relations ? keyDimensions * statements : 0;
-  return { work_units: keyDimensions * statements + demandDimensions + roots * cells + finiteness + relationDots,
+  return { work_units: keyDimensions * statements + demandDimensions + roots * cells + finiteness + relationDots
+      + openingRankWork(roots, statements),
     memory_bytes: demandDimensions * 4 + roots * (64 + 96 + statements * (spans ? 72 + 192 : 72)
-      + (relations ? statements * 72 : 0) + (spans ? 64 : 0)) + (relations ? keyDimensions * 4 : 0) };
+      + (relations ? statements * 72 : 0) + (spans ? 64 : 0) + 16 + statements * 16)
+      + (relations ? keyDimensions * 4 : 0) };
 }
 
 /** Prepared statement vectors serve only the exact admitted condition texts under the query's profile. */
@@ -195,24 +199,6 @@ function scoreRootStatements(
     return best;
   });
   return { coverage, possible: open, cells, winners };
-}
-
-/** The opening covers every necessary witness message of the root. Keys nominate witnesses;
- * physical messages, including unkeyed ones, define ordinary units. */
-function evidenceOpening(
-  coverage: readonly (number | null)[],
-  cells: readonly ((readonly [number, number]) | null)[],
-  messages: readonly Pick<HostOccurrence, "utf8_span">[]
-): EvidenceOpening | null {
-  let top = -1, lo = Infinity, hi = -Infinity;
-  coverage.forEach((value, index) => {
-    const cell = cells[index];
-    if (value === null || cell == null) return;
-    lo = Math.min(lo, cell[0]); hi = Math.max(hi, cell[1]);
-    if (top < 0 || value > coverage[top]!) top = index;
-  });
-  const first = messages[0]?.utf8_span[1] ?? Infinity;
-  return top >= 0 ? { statement: top, span: [lo, hi] } : Number.isFinite(first) ? { statement: null, span: [0, first] } : null;
 }
 
 /** Optional retention cannot cancel the underlying scan or nomination. */
@@ -302,7 +288,7 @@ export class StatementKeyRetention {
     const anchors = [...new Set(demands.conditions.flatMap(condition => condition.anchors))];
     const anchorIndex = new Map(anchors.map((anchor, index) => [anchor, index]));
     const coverage: (number | null)[][] = [], possible: boolean[][] = [], spans: ((readonly [number, number]) | null)[][] = [];
-    const openings: (EvidenceOpening | null)[] = [];
+    const firstMessageEnds: (number | undefined)[] = [];
     const winners: (SourceIndexTarget | null)[][] = [];
     for (const root of roots) {
       const kept = this.byRoot.get(root) ?? [];
@@ -312,11 +298,13 @@ export class StatementKeyRetention {
       coverage.push(scored.coverage);
       possible.push(scored.possible);
       spans.push(scored.cells);
-      openings.push(evidenceOpening(scored.coverage, scored.cells, loaded.messages));
+      firstMessageEnds.push(loaded.messages[0]?.utf8_span[1]);
       winners.push(scored.winners);
     }
     const relations = this.scoreWinningRelations(demands.vectors, coverage, winners, relationReader);
     if (relations === "unavailable") return undefined;
+    const openings = openingStatements(coverage, spans, statements)
+      .map((statement, row) => evidenceOpening(statement, spans[row]!, firstMessageEnds[row]));
     this.observed = { status: "ready", reason: null, ...counts, statements };
     this.byRoot.clear();
     const hasFiniteRelation = Array.isArray(relations) && relations.some(row => row.some(value => value !== null));

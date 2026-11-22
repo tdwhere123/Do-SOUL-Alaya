@@ -11,8 +11,8 @@ Canonical repository instructions. `CLAUDE.md` adds Claude-specific Plan Mode ru
 ## Repository
 
 Do-SOUL Alaya is a **local-first memory plane for CLI agents**
-(`@do-soul/alaya-*`) — MCP and CLI only, no GUI, no conversation TUI.
-Memory Inspector is loopback tooling, not an agent surface. Public copy uses
+(`@do-soul/alaya-*`) — MCP (`stdio`), CLI, and loopback Daemon HTTP JSON API;
+no GUI, conversation TUI, or SPA. Public copy uses
 "memory plane" (invariant §21a).
 
 - Memory objects are ontology; surfaces, scopes, paths, and projections route

@@ -6,7 +6,6 @@ import {
   SOURCE_ASSERTION_MAX_CHARS
 } from "../source-assertion.js";
 import { parseDirectPreferenceRelation } from "../preference-relation.js";
-import { isBoundedTemplateSlotAssertion } from "../source-assertion/reference-closure.js";
 import {
   coordinateSpans,
   sentenceSpans,
@@ -24,7 +23,6 @@ import {
 export const OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION = VERIFIED_USER_ASSERTION_CATALOG_CONTRACT_VERSION;
 export const SOURCE_ASSERTION_CATALOG_PRODUCER = "official-api-source-assertion-catalog-v4" as const;
 export const SOURCE_ASSERTION_CATALOG_PAGE_SIZE = 64;
-export const MAX_SOURCE_ASSERTIONS = SOURCE_ASSERTION_CATALOG_PAGE_SIZE;
 
 export interface OfficialApiSourceAssertion {
   readonly assertion_id: number;
@@ -134,7 +132,7 @@ function indexLegacySourceAssertions(
   const sentences = sentenceSpans(sourceText);
   const output: IndexedSourceAssertion[] = [];
   const seen = new Set<string>();
-  for (const [index, sentence] of sentences.entries()) {
+  for (const sentence of sentences) {
     if (roleAt(roleMarkers, sentence.start) !== "user") continue;
     const sentenceText = sourceText.slice(sentence.start, sentence.end);
     if (isDirectQuestionSourceText(sentenceText)) continue;
@@ -152,15 +150,6 @@ function indexLegacySourceAssertions(
     for (const clause of coordinateSpans(sourceText, sentence)) {
       appendAssertion(output, seen, sourceText, clause, sentence, false, preferenceMaxChars);
     }
-    appendBoundedTemplateSlotPair(
-      output,
-      seen,
-      sourceText,
-      roleMarkers,
-      sentence,
-      sentences[index + 1],
-      preferenceMaxChars
-    );
   }
   return output;
 }
@@ -184,21 +173,6 @@ function appendBoundedIndirectQuestionPrefix(
   };
   appendAssertion(output, seen, sourceText, span, sentence, false, preferenceMaxChars);
   return true;
-}
-
-function appendBoundedTemplateSlotPair(
-  output: IndexedSourceAssertion[],
-  seen: Set<string>,
-  sourceText: string,
-  roleMarkers: readonly SourceRoleMarker[],
-  first: AssertionSpan,
-  second: AssertionSpan | undefined,
-  preferenceMaxChars: number
-): void {
-  if (second === undefined || roleAt(roleMarkers, second.start) !== "user") return;
-  const pair = { start: first.start, end: second.end };
-  if (!isBoundedTemplateSlotAssertion(sourceText.slice(pair.start, pair.end))) return;
-  appendAssertion(output, seen, sourceText, pair, pair, false, preferenceMaxChars);
 }
 
 function appendAssertion(

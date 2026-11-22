@@ -16,6 +16,7 @@ import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../cli/bridge.js";
 import { createReviewCommand } from "../../cli/review/review.js";
 
 import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal/proposal-workflow.js";
+import { createMemory } from "../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 
 import type {
   McpMemoryToolCallContext,
@@ -173,7 +174,8 @@ describe("alaya review", () => {
         acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, events, memoryUpdate, options) => {
           updateCalls += 1;
           expect(options?.reviewerIdentity).toBe("user:alice");
-          expect(memoryUpdate.caused_by).toBe(`proposal_accept:${proposal.proposal_id}`);
+          const audit = memoryUpdate.buildMemoryEvent(createMemory({ object_id: "mem1", workspace_id: "ws1" }));
+          expect(audit.caused_by).toBe(`proposal_accept:${proposal.proposal_id}`);
           storedProposal = {
             ...storedProposal,
             resolution_state: ProposalResolutionState.ACCEPTED,

@@ -11,7 +11,7 @@ import {
   type WorkingProjection
 } from "@do-soul/alaya-protocol";
 
-export type DegradationStepKind =
+type DegradationStepKind =
   | "manifestation_downgrade_excerpt"
   | "manifestation_downgrade_hint"
   | "handoff_pointer_ify"
@@ -53,11 +53,6 @@ interface DropStepParams {
 
 const EXCERPT_RATIO = 0.35;
 const HINT_RATIO = 0.1;
-
-export const DEGRADATION_CONSTANTS = Object.freeze({
-  EXCERPT_RATIO,
-  HINT_RATIO
-});
 
 export class DegradationPipeline implements LensAssemblerDegradationPort {
   public assess(params: DegradationAssessParams): LensDegradationResult {

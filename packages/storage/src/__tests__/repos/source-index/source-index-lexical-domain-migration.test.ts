@@ -94,6 +94,7 @@ it("rolls back shared-FTS removal and partial domain creation when migration enc
   try {
     applyBaselineSql(legacy, 27);
     migrateLegacyPathRelationsToTemporalCandidate(legacy, { selectionRequired: false });
+    seedWorkspaces(owner);
     legacy.exec("CREATE TABLE schema_version(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
     for (let version = 1; version <= 27; version++) legacy.prepare("INSERT INTO schema_version VALUES(?,?)").run(version, CLOCK);
     const valid = `sha256:${"1".repeat(64)}`;

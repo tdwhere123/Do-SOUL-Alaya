@@ -49,7 +49,7 @@ describe("manifestation budget contracts", () => {
       ManifestationLevel.LENS_ENTRY
     ]);
     expect(ManifestationLevelSchema.parse("stance_bias")).toBe(ManifestationLevel.STANCE_BIAS);
-    expect(ManifestationBudgetConfigSchema.parse(config)).toEqual(config);
+    expect(ManifestationBudgetConfigSchema.parse(config)).toEqual({ ...config, config_version: 0 });
     expect(ManifestationDecisionSchema.parse(decision)).toEqual(decision);
   });
 

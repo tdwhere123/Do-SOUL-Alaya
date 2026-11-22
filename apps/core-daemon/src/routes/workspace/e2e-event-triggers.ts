@@ -10,7 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { Context, Hono } from "hono";
 import { constantTimeTokenEqual } from "../../shared/constant-time-token.js";
-import { parseJsonBody } from "../shared/shared.js";
+import { jsonError, parseJsonObject } from "../shared/shared.js";
 
 export const E2E_EVENT_TRIGGER_TOKEN_HEADER = "x-alaya-e2e-token";
 
@@ -65,7 +65,7 @@ function registerSoulApprovalRequestedRoute(
     if (unauthorized !== null) {
       return unauthorized;
     }
-    const body = await parseBodyRecord(context.req.json.bind(context.req));
+    const body = await parseJsonObject(context.req.json.bind(context.req));
     const run = await loadTriggeredRun(services, body);
     const payload = createSoulApprovalRequestedEvent(body, run.run_id);
     const entry = await appendAndBroadcast(services, {
@@ -100,7 +100,7 @@ function registerDirtyStatePanicRoute(
     if (unauthorized !== null) {
       return unauthorized;
     }
-    const body = await parseBodyRecord(context.req.json.bind(context.req));
+    const body = await parseJsonObject(context.req.json.bind(context.req));
     const run = await loadTriggeredRun(services, body);
     const payload = createDirtyStatePanicEvent(body, run.run_id);
     const entry = await appendAndBroadcast(services, {
@@ -128,7 +128,7 @@ function registerDirtyStatePanicRoute(
 function rejectUnlessE2eTriggerToken(context: Context, expectedToken: string): Response | null {
   const provided = context.req.header(E2E_EVENT_TRIGGER_TOKEN_HEADER)?.trim() ?? "";
   if (provided.length === 0 || !constantTimeTokenEqual(provided, expectedToken)) {
-    return context.json({ success: false, error: "E2E trigger token is required" }, 403);
+    return jsonError(context, 403, "E2E trigger token is required");
   }
   return null;
 }
@@ -186,14 +186,6 @@ async function appendAndBroadcast(
   const entry = await services.eventLogRepo.append(event);
   await services.runtimeNotifier.notifyEntry(entry);
   return entry;
-}
-
-async function parseBodyRecord(readJson: () => Promise< unknown>): Promise<Record<string, unknown>> {
-  const body = await parseJsonBody(readJson);
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    throw new CoreError("VALIDATION", "Invalid request body");
-  }
-  return body as Record<string, unknown>;
 }
 
 function readRequiredString(body: Readonly<Record<string, unknown>>, key: string): string {

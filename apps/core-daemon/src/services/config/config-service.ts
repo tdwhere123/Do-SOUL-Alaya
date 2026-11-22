@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CoreError } from "@do-soul/alaya-core";
+import { CoreError, type EventPublisher } from "@do-soul/alaya-core";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import { normalizeLegacyConfigVersion, withConfigVersion } from "./config-version.js";
 import {
@@ -59,12 +59,7 @@ export interface ManifestationBudgetConfigRead {
   readonly source: "default" | "stored";
 }
 
-interface ConfigEventPublisher {
-  appendManyWithMutation<T>(
-    eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
-    mutate: (entries: readonly EventLogEntry[]) => T
-  ): Promise<T>;
-}
+type ConfigEventPublisher = Pick<EventPublisher, "appendManyWithMutation" | "decideAppendThenApply">;
 
 const SoulConfigPatchSchema = SoulConfigSchema.unwrap().partial();
 const StrategyConfigPatchSchema = StrategyConfigSchema.unwrap().partial();
@@ -143,7 +138,7 @@ function createManifestationBudgetMethods(
 ): Pick<AppConfigService, "getManifestationBudgetConfig" | "patchManifestationBudgetConfig"> {
   return {
     getManifestationBudgetConfig: async (workspaceId) =>
-      await getManifestationBudgetConfig(configRepo, workspaceId, clock),
+      getManifestationBudgetConfig(configRepo, workspaceId, clock),
     patchManifestationBudgetConfig: async (workspaceId, patch) =>
       await patchManifestationBudgetConfig({
         repo: configRepo,
@@ -232,11 +227,11 @@ async function patchSectionConfig<T extends VersionedConfigObject>(
   );
 }
 
-async function getManifestationBudgetConfig(
+function getManifestationBudgetConfig(
   repo: ConfigRepo,
   workspaceId: string,
   clock: () => string
-): Promise<ManifestationBudgetConfigRead> {
+): ManifestationBudgetConfigRead {
   const stored = repo.getParsed(
     keyFor(workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION),
     ManifestationBudgetConfigSchema
@@ -263,17 +258,26 @@ async function patchManifestationBudgetConfig(input: {
     "Invalid manifestation budget config patch"
   );
   const occurredAt = parseIsoTimestamp(input.clock(), "Invalid manifestation budget config patch");
-  const next = await buildNextManifestationBudgetConfig(input.repo, input.workspaceId, input.clock, patch, escalationPolicyPatch, occurredAt);
-  const auditEntryId = input.generateAuditId();
   const configKey = keyFor(input.workspaceId, MANIFESTATION_BUDGET_CONFIG_SECTION);
 
-  return await input.eventPublisher.appendManyWithMutation(
-    [buildManifestationBudgetAuditEvent(input.workspaceId, configKey, patch, escalationPolicyPatch, occurredAt, auditEntryId)],
-    () => {
-      input.repo.setParsed(configKey, next, ManifestationBudgetConfigSchema);
-      return next;
-    }
-  );
+  return await input.eventPublisher.decideAppendThenApply(() => {
+    const { config: current } = getManifestationBudgetConfig(input.repo, input.workspaceId, () => occurredAt);
+    const next = ManifestationBudgetConfigSchema.parse({
+      ...current,
+      ...patch,
+      workspace_id: input.workspaceId,
+      config_version: current.config_version + 1,
+      escalation_policy: { ...current.escalation_policy, ...escalationPolicyPatch },
+      updated_at: occurredAt
+    });
+    const audit = buildManifestationBudgetAuditEvent(
+      input.workspaceId, configKey, patch, escalationPolicyPatch, occurredAt, input.generateAuditId()
+    );
+    return {
+      eventInputs: [audit],
+      apply: () => input.repo.setParsed(configKey, next, ManifestationBudgetConfigSchema)
+    };
+  });
 }
 
 function createSoulConfigMethods(configRepo: ConfigRepo): Pick<AppConfigService, "getSoulConfig" | "patchSoulConfig"> {
@@ -349,7 +353,9 @@ function createRuntimeConfigReadMethods(input: {
         env: input.envProvider()
       }),
     getRuntimeGardenComputeConfig: async () =>
-      await getRuntimeGardenComputeConfig(input.configRepo, input.configPathsProvider(), input.warn)
+      await getRuntimeGardenComputeConfig(
+        input.configRepo, input.configPathsProvider(), input.warn, input.envProvider()
+      )
   };
 }
 
@@ -390,27 +396,6 @@ function createRuntimeConfigPatchMethods(input: {
   };
 }
 
-async function buildNextManifestationBudgetConfig(
-  repo: ConfigRepo,
-  workspaceId: string,
-  clock: () => string,
-  patch: ConfigPatchObject,
-  escalationPolicyPatch: ConfigPatchObject,
-  occurredAt: string
-): Promise<ManifestationBudgetConfig> {
-  const current = (await getManifestationBudgetConfig(repo, workspaceId, clock)).config;
-  return ManifestationBudgetConfigSchema.parse({
-    ...current,
-    ...patch,
-    workspace_id: workspaceId,
-    escalation_policy: {
-      ...current.escalation_policy,
-      ...escalationPolicyPatch
-    },
-    updated_at: occurredAt
-  });
-}
-
 function buildManifestationBudgetAuditEvent(
   workspaceId: string,
   configKey: string,
@@ -425,7 +410,7 @@ function buildManifestationBudgetAuditEvent(
     entity_id: configKey,
     workspace_id: workspaceId,
     run_id: null,
-    caused_by: "inspector",
+    caused_by: "http-config",
     payload_json: SoulHealthJournalRecordedPayloadSchema.parse({
       entry_id: auditEntryId,
       event_kind: HealthEventKind.RECALL_TUNING,

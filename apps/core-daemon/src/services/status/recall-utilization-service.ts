@@ -6,15 +6,16 @@ import {
   parseRecallContextEventPayload,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
+import { HTTP_REVIEWER_AGENT_TARGET } from "../../mcp-memory/proposal/reviewer-surfaces.js";
 
-// Agent targets excluded from agent-recall metrics. Inspector / CLI /
+// Agent targets excluded from agent-recall metrics. HTTP reviewer / CLI /
 // tools-cli surfaces drive `soul.recall` for human-operated debugging
 // and would inflate `total`, skew `miss_ratio`, and depress
 // `follow_through_ratio` (no `report_context_usage` fires from those
 // paths). `tools-cli` is the default agentTarget bound by `alaya tools
 // call` (cli/tools.ts) — keep this set in sync with the human-reviewer
 // surfaces guarded at handler boundaries.
-const NON_AGENT_TARGETS: ReadonlySet<string> = new Set(["inspector", "cli", "tools-cli"]);
+const NON_AGENT_TARGETS: ReadonlySet<string> = new Set([HTTP_REVIEWER_AGENT_TARGET, "cli", "tools-cli"]);
 const EMBEDDING_LATENCY_BUCKETS: readonly Readonly<{ label: string; upperMs: number }>[] = [
   { label: "<=150ms", upperMs: 150 },
   { label: "<=300ms", upperMs: 300 },
@@ -76,9 +77,9 @@ export interface RecallUtilizationStats {
 export interface RecallUtilizationService {
   /**
    * Aggregate agent-driven recall telemetry within a workspace + time
-   * window. Inspector and CLI traffic is excluded by default so the
+   * window. HTTP reviewer and CLI traffic is excluded by default so the
    * stats reflect what the attached CLI agents (Codex / Claude Code /
-   * similar) actually do; pass `agentTargets` to override.
+   * similar) actually do; pass `excludeAgentTargets` to override.
    */
   getStats(input: {
     readonly workspaceId: string;

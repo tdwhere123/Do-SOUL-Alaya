@@ -256,30 +256,28 @@ describe("proposal-repo reviewer_identity", () => {
     });
   });
 
-  // Every code path leading to resolution_state ∈ ('accepted','rejected')
-  // writes a non-null reviewer_identity. This contract test exercises both
-  // write paths (legacy updateResolution + new updatePendingResolutionWithEvents)
-  // and asserts the SQL-level invariant.
+  // Persist reviewer identity on both outcomes through the guarded event path.
   it("every accepted/rejected proposals row carries a non-null reviewer_identity", async () => {
     const { repo, database } = createRepo();
 
-    const acceptedThroughLegacy = createProposal({
+    const acceptedThroughEvents = createProposal({
       runtime_id: "55555555-5555-4555-8555-555555555555",
       proposal_id: "55555555-5555-4555-8555-555555555555"
     });
     await repo.create({
-      proposal: acceptedThroughLegacy,
+      proposal: acceptedThroughEvents,
       workspace_id: "workspace-1",
       run_id: "run-1",
       target_object_kind: "synthesis_capsule",
-      proposed_change_summary: "legacy path",
+      proposed_change_summary: "accepted through events",
       created_at: "2026-04-30T03:00:00.000Z"
     });
-    await repo.updateResolution(
-      acceptedThroughLegacy.proposal_id,
+    await repo.updatePendingResolutionWithEvents(
+      acceptedThroughEvents.proposal_id,
       "accepted",
       "2026-04-30T03:30:00.000Z",
-      "user:legacy-reviewer"
+      createReviewEvents(acceptedThroughEvents),
+      { reviewerIdentity: "user:accepted-reviewer" }
     );
 
     const rejectedThroughEvents = createProposal({

@@ -225,7 +225,7 @@ export function parseNullableTimestamp(value: string | null): string | null {
   return value === null ? null : parseTimestamp(value);
 }
 
-export function parseNullableNonNegativeInteger(value: number | null, field: string): number | null {
+function parseNullableNonNegativeInteger(value: number | null, field: string): number | null {
   if (value === null) {
     return null;
   }

@@ -117,7 +117,6 @@ async function handleNoGoVerification(
 }
 
 async function handleGoVerification(input: GreenVerificationInput): Promise<void> {
-  input.consecutiveNoGo.delete(input.targetObjectId);
   const basis =
     input.memory.dimension === MemoryDimension.HAZARD
       ? VerificationBasis.USER_RECONFIRM

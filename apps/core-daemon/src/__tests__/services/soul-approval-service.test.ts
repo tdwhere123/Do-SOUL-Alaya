@@ -1,20 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
+import { EventPublisher, type EventPublisherEventLogRepoPort } from "@do-soul/alaya-core";
 import { FileApprovalEventType } from "@do-soul/alaya-protocol";
 import { createSoulApprovalService } from "../../services/soul/soul-approval-service.js";
 
+function createWiredApprovalService(entries: readonly Record<string, unknown>[], nowIso: string) {
+  const eventLogRepo = createEventLogRepo(entries);
+  const runtimeNotifier = { notify: vi.fn(), notifyEntry: vi.fn() };
+  const eventPublisher = new EventPublisher({
+    eventLogRepo,
+    runHotStateService: { apply: () => undefined },
+    runtimeNotifier
+  });
+  const service = createSoulApprovalService({
+    eventLogRepo,
+    eventPublisher,
+    runLookup: vi.fn(async () => ({
+      run_id: "run-1",
+      workspace_id: "ws-1"
+    })),
+    now: () => nowIso
+  });
+  return { eventLogRepo, runtimeNotifier, service };
+}
+
 describe("SoulApprovalService", () => {
   it("throws NOT_FOUND when no pending approval exists for the run", async () => {
-    const eventLogRepo = createEventLogRepo([]);
-    const runtimeNotifier = { notifyEntry: vi.fn() };
-    const service = createSoulApprovalService({
-      eventLogRepo,
-      runLookup: vi.fn(async () => ({
-        run_id: "run-1",
-        workspace_id: "ws-1"
-      })),
-      runtimeNotifier,
-      now: () => "2026-04-01T00:00:00.000Z"
-    });
+    const { eventLogRepo, runtimeNotifier, service } = createWiredApprovalService(
+      [],
+      "2026-04-01T00:00:00.000Z"
+    );
 
     await expect(
       service.approve({
@@ -35,15 +49,21 @@ describe("SoulApprovalService", () => {
     const eventLogRepo = createEventLogRepo([
       createApprovalRequestedEvent({ approvalId: "approval-1", runId: "run-1" })
     ]);
-    const runtimeNotifier = { notifyEntry: vi.fn() };
-    const queryByEntity = eventLogRepo.queryByEntity as ReturnType<typeof vi.fn>;
+    const runtimeNotifier = { notify: vi.fn(), notifyEntry: vi.fn() };
+    const eventPublisher = new EventPublisher({
+      eventLogRepo,
+      runHotStateService: { apply: () => undefined },
+      runtimeNotifier
+    });
+    const queryByEntityInCurrentTransaction =
+      eventLogRepo.queryByEntityInCurrentTransaction as ReturnType<typeof vi.fn>;
     const service = createSoulApprovalService({
       eventLogRepo,
+      eventPublisher,
       runLookup: vi.fn(async () => ({
         run_id: "run-1",
         workspace_id: "ws-a"
       })),
-      runtimeNotifier,
       now: () => "2026-04-01T00:00:00.000Z"
     });
 
@@ -58,33 +78,26 @@ describe("SoulApprovalService", () => {
       code: "NOT_FOUND",
       message: "Pending approval not found for run"
     });
-    expect(queryByEntity).not.toHaveBeenCalled();
+    expect(queryByEntityInCurrentTransaction).not.toHaveBeenCalled();
     expect(eventLogRepo.append).not.toHaveBeenCalled();
     expect(runtimeNotifier.notifyEntry).not.toHaveBeenCalled();
   });
 
   it("throws CONFLICT when the approval has already been resolved", async () => {
-    const eventLogRepo = createEventLogRepo([
-      createApprovalRequestedEvent({
-        approvalId: "approval-1",
-        runId: "run-1"
-      }),
-      createApprovalResolvedEvent({
-        approvalId: "approval-1",
-        runId: "run-1",
-        result: "approved"
-      })
-    ]);
-    const runtimeNotifier = { notifyEntry: vi.fn() };
-    const service = createSoulApprovalService({
-      eventLogRepo,
-      runLookup: vi.fn(async () => ({
-        run_id: "run-1",
-        workspace_id: "ws-1"
-      })),
-      runtimeNotifier,
-      now: () => "2026-04-01T00:00:00.000Z"
-    });
+    const { eventLogRepo, runtimeNotifier, service } = createWiredApprovalService(
+      [
+        createApprovalRequestedEvent({
+          approvalId: "approval-1",
+          runId: "run-1"
+        }),
+        createApprovalResolvedEvent({
+          approvalId: "approval-1",
+          runId: "run-1",
+          result: "approved"
+        })
+      ],
+      "2026-04-01T00:00:00.000Z"
+    );
 
     await expect(
       service.reject({
@@ -102,38 +115,31 @@ describe("SoulApprovalService", () => {
   });
 
   it("short-circuits after validating the first resolved approval event", async () => {
-    const eventLogRepo = createEventLogRepo([
-      createApprovalRequestedEvent({
-        approvalId: "approval-1",
-        runId: "run-1"
-      }),
-      createApprovalResolvedEvent({
-        approvalId: "approval-1",
-        runId: "run-1",
-        result: "approved"
-      }),
-      createApprovalResolvedEvent({
-        approvalId: "approval-1",
-        runId: "run-1",
-        result: "approved",
-        payload_json: {
-          approval_id: "approval-1",
+    const { eventLogRepo, runtimeNotifier, service } = createWiredApprovalService(
+      [
+        createApprovalRequestedEvent({
+          approvalId: "approval-1",
+          runId: "run-1"
+        }),
+        createApprovalResolvedEvent({
+          approvalId: "approval-1",
+          runId: "run-1",
+          result: "approved"
+        }),
+        createApprovalResolvedEvent({
+          approvalId: "approval-1",
+          runId: "run-1",
           result: "approved",
-          resolved_at: "2026-04-01T02:00:00.000Z",
-          run_id: "run-1"
-        }
-      })
-    ]);
-    const runtimeNotifier = { notifyEntry: vi.fn() };
-    const service = createSoulApprovalService({
-      eventLogRepo,
-      runLookup: vi.fn(async () => ({
-        run_id: "run-1",
-        workspace_id: "ws-1"
-      })),
-      runtimeNotifier,
-      now: () => "2026-04-01T01:30:00.000Z"
-    });
+          payload_json: {
+            approval_id: "approval-1",
+            result: "approved",
+            resolved_at: "2026-04-01T02:00:00.000Z",
+            run_id: "run-1"
+          }
+        })
+      ],
+      "2026-04-01T01:30:00.000Z"
+    );
 
     await expect(
       service.reject({
@@ -151,26 +157,19 @@ describe("SoulApprovalService", () => {
   });
 
   it("preserves the requested message_id and description when resolving an approval", async () => {
-    const eventLogRepo = createEventLogRepo([
-      createApprovalRequestedEvent({
-        approvalId: "approval-1",
-        runId: "run-1",
-        messageId: "msg-request-1",
-        description: "Review cross-cutting permission merge",
-        riskLevel: "high",
-        sourceKind: "governance"
-      })
-    ]);
-    const runtimeNotifier = { notifyEntry: vi.fn() };
-    const service = createSoulApprovalService({
-      eventLogRepo,
-      runLookup: vi.fn(async () => ({
-        run_id: "run-1",
-        workspace_id: "ws-1"
-      })),
-      runtimeNotifier,
-      now: () => "2026-04-01T03:00:00.000Z"
-    });
+    const { eventLogRepo, runtimeNotifier, service } = createWiredApprovalService(
+      [
+        createApprovalRequestedEvent({
+          approvalId: "approval-1",
+          runId: "run-1",
+          messageId: "msg-request-1",
+          description: "Review cross-cutting permission merge",
+          riskLevel: "high",
+          sourceKind: "governance"
+        })
+      ],
+      "2026-04-01T03:00:00.000Z"
+    );
 
     await expect(
       service.approve({
@@ -213,30 +212,23 @@ describe("SoulApprovalService", () => {
   });
 
   it("uses the highest observed revision plus one even when revisions are non-consecutive", async () => {
-    const eventLogRepo = createEventLogRepo([
-      createApprovalRequestedEvent({
-        approvalId: "approval-1",
-        runId: "run-1",
-        revision: 2
-      }),
-      createApprovalRequestedEvent({
-        approvalId: "approval-1",
-        runId: "run-1",
-        revision: 7,
-        messageId: "msg-request-latest",
-        description: "Latest approval request"
-      })
-    ]);
-    const runtimeNotifier = { notifyEntry: vi.fn() };
-    const service = createSoulApprovalService({
-      eventLogRepo,
-      runLookup: vi.fn(async () => ({
-        run_id: "run-1",
-        workspace_id: "ws-1"
-      })),
-      runtimeNotifier,
-      now: () => "2026-04-01T04:00:00.000Z"
-    });
+    const { eventLogRepo, service } = createWiredApprovalService(
+      [
+        createApprovalRequestedEvent({
+          approvalId: "approval-1",
+          runId: "run-1",
+          revision: 2
+        }),
+        createApprovalRequestedEvent({
+          approvalId: "approval-1",
+          runId: "run-1",
+          revision: 7,
+          messageId: "msg-request-latest",
+          description: "Latest approval request"
+        })
+      ],
+      "2026-04-01T04:00:00.000Z"
+    );
 
     await expect(
       service.approve({
@@ -262,7 +254,7 @@ describe("SoulApprovalService", () => {
   });
 
   it("resolves approvals with large histories without spreading all revisions into Math.max", async () => {
-    const eventLogRepo = createEventLogRepo(
+    const { eventLogRepo, service } = createWiredApprovalService(
       Array.from({ length: 300_000 }, (_, index) =>
         createApprovalRequestedEvent({
           approvalId: "approval-1",
@@ -271,18 +263,9 @@ describe("SoulApprovalService", () => {
           messageId: `msg-request-${index}`,
           description: `Approval request ${index}`
         })
-      )
+      ),
+      "2026-04-01T04:30:00.000Z"
     );
-    const runtimeNotifier = { notifyEntry: vi.fn() };
-    const service = createSoulApprovalService({
-      eventLogRepo,
-      runLookup: vi.fn(async () => ({
-        run_id: "run-1",
-        workspace_id: "ws-1"
-      })),
-      runtimeNotifier,
-      now: () => "2026-04-01T04:30:00.000Z"
-    });
 
     await expect(
       service.approve({
@@ -308,34 +291,27 @@ describe("SoulApprovalService", () => {
   });
 
   it("throws VALIDATION when a resolved approval event payload is malformed", async () => {
-    const eventLogRepo = createEventLogRepo([
-      createApprovalRequestedEvent({
-        approvalId: "approval-1",
-        runId: "run-1"
-      }),
-      createApprovalResolvedEvent({
-        approvalId: "approval-1",
-        runId: "run-1",
-        result: "approved",
-        payload_json: {
-          approval_id: "approval-1",
+    const { eventLogRepo, runtimeNotifier, service } = createWiredApprovalService(
+      [
+        createApprovalRequestedEvent({
+          approvalId: "approval-1",
+          runId: "run-1"
+        }),
+        createApprovalResolvedEvent({
+          approvalId: "approval-1",
+          runId: "run-1",
           result: "approved",
-          description: "Already resolved",
-          resolved_at: "2026-04-01T02:00:00.000Z",
-          run_id: "run-1"
-        }
-      })
-    ]);
-    const runtimeNotifier = { notifyEntry: vi.fn() };
-    const service = createSoulApprovalService({
-      eventLogRepo,
-      runLookup: vi.fn(async () => ({
-        run_id: "run-1",
-        workspace_id: "ws-1"
-      })),
-      runtimeNotifier,
-      now: () => "2026-04-01T05:00:00.000Z"
-    });
+          payload_json: {
+            approval_id: "approval-1",
+            result: "approved",
+            description: "Already resolved",
+            resolved_at: "2026-04-01T02:00:00.000Z",
+            run_id: "run-1"
+          }
+        })
+      ],
+      "2026-04-01T05:00:00.000Z"
+    );
 
     await expect(
       service.reject({
@@ -355,17 +331,20 @@ describe("SoulApprovalService", () => {
 
 function createEventLogRepo(
   entries: readonly Record<string, unknown>[]
-): Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"] {
+): Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"] & EventPublisherEventLogRepoPort {
   type EventLogRepoPort = Parameters<typeof createSoulApprovalService>[0]["eventLogRepo"];
-  type EventLogEntry = Awaited<ReturnType<EventLogRepoPort["append"]>>;
+  type EventLogEntry = Awaited<ReturnType<EventPublisherEventLogRepoPort["append"]>>;
   return {
-    queryByEntity: vi.fn<EventLogRepoPort["queryByEntity"]>(async (entityType, entityId) =>
-      (entries as readonly EventLogEntry[]).filter(
-        (entry) => entry.entity_type === entityType && entry.entity_id === entityId
-      )
+    queryByEntityInCurrentTransaction: vi.fn<EventLogRepoPort["queryByEntityInCurrentTransaction"]>(
+      (entityType, entityId) =>
+        (entries as readonly EventLogEntry[]).filter(
+          (entry) => entry.entity_type === entityType && entry.entity_id === entityId
+        )
     ),
-    append: vi.fn<EventLogRepoPort["append"]>(
-      (entry: Parameters<EventLogRepoPort["append"]>[0]) =>
+    transactional: <T>(fn: () => T): T => fn(),
+    deleteById: vi.fn(),
+    append: vi.fn<EventPublisherEventLogRepoPort["append"]>(
+      (entry: Parameters<EventPublisherEventLogRepoPort["append"]>[0]) =>
         ({
           event_id: "event-resolved-1",
           created_at: "2026-04-01T03:00:00.000Z",

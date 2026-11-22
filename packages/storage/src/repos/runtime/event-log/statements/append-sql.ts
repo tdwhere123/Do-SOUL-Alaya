@@ -2,7 +2,7 @@
  * Shared event_log row column order for INSERT and SELECT paths.
  * Sync binds a precomputed revision in-txn; worker CAS stays in payload SQL.
  */
-export const EVENT_LOG_INSERT_COLUMNS = [
+const EVENT_LOG_INSERT_COLUMNS = [
   "event_id",
   "event_type",
   "entity_type",

@@ -4,7 +4,7 @@ import {
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
 } from "../path-relation-repo.js";
 
-export interface SqliteEdgeProposalStatement {
+interface SqliteEdgeProposalStatement {
   readonly source: string;
   run(...args: readonly unknown[]): { readonly changes: number };
   get(...args: readonly unknown[]): unknown;

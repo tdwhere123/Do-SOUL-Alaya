@@ -7,6 +7,7 @@ import {
   type FieldObservationEffect
 } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { absorbObservations } from "../../../../recall/conditional-field/engine/field-update.js";
+import { indexedIdentityWork } from "../../../../recall/conditional-field/engine/state-endpoint-index.js";
 import {
   QUERY_ID,
   SNAPSHOT_ID,
@@ -191,6 +192,26 @@ describe("field state ownership", () => {
     expect(retried.retention_rejected).toBeUndefined();
     expect(retried.guaranteed_transitions.map(row => row.relation_kind)).toEqual(["accepted"]);
     expect(rejected.guaranteed_transitions).toHaveLength(0);
+  });
+
+  it("settles work and cumulative allocation when a partially solved observation page rolls back", () => {
+    const settled = createField();
+    const paused = applyObserverPage({ ...settled, remaining_exploration: indexedIdentityWork(settled) + 1, remaining_reserve: 0 }, {
+      page: page(),
+      effects: [{ observation_id: "partial", transition: transition("partial", true) }]
+    });
+    expect(paused.retention_rejected).toBeUndefined();
+    expect(paused.remaining_work.some(work => work.kind === "relaxation")).toBe(true);
+    const initial = { ...paused, remaining_reserve: 1 };
+    const rejected = applyObserverPage(initial, { page: page(), work: { work_units: 1 } });
+    expect(rejected.retention_rejected).toBe("work");
+    expect(rejected.binding).toBe(initial.binding);
+    expect(rejected.remaining_memory_bytes).toBe(initial.remaining_memory_bytes);
+    expect(rejected.remaining_exploration).toBe(0);
+    expect(rejected.remaining_reserve).toBe(0);
+    expect(rejected.solver_completed_work).toBe((initial.solver_completed_work ?? 0) + 1);
+    expect(rejected.solver_retained_work).toBe(initial.solver_retained_work);
+    expect(rejected.admitted_allocation_bytes).toBeGreaterThan(initial.admitted_allocation_bytes);
   });
 
   it.each(["resolved", "unsupported"] as const)("initializes independent routing progress for %s fields", status => {

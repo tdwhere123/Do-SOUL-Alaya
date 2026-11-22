@@ -189,7 +189,7 @@ function parseJsonField(value: string, fieldName: string): unknown {
   }
 }
 
-export function appendUniqueEvidenceBasis(
+function appendUniqueEvidenceBasis(
   current: readonly string[],
   ...nextValues: readonly string[]
 ): readonly string[] {

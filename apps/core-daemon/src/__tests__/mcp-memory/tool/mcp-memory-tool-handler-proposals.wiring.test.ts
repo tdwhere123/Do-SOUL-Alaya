@@ -457,7 +457,7 @@ describe("mcp memory tool handler wiring", () => {
       error: {
         code: "VALIDATION",
         message:
-          "Review requires a human reviewer surface (Inspector/alaya review); attached agents cannot review."
+          "Review requires a human reviewer surface (HTTP reviewer / alaya review); attached agents cannot review."
       }
     });
     expect(deps.edgeProposalService?.batchReview).not.toHaveBeenCalled();

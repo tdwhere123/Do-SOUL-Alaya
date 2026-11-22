@@ -14,16 +14,20 @@ import { isRetiredProposalDossier, isSynthesisCreateProposalDossier } from "@do-
 import type { McpMemoryToolCallContext } from "../tool/tool-handler.js";
 import { createWorkflowError } from "../tool/mcp-tool-error.js";
 import type { McpMemoryProposalWorkflowDependencies } from "./proposal-workflow.js";
+import type { ProposalResolutionEventInput } from "./proposal-workflow-types.js";
+import type { ProposalReviewResolutionOptions } from "./phases/review-resolution.js";
 import {
   prepareAcceptedPrivacyErase,
   type AcceptedPrivacyEraseApply
 } from "./phases/privacy-erase.js";
 import { prepareAcceptedMemoryUpdate } from "./phases/memory-update-acceptance.js";
-type ProposalResolutionEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
-type ProposalReviewResolutionOptions = Readonly<{
-  readonly reviewerIdentity: string;
-  readonly applySynchronousResolutionMutation?: () => readonly ProposalResolutionEventInput[];
-}>;
+import {
+  buildAcceptedGreenRevocationEvent,
+  buildAcceptedMemoryEvent,
+  buildAcceptedPathRelationEvent,
+  buildAcceptedSynthesisEvent
+} from "./phases/accepted-mutation-events.js";
+
 type AcceptedProposalApply =
   | AcceptedPrivacyEraseApply
   | Readonly<{
@@ -50,7 +54,6 @@ type AcceptedProposalApply =
       readonly synthesisCreate: Readonly<{
         readonly workspace_id: string;
         readonly capsule: SynthesisCapsule;
-        readonly caused_by: string;
       }>;
     }>;
 type AcceptedProposalScope = Readonly<{
@@ -98,6 +101,7 @@ function prepareAcceptedPrivacyProposal(
   return prepareAcceptedPrivacyErase({
     deps,
     proposalId,
+    proposalRuntimeId: scopedProposal.proposal.runtime_id,
     targetObjectKind: scopedProposal.target_object_kind,
     targetObjectId: resolveProposalTargetObjectId(scopedProposal, proposalId),
     proposedChanges: scopedProposal.proposed_changes,
@@ -166,13 +170,17 @@ export async function acceptProposalWithDurableMemoryUpdate(
     );
   }
 
+  const { caused_by, ...mutation } = memoryUpdate;
   return await deps.proposalRepo.acceptPendingMemoryUpdateWithEvents(
     proposalId,
     reviewedAt,
     reviewEvents,
     {
-      ...memoryUpdate,
-      updated_at: reviewedAt
+      ...mutation,
+      updated_at: reviewedAt,
+      buildMemoryEvent: (memory) => buildAcceptedMemoryEvent(memory, mutation.proposed_changes, caused_by),
+      buildGreenRevocationEvent: (memory, greenStatusId) =>
+        buildAcceptedGreenRevocationEvent(memory, greenStatusId, caused_by, reviewedAt)
     },
     options
   );
@@ -207,7 +215,9 @@ export async function acceptProposalWithDurablePathRelationGovernance(
     reviewEvents,
     {
       ...pathRelationGovernance,
-      updated_at: reviewedAt
+      updated_at: reviewedAt,
+      buildEvent: (relation, previous, runId) =>
+        buildAcceptedPathRelationEvent(relation, previous, runId, pathRelationGovernance.caused_by)
     },
     options
   );
@@ -221,7 +231,6 @@ export async function acceptProposalWithDurableSynthesisCreate(
   synthesisCreate: Readonly<{
     readonly workspace_id: string;
     readonly capsule: SynthesisCapsule;
-    readonly caused_by: string;
   }>,
   options: ProposalReviewResolutionOptions
 ): Promise<Readonly<{
@@ -239,7 +248,7 @@ export async function acceptProposalWithDurableSynthesisCreate(
     proposalId,
     reviewedAt,
     reviewEvents,
-    synthesisCreate,
+    { ...synthesisCreate, event: buildAcceptedSynthesisEvent(synthesisCreate.capsule) },
     options
   );
 }
@@ -311,7 +320,7 @@ async function prepareAcceptedSynthesisCreate(
     context.workspaceId
   );
   const timestamp = now();
-  const capsule = parseSynthesisCapsuleForAccept({
+  const capsule = SynthesisCapsuleSchema.parse({
     object_id: generateObjectId(),
     object_kind: "synthesis_capsule",
     schema_version: 1,
@@ -333,8 +342,7 @@ async function prepareAcceptedSynthesisCreate(
     kind: "synthesis_create",
     synthesisCreate: {
       workspace_id: context.workspaceId,
-      capsule,
-      caused_by: `proposal_accept:${proposalId}`
+      capsule
     }
   };
 }
@@ -481,10 +489,6 @@ function buildDeterministicSynthesisSummary(
     return summary;
   }
   return summary.slice(0, SYNTHESIS_SUMMARY_MAX_LENGTH);
-}
-
-function parseSynthesisCapsuleForAccept(value: unknown): SynthesisCapsule {
-  return SynthesisCapsuleSchema.parse(value);
 }
 
 function createAcceptanceError(

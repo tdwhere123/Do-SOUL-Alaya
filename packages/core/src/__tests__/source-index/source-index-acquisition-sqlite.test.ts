@@ -1,25 +1,17 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   sourceIndexProfileId, type SourceIndexQueryVector, type SourceIndexScopeAdmission
 } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition } from "../../source-index/source-index-acquisition.js";
 import {
-  WORKSPACE, configuration, fieldSha256, fixture, publishSource, type Fixture
+  WORKSPACE, configuration, fieldSha256, publishSource
 } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import {
-  AXIS_ROOTS, QUERY_BUDGET, admitScope, digest, expectBounded, expectMetadataOnly, publishIndex, query, queryInput
+  AXIS_ROOTS, QUERY_BUDGET, admitScope, digest, expectBounded, expectMetadataOnly, publishIndex, query, queryInput,
+  registerAcquisitionEnvironments
 } from "./source-index-acquisition-fixture.js";
 
-const environments: Fixture[] = [];
-afterEach(() => {
-  vi.restoreAllMocks();
-  for (const environment of environments.splice(0)) environment.database.close();
-});
-function setup() {
-  const environment = fixture();
-  environments.push(environment);
-  return environment;
-}
+const setup = registerAcquisitionEnvironments();
 const compareKey = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
 
 describe("source index acquisition through native SQLite", () => {
@@ -287,4 +279,120 @@ describe("explicit adapter/input injections, not native boundary evidence", () =
     expect(result.nominations.every(candidate => candidate.vector === null)).toBe(true);
     expect(result.completion).toBe("partial");
   });
+});
+
+// Latin and CJK terms put every root into both lexical lanes.
+const REUSE_NAVIGATION = "alpha 部署流水线";
+const REUSE_ROOTS = ["aa", "bb"].map(id => ({ id, body: `${REUSE_NAVIGATION} ${id}`, vectors: [[1, 0, 0]] }));
+
+describe("one acquisition decides each root once per binding mode", () => {
+  function setupReuse() {
+    const environment = setup();
+    const config = configuration({ window_bytes: 64 });
+    publishIndex(environment, REUSE_ROOTS, config);
+    return { environment, config };
+  }
+
+  it("reuses a root's admission when both lexical lanes nominate it", () => {
+    const { environment, config } = setupReuse();
+    const admit = vi.spyOn(environment.index, "admitQueryCandidate");
+    const input = queryInput(config, { navigation_text: REUSE_NAVIGATION, vector: { status: "unavailable", reason: "not_requested" } });
+    const result = query(environment, input, admitScope);
+    expect(result.accounting).toMatchObject({ attempted: 4, admitted: 2, duplicate: 2, rejected: 0 });
+    expect(result.nominations.map(nomination => nomination.lexical.map(rank => rank.lane)))
+      .toEqual([["unicode61", "trigram"], ["unicode61", "trigram"]]);
+    expect(admit).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the vector binding check separate from the unbound lexical admission", () => {
+    const { environment, config } = setupReuse();
+    const admit = vi.spyOn(environment.index, "admitQueryCandidate");
+    const base = queryInput(config, { navigation_text: REUSE_NAVIGATION });
+    if (base.vector.status !== "available") throw new Error("expected query vector");
+    const result = query(environment, { ...base, vector: { ...base.vector, input_digest: digest(REUSE_NAVIGATION) } }, admitScope);
+    expect(result.accounting).toMatchObject({ attempted: 6, admitted: 2, duplicate: 4, rejected: 0 });
+    expect(admit.mock.calls.filter(call => call[1] === null)).toHaveLength(2);
+    expect(admit.mock.calls.filter(call => call[1] !== null)).toHaveLength(2);
+  });
+});
+
+describe("supplied vector validation against real SQLite index states", () => {
+  it("validates a supplied vector even when the selected native generation is valid empty", () => {
+    const environment = setup();
+    publishIndex(environment, []);
+    const input = queryInput();
+    if (input.vector.status !== "available") throw new Error("expected supplied query vector");
+    const result = query(environment, input, admitScope);
+    expectBounded(result, input);
+    expect(result.vector).toMatchObject({ completion: "complete", reason: null, state: { status: "valid_empty" },
+      validation: "validated", inspected_windows: 0, invalid_windows: 0, input: { status: "available",
+        profile_id: input.vector.profile_id, input_digest: input.vector.input_digest } });
+    expect(result.completion).toBe("complete");
+    expect(result.nominations).toEqual([]);
+    expect(result.accounting).toEqual({ attempted: 0, admitted: 0, duplicate: 0, rejected: 0, scope_denied: 0,
+      native_unknown: 0, resource_refused: 0, stale: 0, nomination_limit: 0 });
+    expect(result.resource_refusals).toEqual([]);
+    expect(result.limitations).toContain("nominations_are_not_source_absence");
+  });
+
+  it("keeps genuinely unavailable preparation unavailable and not applicable without running vector reads", () => {
+    const environment = setup();
+    const { documents } = publishIndex(environment, [AXIS_ROOTS[0]!]);
+    const scan = vi.spyOn(environment.index, "readVectorCandidates");
+    const input = queryInput(configuration(), { vector: { status: "unavailable", reason: "query_unavailable" } });
+    const result = query(environment, input, admitScope);
+    expectBounded(result, input);
+    expect(result.vector).toMatchObject({ completion: "unavailable", reason: "query_unavailable", state: null,
+      validation: "not_applicable", inspected_windows: 0, invalid_windows: 0,
+      input: { status: "unavailable", reason: "query_unavailable" } });
+    expect(result.nominations.map(nomination => nomination.source)).toEqual([documents[0]!.source]);
+    expect(result.nominations[0]!.vector).toBeNull();
+    expect(result.completion).toBe("partial");
+    expect(result.accounting).toEqual({ attempted: 1, admitted: 1, duplicate: 0, rejected: 0, scope_denied: 0,
+      native_unknown: 0, resource_refused: 0, stale: 0, nomination_limit: 0 });
+    expect(result.resource_refusals).toEqual([]);
+    expect(scan).not.toHaveBeenCalled();
+  });
+});
+
+describe("explicit injected reader/transport outcomes, not native error-boundary evidence", () => {
+  it.each(["lexical", "vector", "both", "none"] as const)(
+    "reports unavailable lanes with %s retained nominations without discarding admitted results", retained => {
+      const environment = setup();
+      const { documents } = publishIndex(environment, [AXIS_ROOTS[0]!]);
+      const lexical = environment.index.readLexicalCandidates.bind(environment.index);
+      const vector = environment.index.readVectorCandidates.bind(environment.index);
+      const keepLexical = retained === "lexical" || retained === "both";
+      const keepVector = retained === "vector" || retained === "both";
+      // Real rows/resources are retained selectively; only the reader's final error outcome is injected.
+      vi.spyOn(environment.index, "readLexicalCandidates").mockImplementation((...args) => {
+        const page = lexical(...args);
+        return { ...page, candidates: keepLexical ? page.candidates : [], completion: "unavailable", reason: "native_query_failed" };
+      });
+      vi.spyOn(environment.index, "readVectorCandidates").mockImplementation((...args) => {
+        const page = vector(...args);
+        return { ...page, candidates: keepVector ? page.candidates : [], completion: "unavailable", reason: "native_query_failed" };
+      });
+      const input = queryInput();
+      const result = query(environment, input, admitScope);
+      expectBounded(result, input);
+      expect(result.lexical).toMatchObject({ completion: "unavailable", reason: "native_query_failed" });
+      expect(result.vector).toMatchObject({ completion: "unavailable", reason: "native_query_failed", validation: "validated",
+        inspected_windows: 1, state: { status: "ready" } });
+      expect(result.completion).toBe(retained === "none" ? "unavailable" : "partial");
+      expect(result.accounting).toEqual({ attempted: Number(keepLexical) + Number(keepVector),
+        admitted: retained === "none" ? 0 : 1, duplicate: retained === "both" ? 1 : 0, rejected: 0,
+        scope_denied: 0, native_unknown: 0, resource_refused: 0, stale: 0, nomination_limit: 0 });
+      expect(result.resource_refusals).toEqual([]);
+      expect(result.nominations.map(nomination => nomination.source)).toEqual(retained === "none" ? [] : [documents[0]!.source]);
+      if (retained === "none") return;
+      expect(result.nominations[0]!.lexical).toEqual(keepLexical
+        ? [{ rank: 1, lane: "unicode61", lane_rank: 1, bm25: expect.any(Number) }] : []);
+      if (keepVector) {
+        expect(result.nominations[0]!.vector?.rank).toBe(1);
+        expect(result.nominations[0]!.vector?.cosine).toBeCloseTo(0.6, 12);
+        expect(result.nominations[0]!.vector?.window).toEqual({ window_id: documents[0]!.windows[0]!.window_id,
+          start_byte: 0, end_byte: 8, content_digest: digest("needle a") });
+      } else expect(result.nominations[0]!.vector).toBeNull();
+    });
 });

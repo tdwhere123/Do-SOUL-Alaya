@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
@@ -87,6 +87,57 @@ describe("SqliteWorkspaceRepo", () => {
 
     expect(page.map((workspace) => workspace.workspace_id)).toEqual(["ws_page_2"]);
     await expect(workspaceRepo.count()).resolves.toBe(3);
+  });
+
+  it("filters allowlisted workspaces in SQL before limit/offset and short-circuits empty allowlists", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    databases.add(database);
+    const workspaceRepo = new SqliteWorkspaceRepo(database);
+
+    for (const workspaceId of ["ws_1", "ws_2", "ws_3", "ws_4", "ws_5"]) {
+      workspaceRepo.create({
+        workspace_id: workspaceId,
+        name: workspaceId,
+        root_path: `/tmp/${workspaceId}`,
+        workspace_kind: WorkspaceKind.MIXED,
+        default_engine_binding: null,
+        workspace_state: WorkspaceState.ACTIVE
+      });
+    }
+
+    const multiPage = await workspaceRepo.list(
+      { limit: 2, offset: 1 },
+      { kind: "allowlist", workspaceIds: ["ws_1", "ws_3", "ws_5"] }
+    );
+    expect(multiPage.map((workspace) => workspace.workspace_id)).toEqual(["ws_3", "ws_5"]);
+    await expect(
+      workspaceRepo.count({ kind: "allowlist", workspaceIds: ["ws_1", "ws_3", "ws_5"] })
+    ).resolves.toBe(3);
+
+    const single = await workspaceRepo.list(
+      { limit: 10, offset: 0 },
+      { kind: "allowlist", workspaceIds: ["ws_4"] }
+    );
+    expect(single.map((workspace) => workspace.workspace_id)).toEqual(["ws_4"]);
+    await expect(
+      workspaceRepo.count({ kind: "allowlist", workspaceIds: ["ws_4"] })
+    ).resolves.toBe(1);
+
+    const prepareSpy = vi.spyOn(database.connection, "prepare");
+    await expect(
+      workspaceRepo.list({ limit: 10, offset: 0 }, { kind: "allowlist", workspaceIds: [] })
+    ).resolves.toEqual([]);
+    await expect(
+      workspaceRepo.count({ kind: "allowlist", workspaceIds: [] })
+    ).resolves.toBe(0);
+    expect(prepareSpy).not.toHaveBeenCalled();
+
+    await expect(
+      workspaceRepo.list({ limit: 10, offset: 0 }, { kind: "allowlist", workspaceIds: [" ws_4 "] })
+    ).resolves.toEqual([]);
+    await expect(
+      workspaceRepo.count({ kind: "allowlist", workspaceIds: [" ws_4 "] })
+    ).resolves.toBe(0);
   });
 
   it("delete removes an existing workspace", async () => {

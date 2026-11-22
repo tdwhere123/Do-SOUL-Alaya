@@ -199,7 +199,7 @@ export function createDependencies(seed?: {
       findByWorkspace: vi.fn(async (workspaceId) =>
         [...bindingStore.values()].filter((record) => record.binding.workspace_id === workspaceId)
       ),
-      updateState: vi.fn((bindingId, bindingState, updatedAt) => {
+      updateState: vi.fn((bindingId, _workspaceId, bindingState, updatedAt) => {
         order.push("binding_update");
         const existing = bindingStore.get(bindingId);
 

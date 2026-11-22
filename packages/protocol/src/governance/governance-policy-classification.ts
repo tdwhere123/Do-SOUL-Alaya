@@ -14,7 +14,3 @@ export const GovernanceResolutionPolicyClassificationSchema = z.enum([
   "track_only",
   "inspect_later"
 ]);
-
-export type GovernanceResolutionPolicyClassification = z.infer<
-  typeof GovernanceResolutionPolicyClassificationSchema
->;

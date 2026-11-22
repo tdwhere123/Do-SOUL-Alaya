@@ -1,10 +1,7 @@
-import { createHash } from "node:crypto";
-import { writeRetainedSourceChunks } from "../field/retained-source-chunks.js";
+import { insertEvidenceCapsule } from "./writes/insert-evidence-capsule.js";
 import {
   IsoDatetimeStringSchema,
   type EvidenceCapsule,
-  type EvidenceFactFrameFormationCapture,
-  type OpenSemanticFactorFormationCapture,
   type EvidenceSearchProjection,
   type EvidenceHealthState
 } from "@do-soul/alaya-protocol";
@@ -43,10 +40,6 @@ import {
 } from "./statements/evidence-capsule-statements.js";
 import { RecallQualifiedEvidenceReader } from "./reads/recall-qualified-evidence-reader.js";
 import { BoundedCapsuleSourceReader } from "./reads/bounded-capsule-source-reader.js";
-import { prepareFactFrameFormationInsert } from
-  "./writes/fact-frame-formation/capture-store.js";
-import { prepareSemanticFactorFormationInsert } from
-  "./writes/semantic-factor-formation/capture-store.js";
 import { EvidenceProjectionIntegrityError } from
   "./reads/qualification/qualified-evidence-projection.js";
 import type {
@@ -154,18 +147,11 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   public async create(
     capsule: EvidenceCapsule,
     searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
-    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
-    , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
-      .EvidenceOsfSemanticCompletenessReceipt>,
     sourceProvenance = false
   ): Promise<Readonly<EvidenceCapsule>> {
     const run = () => this.createInCurrentTransaction(
       capsule,
       searchProjections,
-      factFrameFormation,
-      semanticFactorFormation,
-      semanticCompleteness,
       sourceProvenance
     );
     if (this.db.connection.inTransaction) {
@@ -177,30 +163,18 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   public createInCurrentTransaction(
     capsule: EvidenceCapsule,
     searchProjections: readonly Readonly<EvidenceSearchProjection>[] = [],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
-    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>
-    , semanticCompleteness?: Readonly<import("@do-soul/alaya-protocol")
-      .EvidenceOsfSemanticCompletenessReceipt>,
     sourceProvenance = false
   ): Readonly<EvidenceCapsule> {
     const parsedCapsule = parseEvidenceCapsule(capsule);
-    const formationInsert = prepareFactFrameFormationInsert(
-      parsedCapsule,
-      searchProjections,
-      factFrameFormation
-    );
-    const semanticFormationInsert = prepareSemanticFactorFormationInsert(
-      parsedCapsule,
-      semanticFactorFormation,
-      semanticCompleteness,
-      factFrameFormation
-    );
+    if (searchProjections.some(({ projection_kind }) => projection_kind === "fact_key")) {
+      throw new StorageError("VALIDATION_FAILED", "Fact-key projections are not accepted on evidence creation");
+    }
     try {
-      this.insertCreatedCapsule(
+      insertEvidenceCapsule(
+        this.db,
+        this.statements,
         parsedCapsule,
         searchProjections,
-        formationInsert,
-        semanticFormationInsert,
         sourceProvenance
       );
     } catch (error) {
@@ -213,69 +187,10 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     return parsedCapsule;
   }
 
-  private insertCreatedCapsule(
-    parsedCapsule: EvidenceCapsule,
-    searchProjections: readonly Readonly<EvidenceSearchProjection>[],
-    formationInsert: ReturnType<typeof prepareFactFrameFormationInsert>,
-    semanticFormationInsert: ReturnType<typeof prepareSemanticFactorFormationInsert>,
-    sourceProvenance: boolean
-  ): void {
-    this.statements.createStatement.run(
-      parsedCapsule.object_id,
-      parsedCapsule.object_kind,
-      parsedCapsule.schema_version,
-      parsedCapsule.lifecycle_state,
-      parsedCapsule.created_at,
-      parsedCapsule.updated_at,
-      parsedCapsule.created_by,
-      parsedCapsule.evidence_kind,
-      JSON.stringify(parsedCapsule.semantic_anchor),
-      parsedCapsule.event_anchor === null ? null : JSON.stringify(parsedCapsule.event_anchor),
-      parsedCapsule.physical_anchor === null ? null : JSON.stringify(parsedCapsule.physical_anchor),
-      parsedCapsule.evidence_health_state,
-      parsedCapsule.gist,
-      parsedCapsule.excerpt,
-      parsedCapsule.source_hash,
-      parsedCapsule.run_id,
-      parsedCapsule.workspace_id,
-      parsedCapsule.surface_id,
-      `sha256:${createHash("sha256").update(parsedCapsule.excerpt ?? parsedCapsule.gist, "utf8").digest("hex")}`,
-      Buffer.byteLength(parsedCapsule.excerpt ?? parsedCapsule.gist, "utf8"),
-      parsedCapsule.event_anchor?.occurred_at ?? null
-    );
-    if (sourceProvenance) {
-      // Shared INSERT omits this later column so create still works before migration 027.
-      this.db.connection.prepare(
-        "UPDATE evidence_capsules SET source_provenance = 1 WHERE object_id = ?"
-      ).run(parsedCapsule.object_id);
-    }
-    const retained = parsedCapsule.excerpt ?? parsedCapsule.gist;
-    writeRetainedSourceChunks(this.db, { workspaceId: parsedCapsule.workspace_id, kind: "evidence_capsule",
-      rootId: parsedCapsule.object_id, revision: parsedCapsule.updated_at,
-      digest: `sha256:${createHash("sha256").update(retained, "utf8").digest("hex")}` }, retained);
-    for (const projection of searchProjections) {
-      this.statements.createSearchProjectionStatement.run(
-        parsedCapsule.object_id,
-        projection.projection_id,
-        projection.projection_kind,
-        parsedCapsule.workspace_id,
-        parsedCapsule.source_hash,
-        projection.content
-      );
-    }
-    if (formationInsert !== null) {
-      this.statements.createFactFrameFormationStatement.run(...formationInsert);
-    }
-    if (semanticFormationInsert !== null) {
-      this.statements.createSemanticFactorFormationStatement.run(
-        ...semanticFormationInsert
-      );
-    }
-  }
-
-  public async deleteById(objectId: string): Promise<void> {
+  public async deleteById(objectId: string, workspaceId: string): Promise<void> {
     try {
-      this.activeConnection().prepare("DELETE FROM evidence_capsules WHERE object_id = ?").run(objectId);
+      this.activeConnection().prepare("DELETE FROM evidence_capsules WHERE object_id = ? AND workspace_id = ?")
+        .run(objectId, workspaceId);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to delete evidence capsule ${objectId}.`, error);
     }
@@ -487,22 +402,6 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     return await this.findByHealthPage(health, DEFAULT_EVIDENCE_PAGE);
   }
 
-  public async findByHealthAll(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]> {
-    const parsedHealth = parseEvidenceHealthState(health);
-
-    try {
-      return parseRows(
-        this.statements.findByHealthStatement.all(parsedHealth),
-        EvidenceCapsuleRowParser,
-        "evidence capsule row"
-      );
-    } catch (error) {
-      throw wrapEvidenceCapsuleQueryError(
-        `Failed to list all evidence capsules by health state ${parsedHealth}.`,
-        error
-      );
-    }
-  }
 
   public async findByHealthPage(
     health: EvidenceHealthState,

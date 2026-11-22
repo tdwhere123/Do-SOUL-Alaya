@@ -7,10 +7,10 @@ import {
   type RecallFieldDigest
 } from "./field-identity.js";
 
-export const RECALL_FINITE_FIELD_CHANNEL_CAPTURE_OPERATOR_ID =
+const RECALL_FINITE_FIELD_CHANNEL_CAPTURE_OPERATOR_ID =
   "recall_finite_field_channel_capture_v1";
 
-export const RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1 = Object.freeze([
+const RECALL_RETRIEVAL_FIELD_CHANNEL_CATALOG_V1 = Object.freeze([
   "lexical_relaxed_exact",
   "lexical_relaxed_porter",
   "lexical_relaxed_trigram",

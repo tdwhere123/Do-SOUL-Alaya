@@ -80,8 +80,9 @@ it("quarantines an ordinary dispatched call until the real native lock releases 
     expect(original.threadId).toBeGreaterThan(0); expect(gate.inTransaction).toBe(true);
     posts.mockClear();
     let settled = false;
-    const next = client.memoryRepo.findByWorkspaceId(WS).finally(() => { settled = true; });
-    const result = expect(next).resolves.toEqual([]);
+    const next = client.activeConstraintsPort.findActiveConstraints({ workspaceId: WS, cap: 8 })
+      .finally(() => { settled = true; });
+    const result = expect(next).resolves.toEqual({ constraints: [], total_count: 0 });
     await new Promise(resolve => setImmediate(resolve));
     expect(settled).toBe(false); expect(posts).not.toHaveBeenCalled(); expect(workers.size).toBe(1);
     gate.exec("ROLLBACK"); await Promise.all([exit, result]);
@@ -106,6 +107,7 @@ it("removes an ordinary caller cancelled in the real worker acquisition queue wi
     release.resolve(); await holder;
     await new Promise(resolve => setImmediate(resolve));
     expect(posts).not.toHaveBeenCalled();
-    await expect(h.client.memoryRepo.findByWorkspaceId(WS)).resolves.toEqual([]);
+    await expect(h.client.activeConstraintsPort.findActiveConstraints({ workspaceId: WS, cap: 8 }))
+      .resolves.toEqual({ constraints: [], total_count: 0 });
   } finally { release.resolve(); await holder; await h.cleanup(); }
 });

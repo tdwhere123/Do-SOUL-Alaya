@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { EvidenceHealthState, sourceRecallTarget, type QueryInterpretation } from "@do-soul/alaya-protocol";
+import { EvidenceHealthState, SourceSemanticResourceLedger, sourceRecallTarget, type QueryInterpretation } from "@do-soul/alaya-protocol";
 import { SqliteEvidenceCapsuleRepo, SqliteFieldSourceRecordRepo, SqliteSourceRootRecallReader, type StorageDatabase } from "@do-soul/alaya-storage";
 import { observeConditionalField, startObserverCursor, toSourceRootObserverRow } from "../../../../recall/conditional-field/observers/observe.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
+import { nativeSourceReaders } from "../../../../recall/runtime/native-source-observer.js";
+import { openWorkspaceSourceTarget } from "../../../../memory/source-target-open.js";
 import { defaultBudget, defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 import { fieldSha256, hashedRecord, openFieldDatabase } from "../../../../../../storage/src/__tests__/repos/field/field-contract-fixture.js";
 
@@ -35,6 +37,59 @@ function createCapsule(capsules: SqliteEvidenceCapsuleRepo, body: string) {
 }
 
 describe("bounded source resource consumer contract", () => {
+  it("resumes a pinned frozen source at its SQLite byte offset after a refused read", () => {
+    const { records, reader } = fixture();
+    const record = records.insert(hashedRecord("workspace-1", "xxxxxxxxNEEDLE", "frozen-stream"));
+    const target = sourceRecallTarget({ workspace_id: "workspace-1", root_kind: "source_record",
+      root_id: record.record_id, source_version: record.source_version, content_digest: record.content_digest,
+      evidence_object_id: null });
+    const offsets: number[] = [];
+    const readers = nativeSourceReaders({ sourceRoot: ({ offset = 0, workLimit, byteLimit }) => {
+      offsets.push(offset);
+      const page = reader.hydrate("workspace-1", target, byteLimit, offset, 65536, workLimit);
+      return { ...page, row: page.row === null ? null : toSourceRootObserverRow(page.row) };
+    } }, { result: null, witness: [], admitted_roots: [target] },
+      new SourceSemanticResourceLedger({ work_units: 1_000, memory_bytes: 100_000 }));
+    const interpretation: QueryInterpretation = { ...query(), view: { ...query().view, enumeration_policy: "native_query" } };
+    const cursor = startObserverCursor({ cursor_id: "seed", region_id: "seed", snapshot_id: SNAPSHOT_ID,
+      query_id: interpretation.query_id });
+    const read = (from: typeof cursor, work_limit: number) => observeConditionalField({ workspace_id: "workspace-1",
+      query: interpretation, cursor: from, readers, source_byte_limit: 10, authorized_scopes: null,
+      action: { schema_version: 1, action: "seed", region_id: "seed", work_limit },
+      lease: { schema_version: 1, lease_id: "frozen-sources", status: "active", snapshot_id: SNAPSHOT_ID,
+        query_id: interpretation.query_id } });
+    const first = read(cursor, 100);
+    expect(first.page.observations[0]?.applicability.verdict).toBe("unresolved");
+    const sourceCursor = (value: typeof cursor) => JSON.parse(value.committed_through!.slice(2)).source as string;
+    const pinned = sourceCursor(first.page.cursor);
+    expect(pinned).toMatch(/^o:/u);
+    const blocked = read(first.page.cursor, 1);
+    expect(sourceCursor(blocked.page.cursor)).toBe(pinned);
+    const resumed = read(blocked.page.cursor, 100);
+    expect(offsets).toEqual([0, 10, 10]);
+    expect(resumed.page.observations[0]?.applicability.verdict).toBe("true");
+    expect(resumed.page.outcome.status).toBe("exhausted");
+    const malformed = `o:${JSON.stringify({ ...JSON.parse(pinned.slice(2)), rootId: "different-root" })}`;
+    expect(() => readers.sourceRoots!({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1, afterCursor: malformed }))
+      .toThrow(/Invalid frozen source stream pin/u);
+  });
+
+  it("rejects an open budget smaller than the next UTF-8 code point and still permits EOF", async () => {
+    const { records, reader } = fixture();
+    const record = records.insert(hashedRecord("workspace-1", "x界", "utf8-open"));
+    const input = { reader, workspaceId: "workspace-1", startOffset: 1, byteBudget: 1,
+      evaluatedAsOf: "2026-09-10T00:00:00.000Z",
+      sourceTarget: { root_kind: "source_record" as const, root_id: record.record_id,
+        source_version: record.source_version, content_digest: record.content_digest } };
+    await expect(openWorkspaceSourceTarget(input)).rejects.toMatchObject({ code: "VALIDATION",
+      message: expect.stringContaining("byte_budget") });
+    const complete = await openWorkspaceSourceTarget({ ...input, byteBudget: 3 });
+    expect(complete).toMatchObject({ target: { span: { content_start: 1, content_end: 4, content_complete: true } } });
+    await expect(openWorkspaceSourceTarget({ ...input, startOffset: 4 })).resolves.toMatchObject({
+      target: { span: { content_start: 4, content_end: 4, content_complete: true } }
+    });
+  });
+
   it("limits cumulative native bytes across all roots read in one observer request", () => {
     const { records, reader } = fixture();
     for (let index = 0; index < 8; index += 1) {

@@ -1,7 +1,7 @@
 import type { ReferenceTransportBatchSize } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
-import { mintOfficialApiAssertionWork, mintOfficialApiAssertionWorkFromCorpus, type MintedOfficialApiAssertionBinding } from "./extraction-request.js";
+import { mintOfficialApiAssertionWork, type MintedOfficialApiAssertionBinding } from "./extraction-request.js";
 import {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
@@ -12,9 +12,7 @@ import { indexSourceAssertions } from
 import { collectSourceRoleMarkers } from
   "../../triage/grounding/source-role/marker.js";
 import {
-  demultiplexTransportPack,
   planTurnTransportPacks,
-  type DemultiplexRejection,
   type TransportPack,
   type TransportPackPlan,
   type TransportPackPolicy
@@ -66,11 +64,6 @@ export function planOfficialApiSemanticWorkset(
 ): PlannedOfficialApiSemanticWorkset {
   const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages);
   return worksetFromMinted(sourceCorpus, mintOfficialApiAssertionWork(turnContent, messages, datasetRevision));
-}
-
-/** Replay already retains the canonical corpus; do not add role framing again. */
-export function officialApiSemanticWorksetFromSourceCorpus(sourceCorpus: string, datasetRevision?: string): PlannedOfficialApiSemanticWorkset {
-  return worksetFromMinted(sourceCorpus, mintOfficialApiAssertionWorkFromCorpus(sourceCorpus, [], datasetRevision));
 }
 
 function worksetFromMinted(sourceCorpus: string, work: readonly MintedOfficialApiAssertionBinding[]): PlannedOfficialApiSemanticWorkset {
@@ -151,13 +144,6 @@ export function planOfficialApiTransport(
       ? { kind: "reference_batch", assertionsPerPack: policy.assertionsPerPack }
       : policy
   );
-}
-
-export function materializeOfficialApiTransportResponse(
-  pack: TransportPack,
-  entries: readonly { readonly semanticKey?: string; readonly assertionId?: number }[]
-): { readonly admittedKeys: readonly string[]; readonly rejections: readonly DemultiplexRejection[] } {
-  return demultiplexTransportPack(pack, entries);
 }
 
 function freezeWorkset<T extends OfficialApiSemanticWorkUnit>(

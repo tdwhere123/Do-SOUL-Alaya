@@ -11,19 +11,19 @@ import { AlayaError,
 import { MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeCorrespondenceSemantics } from "./source-semantic-receive.js";
 import { buildSourceSemanticCorrespondenceRequest, semanticSha256, type SourceInterpretationDescriptor } from "./source-semantic-request.js";
 
-export type SourceSemanticLibraryProduceResult =
+type SourceSemanticLibraryProduceResult =
   | Readonly<{ rawJson: string }>
   | Readonly<{ status: "no_correspondence" }>
   | Readonly<{ status: "unattempted" }>;
 
-export type SourceSemanticLibraryProduceTask = Readonly<{
+type SourceSemanticLibraryProduceTask = Readonly<{
   generation_policy: SourceSemanticCorrespondenceGenerationPolicy;
   demand: SourceSemanticCorrespondenceDemand;
 }>;
 
-export type SourceSemanticLibraryPrepareStatus = "interpreted" | "no_correspondence" | "invalid" | "failed" | "preparation_failed" | "unattempted";
+type SourceSemanticLibraryPrepareStatus = "interpreted" | "no_correspondence" | "invalid" | "failed" | "preparation_failed" | "unattempted";
 
-export type SourceSemanticLibraryPrepareOutcome = Readonly<{
+type SourceSemanticLibraryPrepareOutcome = Readonly<{
   source_interpretation_id: string;
   status: SourceSemanticLibraryPrepareStatus;
   generation_policy?: SourceSemanticCorrespondenceGenerationPolicy;
@@ -34,7 +34,7 @@ export type SourceSemanticLibraryPrepareOutcome = Readonly<{
   diagnostic?: string;
 }>;
 
-export type SourceSemanticLibraryPrepareCacheEntry = Readonly<{
+type SourceSemanticLibraryPrepareCacheEntry = Readonly<{
   rawJson: string;
   semantic_correspondence: SourceSemanticCorrespondence;
   coverage?: SourceSemanticCorrespondenceCoverage;

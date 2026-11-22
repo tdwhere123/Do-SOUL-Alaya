@@ -4,6 +4,21 @@ import { authorizedDurableRewrite, DecideFn, createDeps, createMemoryEntry, driv
 import { requireAt, mockCallAt } from "../helpers/defined.js";
 
 describe("ReconciliationService projection metadata", () => {
+  it("degrades an authorized UPDATE if its applier supplies no evidence reference", async () => {
+    const neighbor = createMemoryEntry({ object_id: "memory-neighbor", content: "The user lives in Berlin." });
+    const { deps, decide, update } = createDeps([neighbor], {
+      thresholds: { similarityFloor: 0.2 }, rewriteAuthorization: authorizedDurableRewrite
+    });
+    decide.mockResolvedValue({ kind: "update", targetObjectId: neighbor.object_id, reason: "refinement" });
+    const driven = drive(new ReconciliationService(deps), {
+      incomingContent: "The user lives in Berlin since 2019.",
+      incomingDomainTags: ["residence"]
+    }, { evidenceRefForVerdict: (kind) => kind === "update" ? "" : "new-candidate-evidence" });
+    await expect(driven.decision).resolves.toMatchObject({ kind: "add" });
+    expect(driven.appliedVerdicts).toEqual(["update", "add"]);
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("LLM UPDATE verdict carries projection fields into the survivor update", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
@@ -357,7 +372,7 @@ describe("ReconciliationService projection metadata", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("NOOP merges missing projection metadata into the surviving row without evidence", async () => {
+  it("NOOP leaves missing projection metadata untouched", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
       content: "The user lives in Berlin.",
@@ -380,79 +395,9 @@ describe("ReconciliationService projection metadata", () => {
     const decision = await driven.decision;
 
     expect(decision.kind).toBe("noop");
-    expect(driven.evidenceMinted()).toBe(0);
-    expect(update).toHaveBeenCalledWith(
-      "memory-neighbor",
-      {
-        projection_schema_version: 1,
-        event_time_start: "2026-03-19T00:00:00.000Z",
-        event_time_end: "2026-03-19T23:59:59.999Z",
-        time_precision: "day",
-        time_source: "explicit"
-      },
-      "reconciliation_projection_merge"
-    );
-    expect(append).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps a NOOP duplicate drop when projection merge update fails", async () => {
-    const neighbor = createMemoryEntry({
-      object_id: "memory-neighbor",
-      content: "The user lives in Berlin.",
-      evidence_refs: ["evidence-old"]
-    });
-    const { deps, update, append } = createDeps([neighbor]);
-    update.mockRejectedValueOnce(new Error("projection merge event append failed"));
-    const service = new ReconciliationService(deps);
-
-    const driven = drive(service, {
-      incomingContent: "The user lives in Berlin.",
-      incomingDomainTags: ["bench-seed"],
-      incomingProjectionFields: {
-        projection_schema_version: 1,
-        event_time_start: "2026-03-19T00:00:00.000Z",
-        time_precision: "day",
-        time_source: "explicit"
-      }
-    });
-    const decision = await driven.decision;
-
-    expect(decision.kind).toBe("noop");
-    expect(driven.appliedVerdicts).toEqual(["noop"]);
-    expect(driven.evidenceMinted()).toBe(0);
-    expect(append).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps a NOOP duplicate drop when projection merge lookup fails", async () => {
-    const neighbor = createMemoryEntry({
-      object_id: "memory-neighbor",
-      content: "The user lives in Berlin.",
-      evidence_refs: ["evidence-old"]
-    });
-    const findByIds = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("projection merge lookup failed"));
-    const { deps, update, append } = createDeps([neighbor], {
-      memoryRepo: { findByIds }
-    });
-    const service = new ReconciliationService(deps);
-
-    const driven = drive(service, {
-      incomingContent: "The user lives in Berlin.",
-      incomingDomainTags: ["bench-seed"],
-      incomingProjectionFields: {
-        projection_schema_version: 1,
-        event_time_start: "2026-03-19T00:00:00.000Z",
-        time_precision: "day",
-        time_source: "explicit"
-      }
-    });
-    const decision = await driven.decision;
-
-    expect(decision.kind).toBe("noop");
-    expect(driven.appliedVerdicts).toEqual(["noop"]);
     expect(driven.evidenceMinted()).toBe(0);
     expect(update).not.toHaveBeenCalled();
     expect(append).toHaveBeenCalledTimes(1);
   });
+
 });

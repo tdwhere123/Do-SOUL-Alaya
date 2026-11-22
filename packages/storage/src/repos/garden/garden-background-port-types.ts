@@ -13,13 +13,13 @@ export interface GardenDataPortFactoryOptions {
   readonly proposalWriter?: GardenProposalWriter;
 }
 
-export interface GardenHotDemotionCandidate {
+interface GardenHotDemotionCandidate {
   readonly memory_entry_id: string;
   readonly last_access_at: string | null;
   readonly activation_score: number;
 }
 
-export interface GardenJanitorHotDemotionCriteria {
+interface GardenJanitorHotDemotionCriteria {
   readonly maxLastHitAgeMs: number;
   readonly minActivationScore: number;
 }
@@ -38,20 +38,20 @@ export interface GardenLowActivityMemoryRecord {
   readonly memory_id: string;
 }
 
-export type GardenDormantDemotionOutcome = "demoted" | "skipped";
+type GardenDormantDemotionOutcome = "demoted" | "skipped";
 
 export interface GardenJanitorDormantDemotionPort {
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly GardenLowActivityMemoryRecord[]>;
   setLifecycleDormant(memoryId: string, taskId: string): Promise<GardenDormantDemotionOutcome>;
 }
 
-export interface GardenNeighborGroup {
+interface GardenNeighborGroup {
   readonly subject: string;
   readonly object_ids: readonly string[];
   readonly overlap_basis: string;
 }
 
-export interface GardenSynthesisCandidateCluster {
+interface GardenSynthesisCandidateCluster {
   readonly subject: string;
   readonly evidence_ids: readonly string[];
 }
@@ -80,8 +80,8 @@ export interface GardenAuditorPointerHealthPort {
 
 export interface GardenAuditorGreenMaintenancePort {
   findExpiringGreenStatuses(workspaceId: string, lookaheadMs: number): Promise<readonly ExpiringGreenStatus[]>;
-  renewGreenPassiveStable(greenStatusId: string, taskId: string): void;
-  requestActiveVerification(greenStatusId: string, taskId: string): void;
+  renewGreenPassiveStable(status: ExpiringGreenStatus, workspaceId: string): boolean;
+  requestActiveVerification(status: ExpiringGreenStatus, workspaceId: string): boolean;
   revokeGreen(
     memoryEntryId: string,
     reason: "verification_fail",

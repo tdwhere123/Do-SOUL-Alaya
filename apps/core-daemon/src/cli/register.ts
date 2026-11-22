@@ -13,7 +13,7 @@ import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import type { ProfileMutationAuditRow, ProfileMutationAuditWriter } from "../attach/index.js";
 import type { AlayaDaemonRuntime } from "../index.js";
 import { stripReviewerCredentialsFromAgentMcpEnv } from "../attach/attached-agent-mcp-child-env.js";
-import { HOST_INTERPRETATION_AGENT_TARGET } from "../mcp-memory/proposal/reviewer-surfaces.js";
+import { HOST_INTERPRETATION_AGENT_TARGET, HUMAN_REVIEWER_AGENT_TARGETS } from "../mcp-memory/proposal/reviewer-surfaces.js";
 import { createAttachClaudeCommandSpec, createAttachCodexCommandSpec, createDetachCommandSpec } from "./attach/index.js";
 import { runAlayaMcpStdioServer } from "../mcp/server/mcp-server.js";
 import { parseEnvBoolean } from "@do-soul/alaya-protocol";
@@ -37,7 +37,6 @@ import {
 import { resolveGardenComputeStatus } from "./support/garden-compute-status.js";
 import { readBuildInfo } from "../runtime/daemon/support/build-info.js";
 import { createInstallCommand } from "./install/install.js";
-import { createInspectCommand } from "./inspect/inspect.js";
 import { createUpdateCommand } from "./update.js";
 import { defaultRecallPathPlasticityLookupTelemetry } from "../garden/path-plasticity/path-plasticity-runtime.js";
 import { createOperationCommandSpecs } from "./operations/operations.js";
@@ -91,7 +90,7 @@ function createAttachCommand(runtime: AlayaDaemonRuntime): AlayaSubcommandSpec<A
 
   return {
     name: "attach",
-    description: "Attach Alaya MCP and slash commands to a supported agent.",
+    description: "Attach Alaya MCP to a supported agent.",
     argsSchema: attachArgsSchema(),
     requiresDaemonReady: false,
     handler: async (ctx, args) => {
@@ -129,7 +128,7 @@ function resolveMcpAgentTarget(
     return "mcp";
   }
 
-  if (requestedAgentTarget === "cli" || requestedAgentTarget === "inspector") {
+  if (HUMAN_REVIEWER_AGENT_TARGETS.has(requestedAgentTarget)) {
     warn(`Ignoring ALAYA_AGENT_TARGET=${requestedAgentTarget}: MCP stdio cannot impersonate human-reviewer surfaces.`);
     return "mcp";
   }
@@ -303,10 +302,6 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
     recallUtilizationService: runtime.services.recallUtilizationService
   }));
   bridge.registerSubcommand(createInstallCommand());
-  bridge.registerSubcommand(createInspectCommand({
-    getRequestToken: () => runtime.requestProtection.requestToken,
-    startDaemonServer: async (options) => await runtime.startHttpServer(options)
-  }));
   bridge.registerSubcommand(createUpdateCommand());
 }
 

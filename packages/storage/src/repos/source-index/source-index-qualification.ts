@@ -9,8 +9,7 @@ import { decodeValidEmbeddingBlob } from "../memory/embedding-vector-validity.js
 import { sourceIndexWindowWithinSource } from "./source-index-query-reader.js";
 import { readSourceIndexLexicalBinding } from "./lexical-generation.js";
 
-export const SOURCE_INDEX_QUALIFICATION_STATUSES = ["ready", "not_indexed", "stale", "partial", "unknown"] as const;
-type Status = typeof SOURCE_INDEX_QUALIFICATION_STATUSES[number];
+type Status = "ready" | "not_indexed" | "stale" | "partial" | "unknown";
 export type SourceIndexSnapshotFact = {
   workspace_id: string; source_epoch: number; query_state: SourceIndexVectorQueryState;
   selection: SourceIndexSelection | null; generation: SourceIndexGeneration | null;
@@ -28,7 +27,7 @@ export type SourceIndexRootQualification = {
     capture: "complete" | "partial" | "unknown"; next_ordinal: number | null };
 };
 
-/** Private measurement reader. Caller owns the frozen read transaction; no activation, build,
+/** Read-only diagnostic. Caller owns the frozen read transaction; no activation, build,
  * model invocation or recall-ledger debit. State/currentness/coverage reuse the serving owners.
  * Its SQL reads stored metadata, never defines an alternate index admission policy. */
 export function readSourceIndexSnapshotFact(database: StorageDatabase, workspaceId: string): SourceIndexSnapshotFact {

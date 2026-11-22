@@ -12,6 +12,7 @@ export type RecallRetentionRemoval = Readonly<{ handles: readonly string[];
  * conservatively charged per retained root. */
 export class RecallExecutionRetention {
   private readonly records = new Map<string, Retained>();
+  private readonly keysByExecution = new Map<string, Set<string>>();
   private readonly deadlines = new Map<string, number>();
   private readonly touched = new Map<string, number>();
   private clock = 0;
@@ -30,9 +31,14 @@ export class RecallExecutionRetention {
     if (row !== undefined) this.touch(row.execution);
     return row?.value as T | undefined;
   }
-  values<T>(prefix: string): readonly T[] {
-    this.sweep();
-    return [...this.records].filter(([key]) => key.startsWith(prefix)).map(([, row]) => row.value as T);
+  valuesForExecution<T>(execution: string, prefix: string): T[] {
+    const deadline = this.deadlines.get(execution);
+    if (deadline !== undefined && deadline <= Date.now()) this.invalidate(execution, "expired");
+    const values: T[] = [];
+    for (const key of this.keysByExecution.get(execution) ?? []) {
+      if (key.startsWith(prefix)) values.push(this.records.get(key)!.value as T);
+    }
+    return values;
   }
   executionFor(handle: string): string | undefined {
     this.sweep();
@@ -40,8 +46,8 @@ export class RecallExecutionRetention {
     return undefined;
   }
   workspaceFor(execution: string): string {
-    for (const row of this.records.values()) if (row.execution === execution) return row.workspace;
-    return "";
+    const key = this.keysByExecution.get(execution)?.values().next().value;
+    return key === undefined ? "" : this.records.get(key)!.workspace;
   }
   transaction<T>(work: () => T): T {
     this.sweep();
@@ -58,7 +64,11 @@ export class RecallExecutionRetention {
       events = this.transactionEvents;
     } catch (error) {
       this.records.clear();
-      for (const [key, row] of records) this.records.set(key, row);
+      this.keysByExecution.clear();
+      for (const [key, row] of records) {
+        this.records.set(key, row);
+        this.indexKey(row.execution, key);
+      }
       this.deadlines.clear();
       for (const [key, deadline] of deadlines) this.deadlines.set(key, deadline);
       this.touched.clear();
@@ -72,7 +82,6 @@ export class RecallExecutionRetention {
   }
   set(key: string, row: Retained): void {
     this.sweep();
-    const previous = this.records.get(key);
     const bytes = charge(key, row.bytes, row.handles);
     const victims = Number.isFinite(row.bytes) && row.bytes >= 0 ? this.victimsFor(key, row, bytes) : undefined;
     if (victims === undefined) {
@@ -82,7 +91,10 @@ export class RecallExecutionRetention {
       });
     }
     for (const execution of victims) this.invalidate(execution, "evicted");
+    const previous = this.records.get(key);
+    if (previous !== undefined && previous.execution !== row.execution) this.dropKey(previous.execution, key);
     this.records.set(key, { ...row, bytes });
+    this.indexKey(row.execution, key);
     this.touch(row.execution);
     this.bytes += bytes - (previous?.bytes ?? 0);
     this.deadlines.set(row.execution, Math.min(this.deadlines.get(row.execution) ?? Date.now() + this.ttl,
@@ -94,11 +106,8 @@ export class RecallExecutionRetention {
     if (row === undefined) return;
     this.records.delete(key);
     this.bytes -= row.bytes;
+    this.dropKey(row.execution, key);
     const remaining = [...this.records.values()];
-    if (!remaining.some(value => value.execution === row.execution)) {
-      this.deadlines.delete(row.execution);
-      this.touched.delete(row.execution);
-    }
     const handles = row.handles.filter(handle => !remaining.some(value => value.handles.includes(handle)));
     if (handles.length > 0) {
       const event = { handles, reason };
@@ -117,7 +126,7 @@ export class RecallExecutionRetention {
     this.bytes -= row.bytes - charged;
   }
   invalidate(execution: string, reason: RecallRetentionRemoval["reason"] = "invalidated"): void {
-    for (const [key, row] of this.records) if (row.execution === execution) this.delete(key, reason);
+    for (const key of this.keysByExecution.get(execution) ?? []) this.delete(key, reason);
   }
   subscribe(listener: (event: RecallRetentionRemoval) => void): () => void {
     this.listeners.add(listener);
@@ -128,6 +137,19 @@ export class RecallExecutionRetention {
     return { entries: this.records.size, executions: this.deadlines.size, retained_bytes: this.bytes };
   }
   private touch(execution: string): void { this.touched.set(execution, ++this.clock); }
+  private indexKey(execution: string, key: string): void {
+    const keys = this.keysByExecution.get(execution);
+    if (keys === undefined) this.keysByExecution.set(execution, new Set([key]));
+    else keys.add(key);
+  }
+  private dropKey(execution: string, key: string): void {
+    const keys = this.keysByExecution.get(execution)!;
+    keys.delete(key);
+    if (keys.size > 0) return;
+    this.keysByExecution.delete(execution);
+    this.deadlines.delete(execution);
+    this.touched.delete(execution);
+  }
   /** Least-recently-used other executions of the same workspace whose removal makes `bytes` fit, or undefined
    * if none can. Another workspace's leases are never evicted to make room. */
   private victimsFor(key: string, row: Retained, bytes: number): readonly string[] | undefined {

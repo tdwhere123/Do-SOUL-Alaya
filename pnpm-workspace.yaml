@@ -1,6 +1,5 @@
 packages:
   - apps/*
-  - apps/inspector/*
   - packages/*
 
 catalog:
@@ -36,9 +35,6 @@ overrides:
   postcss: 8.5.31
   postcss-selector-parser: 7.1.6
   qs: 6.16.1
-  # Inspector loopback SPA; v7 is a breaking upgrade. See scripts/ci/audit-exemptions.json.
-  react-router: 6.30.6
-  react-router-dom: 6.30.6
   # Optional ONNX extra only. transformers 4.2.0 declares sharp ^0.34.5; 0.35.5 fixes the bundled librsvg vulnerability.
   sharp: 0.35.5
   smol-toml: 1.9.1

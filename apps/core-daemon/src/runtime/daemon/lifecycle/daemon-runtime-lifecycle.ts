@@ -19,7 +19,7 @@ import {
   type LifecycleTimerPort
 } from "./daemon-runtime-timing.js";
 import {
-  resolveDaemonHostFromEnv,
+  isLoopbackHost,
   resolveDaemonListenPolicy,
   warnIfRemoteDaemonListening
 } from "../../server-options.js";
@@ -61,7 +61,6 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   gardenRuntime: GardenRuntimeLifecycle;
   securityStatusService: Readonly<{ close(): void }>;
   daemonMcpRuntimeRegistry: Readonly<{ close(): Promise<void> }>;
-  globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
   closeEmbeddingProvider?: () => Promise<void>;
   closeSignalService?: () => Promise<void>;
@@ -300,24 +299,19 @@ function createHttpServerStarter(
     }
     validateEphemeralTokenPolicy(input.requestProtection, options);
     ensureServerNotRunning(state);
-    logEphemeralTokenStartup(input, options);
 
     const env = input.env ?? processEnvLookup();
-    const policy = resolveDaemonListenPolicy(env);
-    const hostname = options.hostname ?? (policy.kind === "unix" ? policy.tcpHost : policy.host);
+    const policy = resolveVerifiedListenPolicy(env, options);
+    const hostname = policy.kind === "unix" ? policy.tcpHost : policy.host;
     const port = options.port ?? parsePort(env.PORT, 3000);
+    logEphemeralTokenStartup(input, hostname, port);
     const serverFactory = input.serverFactory ?? serve;
     const tcpServer = serverFactory({
       fetch: input.app.fetch,
       hostname,
       port
     });
-    try {
-      await waitForTcpServerListening(tcpServer);
-    } catch (error) {
-      tcpServer.close();
-      throw error;
-    }
+    const listeningPort = await awaitAndVerifyBoundTcpServer(tcpServer, hostname, port);
     state.server = tcpServer;
     if (policy.kind === "unix") {
       const unixServe = input.unixSocketServe ?? serveDaemonUnixSocket;
@@ -335,8 +329,6 @@ function createHttpServerStarter(
     warnIfRemoteDaemonListening(env, hostname, (message) => {
       input.warnLogger.warn(message, {});
     });
-    const address = (tcpServer as Partial<Server>).address?.();
-    const listeningPort = address !== null && typeof address === "object" ? address.port : port;
     logListeningAddress(input, hostname, listeningPort, policy.kind === "unix" ? policy.path : undefined);
     return Object.freeze({
       hostname,
@@ -349,6 +341,48 @@ function createHttpServerStarter(
   };
 }
 
+function resolveVerifiedListenPolicy(
+  env: NodeJS.ProcessEnv,
+  options: AlayaDaemonListenOptions
+) {
+  const envPolicy = resolveDaemonListenPolicy(env);
+  const policy = resolveDaemonListenPolicy(env, { hostname: options.hostname });
+  if (policy.kind !== envPolicy.kind) {
+    throw new AlayaError(
+      "CONFLICT",
+      `Cannot switch listen policy from "${envPolicy.kind}" to "${policy.kind}" via options.hostname after requestProtection initialization.`
+    );
+  }
+  return policy;
+}
+
+async function awaitAndVerifyBoundTcpServer(
+  tcpServer: CloseableHttpServer,
+  hostname: string,
+  fallbackPort: number
+): Promise<number> {
+  try {
+    await waitForTcpServerListening(tcpServer);
+  } catch (error) {
+    tcpServer.close();
+    throw error;
+  }
+  const address = (tcpServer as Partial<Server>).address?.();
+  if (
+    address !== null &&
+    typeof address === "object" &&
+    typeof address.address === "string" &&
+    !isLoopbackHost(address.address)
+  ) {
+    tcpServer.close();
+    throw new AlayaError(
+      "CONFLICT",
+      `Refusing non-loopback bound TCP address "${address.address}". Bind loopback (${hostname}) or ALAYA_DAEMON_SOCKET.`
+    );
+  }
+  return address !== null && typeof address === "object" ? address.port : fallbackPort;
+}
+
 function validateEphemeralTokenPolicy(
   requestProtection: RequestProtectionConfig,
   options: AlayaDaemonListenOptions
@@ -356,7 +390,7 @@ function validateEphemeralTokenPolicy(
   const allowEphemeralRequestToken = options.allowEphemeralRequestToken ?? false;
   if (requestProtection.tokenSource === "ephemeral" && !allowEphemeralRequestToken) {
     throw new Error(
-      "ALAYA_REQUEST_TOKEN must be set before starting the daemon HTTP server. Use `alaya inspect` for a managed temporary daemon or set ALAYA_REQUEST_TOKEN explicitly."
+      "ALAYA_REQUEST_TOKEN must be set before starting the daemon HTTP server. Set ALAYA_REQUEST_TOKEN explicitly in the environment or daemon config."
     );
   }
 }
@@ -369,15 +403,16 @@ function ensureServerNotRunning(state: LifecycleState): void {
 
 function logEphemeralTokenStartup(
   input: CreateDaemonLifecycleControlsInput,
-  options: AlayaDaemonListenOptions
+  hostname: string,
+  port: number
 ): void {
   if (input.requestProtection.tokenSource !== "ephemeral") {
     return;
   }
 
   input.warnLogger.warn("starting managed daemon with ephemeral request token", {
-    host: options.hostname ?? resolveDaemonHostFromEnv(input.env ?? processEnvLookup()),
-    port: options.port ?? parsePort((input.env ?? processEnvLookup()).PORT, 3000)
+    host: hostname,
+    port
   });
 }
 
@@ -531,9 +566,6 @@ async function closeRuntimeResources(
   });
   await closeRuntimeResourceStepAsync(input, "daemon MCP runtime registry shutdown failed", async () => {
     await input.daemonMcpRuntimeRegistry.close();
-  });
-  closeRuntimeResourceStep(input, "global memory invalidation subscription dispose failed", () => {
-    input.globalMemoryRecallInvalidationSubscription?.dispose();
   });
   clearLifecycleIntervals(input.intervalsToClear);
   await closeHttpServers(input, state);

@@ -1,14 +1,14 @@
 import { ToolCategorySchema, type ClaimForm, type ToolCategory } from "@do-soul/alaya-protocol";
 
-export interface SoulClaimRegistryReader {
+interface SoulClaimRegistryReader {
   listClaimsForWorkspace(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]>;
 }
 
-export interface SoulHazardProjectionReader {
+interface SoulHazardProjectionReader {
   listActiveHazardObjectRefs(workspaceId: string): Promise<readonly string[]>;
 }
 
-export interface SoulPolicyProjectionReader {
+interface SoulPolicyProjectionReader {
   listGlobalDeniedToolCategories(): Promise<readonly ToolCategory[]>;
   listWorkspaceHardStopRefs(workspaceId: string): Promise<readonly string[]>;
 }

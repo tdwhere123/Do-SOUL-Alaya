@@ -1,6 +1,4 @@
 import {
-  MemoryGovernanceEventType,
-  SoulSynthesisCreatedPayloadSchema,
   type EventLogEntry,
   type MemoryEntry,
   type PathRelation,
@@ -51,7 +49,7 @@ interface SqliteStatement {
 export interface SqliteProposalWorkflowContext extends MemoryEntryEvidenceRefIndexHost {
   readonly db: StorageDatabase;
   readonly materializeMemoryKeys?: (memory: Readonly<MemoryEntry>) => void;
-  transaction<T>(fn: () => T, options?: { readonly immediate?: boolean }): T;
+  transaction<T>(fn: () => T): T;
   readonly eventLogWriter: Parameters<typeof insertEventLogEntry>[0];
   readonly findByIdStatement: SqliteStatement;
   readonly findMemoryEntryByIdStatement: SqliteStatement;
@@ -226,10 +224,7 @@ function acceptPathRelationGovernanceTransaction(
   return deepFreeze({
     proposal: loadUpdatedProposal(ctx, request.proposalId),
     path_relation: pathApply.pathRelation,
-    events:
-      pathApply.event === null
-        ? [...storedReviewEvents, ...mutationEvents]
-        : [...storedReviewEvents, pathApply.event, ...mutationEvents]
+    events: [...storedReviewEvents, pathApply.event, ...mutationEvents]
   });
 }
 
@@ -248,7 +243,7 @@ function acceptSynthesisCreateTransaction(
 
   const storedReviewEvents = insertReviewEvents(ctx, events);
   resolvePendingProposal(ctx, request);
-  const synthesisEvent = insertSynthesisCreatedEvent(ctx, synthesisCreate.capsule);
+  const synthesisEvent = insertEventLogEntry(ctx.eventLogWriter, synthesisCreate.event);
   insertSynthesisCapsule(ctx, synthesisCreate.capsule);
   const mutationEvents = insertTransactionMutationEvents(ctx, request);
 
@@ -331,25 +326,6 @@ function insertTransactionMutationEvents(
   return mutationEvents.map((event) => insertEventLogEntry(ctx.eventLogWriter, event));
 }
 
-function insertSynthesisCreatedEvent(
-  ctx: SqliteProposalWorkflowContext,
-  capsule: SynthesisCapsule
-): EventLogEntry {
-  return insertEventLogEntry(ctx.eventLogWriter, {
-    event_type: MemoryGovernanceEventType.SOUL_SYNTHESIS_CREATED,
-    entity_type: "synthesis_capsule",
-    entity_id: capsule.object_id,
-    workspace_id: capsule.workspace_id,
-    run_id: capsule.run_id,
-    caused_by: capsule.created_by,
-    payload_json: SoulSynthesisCreatedPayloadSchema.parse({
-      object_id: capsule.object_id,
-      object_kind: capsule.object_kind,
-      workspace_id: capsule.workspace_id,
-      run_id: capsule.run_id
-    })
-  });
-}
 
 function insertSynthesisCapsule(
   ctx: SqliteProposalWorkflowContext,

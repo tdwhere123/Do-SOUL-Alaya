@@ -24,7 +24,7 @@ it("keeps local Step schema rejection non-transport and never dispatches or retr
 });
 
 it("cancels a continuing non-OK Step body after a bounded prefix and retains incomplete received-byte evidence", async () => {
-  const bytes = new Uint8Array(PROVIDER_FAILURE_BODY_DIGEST_BYTES).fill(120);
+  const bytes = new Uint8Array(PROVIDER_FAILURE_BODY_DIGEST_BYTES + 1).fill(120);
   const cancel = vi.fn();
   let reads = 0;
   const body = new ReadableStream<Uint8Array>({ pull(controller) { reads++; controller.enqueue(bytes); }, cancel });
@@ -41,9 +41,11 @@ it("cancels a continuing non-OK Step body after a bounded prefix and retains inc
   expect(failure.kind).toBe("http_error");
   expect(cancel).toHaveBeenCalledOnce();
   expect(reads).toBeLessThanOrEqual(2);
-  expect(failure.httpResponse).toMatchObject({ bodyComplete: false, bodyTruncated: false,
+  expect(failure.httpResponse).toMatchObject({ bodyComplete: false, bodyTruncated: true,
     bodyByteLength: bytes.length, bodySha256: createHash("sha256").update(bytes).digest("hex") });
-  expect(Buffer.from(failure.httpResponse!.bodyBase64, "base64")).toEqual(Buffer.from(bytes));
+  expect(Buffer.from(failure.httpResponse!.bodyBase64, "base64")).toEqual(
+    Buffer.from(bytes.subarray(0, PROVIDER_FAILURE_BODY_DIGEST_BYTES))
+  );
 });
 
 it("digests every received Step error byte and retains only the bounded prefix", async () => {

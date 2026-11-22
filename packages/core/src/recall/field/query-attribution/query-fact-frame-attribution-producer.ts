@@ -10,22 +10,22 @@ import {
   type RecallFieldDigest
 } from "../field-identity.js";
 
-export const RECALL_QUERY_FACT_FRAME_MAX_FRAMES = 8;
-export const QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID =
+const RECALL_QUERY_FACT_FRAME_MAX_FRAMES = 8;
+const QUERY_FACT_FRAME_EXTRACTION_CAPTURE_OPERATOR_ID =
   "query_fact_frame_extraction_capture_v1";
 
-export type RecallQueryFactFrameExtractionStatus =
+type RecallQueryFactFrameExtractionStatus =
   | "returned"
   | "ineligible"
   | "unavailable";
 
-export type RecallQueryFactFrameSlotCapture = Readonly<{
+type RecallQueryFactFrameSlotCapture = Readonly<{
   readonly role: AssociativeFactSlotRole;
   readonly text: string;
   readonly source_offset: readonly [number, number];
 }>;
 
-export type RecallQueryFactFrameCaptureFrame = Readonly<{
+type RecallQueryFactFrameCaptureFrame = Readonly<{
   readonly schema_version: 1;
   readonly slots: readonly Readonly<RecallQueryFactFrameSlotCapture>[];
 }>;

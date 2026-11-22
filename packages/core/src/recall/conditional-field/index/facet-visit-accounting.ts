@@ -4,7 +4,7 @@ import {
   type FieldValue,
   type SeedActivation
 } from "@do-soul/alaya-protocol";
-import { composedFacetPathId, facetBelongsToOutput, facetIdentityOf, facetPathId } from "../engine/path-composition-facet.js";
+import { composedFacetPathId, facetIdentityOf, facetPathId } from "../engine/path-composition-facet.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import type { GroundingProgress } from "../engine/output-derivations.js";
 import type { ExplanationDelivery } from "./explanation-delivery.js";
@@ -42,7 +42,7 @@ export type FacetVisitProgress = Readonly<{
   readonly cache_misses: number;
 }>;
 
-export type FacetIndexPreparation = Readonly<{
+type FacetIndexPreparation = Readonly<{
   readonly index: FacetVisitIndex;
   readonly visits: number;
   readonly cache_hits: number;
@@ -87,7 +87,7 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
   else existing.push(value);
 }
 
-export function prepareFacetVisitIndex(
+function prepareFacetVisitIndex(
   facets: readonly FacetVector[],
   seeds: readonly SeedActivation[],
   allowance: number,
@@ -145,24 +145,6 @@ export function prepareFacetVisitIndex(
   return { index, visits, cache_hits: visits === 0 ? 1 : 0, cache_misses: visits === 0 ? 0 : 1 };
 }
 
-export function facetsForCandidate(
-  value: FieldValue,
-  facets: readonly FacetVector[],
-  seeds: readonly SeedActivation[]
-): readonly FacetVector[] {
-  const matchingSeeds = seeds.filter(
-    (seed) => productStateNodeId(seed.state) === productStateNodeId(value.state)
-  );
-  return [
-    ...facets.filter((vector) => facetBelongsToOutput(vector.path_id, value.state)),
-    ...matchingSeeds.map((seed) => ({
-      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-      path_id: composedFacetPathId(seed.state, "seed"),
-      coordinates: [seed.milligrades]
-    }))
-  ];
-}
-
 export function indexedFacetsForCandidate(
   value: FieldValue,
   index: FacetVisitIndex,
@@ -181,19 +163,6 @@ export function indexedFacetsForCandidate(
       coordinates: [seed.milligrades]
     }))
   ];
-}
-
-export function takeFacetBucketVisits(
-  bucket: readonly FacetVector[],
-  start: number,
-  allowance: number
-): Readonly<{ readonly visits: number; readonly next_offset: number; readonly complete: boolean }> {
-  if (start >= bucket.length) return { visits: 0, next_offset: bucket.length, complete: true };
-  const remaining = bucket.length - start;
-  if (remaining > allowance) {
-    return { visits: allowance, next_offset: start + allowance, complete: false };
-  }
-  return { visits: remaining, next_offset: bucket.length, complete: true };
 }
 
 export function accountFacetPreparation(
@@ -231,7 +200,7 @@ export function fieldProgressFingerprint(state: {
   readonly seeds: { readonly length: number };
   readonly transitions: { readonly length: number };
   readonly grounding_progress?: { readonly completed_work: number };
-  readonly solver_completed_work?: number;
+  readonly solver_retained_work?: number;
   readonly explanation_completed_work?: number;
   readonly support_scan_offset?: number;
   readonly resume_cursors: unknown;
@@ -250,7 +219,7 @@ export function fieldProgressFingerprint(state: {
   return JSON.stringify([
     state?.observations.length ?? 0, state?.seeds.length ?? 0,
     state?.transitions.length ?? 0, state?.grounding_progress?.completed_work ?? 0,
-    state?.solver_completed_work ?? 0, state?.explanation_completed_work ?? 0,
+    state?.solver_retained_work ?? 0, state?.explanation_completed_work ?? 0,
     state?.support_scan_offset ?? 0, state?.pending_path_effects?.progress_position ?? 0,
     state?.resume_cursors ?? {}, state?.pair_progress ?? {}, state?.support_progress ?? {},
     state?.projection_progress?.offset ?? 0, state?.projection_progress?.delivered_entries ?? {},

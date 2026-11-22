@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { parseStorageDbPathFromToml } from "../configured-paths.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const installScript = path.join(repoRoot, "scripts/install.sh");
@@ -366,11 +367,12 @@ test("uninstall removes contained default paths and keeps HOME sentinels", () =>
       const bakDir = `${installDir}.bak`;
       const binDir = path.join(home, ".local", "bin");
       const configDir = path.join(home, ".config", "alaya");
-      for (const dir of [installDir, bakDir, binDir, configDir]) mkdirSync(dir, { recursive: true });
+      for (const dir of [installDir, path.join(installDir, "bin"), bakDir, binDir, configDir]) mkdirSync(dir, { recursive: true });
       writeFileSync(path.join(installDir, "marker"), "install-body");
+      writeFileSync(path.join(installDir, "bin", "alaya.mjs"), "entry");
       writeFileSync(path.join(bakDir, "old"), "rollback");
       writeFileSync(path.join(configDir, "alaya.db"), "durable");
-      writeFileSync(path.join(binDir, "alaya"), "shim");
+      symlinkSync(path.join(installDir, "bin", "alaya.mjs"), path.join(binDir, "alaya"));
       const sentinel = writeSentinel(home);
       const result = runUninstall(work, {
         HOME: home, XDG_CONFIG_HOME: "", ALAYA_CONFIG_DIR: "",
@@ -510,6 +512,80 @@ test("vacuum-into.mjs writes a restorable snapshot", async () => {
     const row = restored.prepare("SELECT body FROM memory WHERE id = '1'").get();
     restored.close();
     assert.equal(row.body, "hello");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("uninstall preserves unrelated non-symlink or external-symlink alaya binary", () => {
+  for (const mode of ["regular-file", "external-symlink"]) {
+    const work = mkdtempSync(path.join(tmpdir(), `alaya-uninstall-keep-bin-${mode}-`));
+    try {
+      const home = path.join(work, "home");
+      const installDir = path.join(home, ".local", "share", "do-soul-alaya");
+      const binDir = path.join(home, ".local", "bin");
+      const externalTarget = path.join(work, "external-alaya");
+      mkdirSync(installDir, { recursive: true });
+      mkdirSync(binDir, { recursive: true });
+      const binEntry = path.join(binDir, "alaya");
+      if (mode === "regular-file") {
+        writeFileSync(binEntry, "user-owned-binary");
+      } else {
+        writeFileSync(externalTarget, "external-tool");
+        symlinkSync(externalTarget, binEntry);
+      }
+
+      const result = runUninstall(work, {
+        HOME: home,
+        ALAYA_HOME: installDir,
+        ALAYA_BIN_DIR: binDir,
+        ALAYA_CONFIG_DIR: path.join(work, "config")
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(existsSync(installDir), false);
+      assert.equal(existsSync(binEntry), true);
+      assert.match(result.stderr, /kept .*alaya \(not a symlink into/);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+});
+
+test("configured-paths parses comments and single-quoted TOML db_path and rejects malformed values", () => {
+  assert.equal(
+    parseStorageDbPathFromToml('[storage]\ndb_path = "custom/alaya.db" # trailing comment\n'),
+    "custom/alaya.db"
+  );
+  assert.equal(
+    parseStorageDbPathFromToml("[storage]\ndb_path = 'C:\\data\\alaya.db' # literal\n"),
+    "C:\\data\\alaya.db"
+  );
+  assert.equal(
+    parseStorageDbPathFromToml("[storage]\n[[backup.targets]]\ndb_path = \"ignored/backup.db\"\n"),
+    null
+  );
+  assert.throws(
+    () => parseStorageDbPathFromToml("[storage]\ndb_path = unquoted\n"),
+    /Malformed \[storage\]\.db_path/
+  );
+  assert.throws(
+    () => parseStorageDbPathFromToml('[storage]\ndb_path = "unterminated\n'),
+    /Malformed \[storage\]\.db_path/
+  );
+});
+
+test("live db locator ignores unallowlisted .env DATA_DIR and honors process.env.DATA_DIR", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-locator-dotenv-"));
+  try {
+    const configDir = path.join(work, "config");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(path.join(configDir, ".env"), "DATA_DIR=dotenv-data\n");
+
+    const fromDotenv = locateLiveDb({ ALAYA_CONFIG_DIR: configDir }, work);
+    assert.equal(fromDotenv.dbPath, path.join(configDir, "alaya.db"));
+
+    const overriddenByEnv = locateLiveDb({ ALAYA_CONFIG_DIR: configDir, DATA_DIR: "env-data" }, work);
+    assert.equal(overriddenByEnv.dbPath, path.join(work, "env-data", "alaya.db"));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

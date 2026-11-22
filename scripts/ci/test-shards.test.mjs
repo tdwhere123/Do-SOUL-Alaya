@@ -231,11 +231,12 @@ test("install smoke executes independently but its existing gate requires every 
   assert.match(execution, /^        run: node scripts\/ci\/smoke-built-cli\.mjs$/mu);
   const gate = workflowJob("install-smoke");
   assert.match(gate, /name: CLI install surface smoke\n/);
-  assert.match(gate, /needs: \[quality-ubuntu, quality-macos, quality-windows, install-smoke-check\]/);
+  assert.match(gate, /needs: \[quality-ubuntu, quality-macos, quality-windows, install-smoke-check, content-contracts\]/);
   assert.match(gate, /if: always\(\)/);
   const results = {
     QUALITY_UBUNTU_RESULT: "quality-ubuntu", QUALITY_MACOS_RESULT: "quality-macos",
-    QUALITY_WINDOWS_RESULT: "quality-windows", INSTALL_SMOKE_RESULT: "install-smoke-check"
+    QUALITY_WINDOWS_RESULT: "quality-windows", INSTALL_SMOKE_RESULT: "install-smoke-check",
+    CONTENT_CONTRACTS_RESULT: "content-contracts"
   };
   for (const [variable, job] of Object.entries(results)) {
     assert.ok(gate.includes(`${variable}: \${{ needs.${job}.result }}`));

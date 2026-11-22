@@ -10,14 +10,10 @@ import { parseRows } from "./parse-row.js";
 import { FtsLaneRankRowParser } from "./sqlite-row-schemas.js";
 
 export {
-  CJK_SCRIPT_PATTERN,
-  mergeFtsLanes,
-  splitFtsLanes,
-  TRIGRAM_MIN_CODEPOINTS,
-  type FtsLaneSplit
+  splitFtsLanes
 } from "@do-soul/alaya-protocol";
 
-export function quoteFtsLiteral(value: string): string {
+function quoteFtsLiteral(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 

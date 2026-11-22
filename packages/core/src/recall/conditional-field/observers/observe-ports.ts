@@ -13,8 +13,7 @@ import {
   type SourceEvidenceRootKind,
   type SourceRepresentation,
   type StagedWarningArray,
-  type StoredCosineObligation,
-  type TypedObservation
+  type StoredCosineObligation
 } from "@do-soul/alaya-protocol";
 import type {
   MeasureStoredPairsInput,
@@ -25,7 +24,7 @@ import type {
 type ProposalMatchReason = NonNullable<import("@do-soul/alaya-protocol").RecallCandidate["source_lookup_reasons"]>[number];
 import { CoreError } from "../../../shared/errors.js";
 
-export type LexicalObserverPage = Readonly<{
+type LexicalObserverPage = Readonly<{
   readonly ids: readonly string[];
   readonly nativeVisits: number;
   readonly nativeBytes: number;
@@ -135,7 +134,7 @@ export type RelationObserverRow = Readonly<{
   readonly occurred_at?: string;
 }>;
 
-export type RelationObserverPage = Readonly<{
+type RelationObserverPage = Readonly<{
   readonly unavailable?: boolean;
   readonly observations: readonly RelationObserverRow[];
   readonly nativeVisits: number;
@@ -146,7 +145,7 @@ export type RelationObserverPage = Readonly<{
   readonly committedThrough?: string | null;
 }>;
 
-export type EmbeddingObserverPage = Readonly<{
+type EmbeddingObserverPage = Readonly<{
   readonly objectIds: readonly string[];
   readonly rowVisits: number;
   readonly metadataUtf8Bytes: number;
@@ -358,12 +357,3 @@ export type ObserverActionResult = Readonly<{
   readonly source_roots?: readonly SourceRootObserverRow[];
   readonly lookup_reasons?: readonly ProposalMatchReason[];
 }>;
-
-export type {
-  ObserverAction,
-  ObserverCursor,
-  ObserverPage,
-  QueryInterpretation,
-  SnapshotReadLease,
-  TypedObservation
-};

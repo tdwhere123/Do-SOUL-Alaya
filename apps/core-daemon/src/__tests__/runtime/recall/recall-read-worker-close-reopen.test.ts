@@ -43,14 +43,12 @@ describe("RecallReadWorkerClient close/reopen", () => {
 
     try {
       await first.ready();
-      const firstRows = await first.memoryRepo.findByWorkspaceId(workspaceId, "hot", {
-        limit: 10,
-        offset: 0
-      });
-      expect(firstRows.map((row) => row.object_id)).toEqual([objectId]);
+      await expect(first.activeConstraintsPort.findActiveConstraints({
+        workspaceId, cap: 8
+      })).resolves.toMatchObject({ constraints: expect.any(Array) });
       await first.close();
       await expect(
-        first.memoryRepo.findByWorkspaceId(workspaceId, "hot", { limit: 10, offset: 0 })
+        first.activeConstraintsPort.findActiveConstraints({ workspaceId, cap: 8 })
       ).rejects.toThrow(/recall read worker is closed/);
 
       const second = createRecallReadWorkerClient({
@@ -63,12 +61,9 @@ describe("RecallReadWorkerClient close/reopen", () => {
       }
       try {
         await second.ready();
-        const secondRows = await second.memoryRepo.findByWorkspaceId(workspaceId, "hot", {
-          limit: 10,
-          offset: 0
-        });
-        expect(secondRows.map((row) => row.object_id)).toEqual([objectId]);
-        expect(secondRows[0]?.content).toBe("worker close/reopen row");
+        await expect(second.activeConstraintsPort.findActiveConstraints({
+          workspaceId, cap: 8
+        })).resolves.toMatchObject({ constraints: expect.any(Array) });
       } finally {
         await second.close();
       }

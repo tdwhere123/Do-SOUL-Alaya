@@ -1,7 +1,7 @@
 import type { EventPublisher } from "@do-soul/alaya-core";
 import type { GardenComputeProvider } from "@do-soul/alaya-soul";
 import type { RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
-import type { SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
+import type { SqliteEventLogRepo, SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import { createStatementSessionTaskProcessor } from "./statement-session-task-processor.js";
 import {
   createGardenClaimReclaimer,
@@ -23,6 +23,7 @@ export function createHostWorkerTaskRuntimeSupport(input: Readonly<{
     getRuntimeGardenComputeConfig(): Promise<RuntimeGardenComputeConfig>;
   };
   readonly eventPublisher: EventPublisher;
+  readonly eventLogRepo: SqliteEventLogRepo;
   readonly localHeuristicsProvider?: GardenComputeProvider;
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
   readonly signalReceiver?: PostTurnSignalReceiver;

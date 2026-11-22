@@ -20,8 +20,16 @@ describe("statement event days", () => {
     expect(days("I went there yesterday")).toEqual(["2023-01-09..2023-01-09"]);
     expect(days("three weeks ago")).toEqual(["2022-12-19..2022-12-25"]);
     expect(days("三周前")).toEqual(["2022-12-19..2022-12-25"]);
-    expect(days("graduated on May 20th, 2017")).toEqual(["2017-01-01..2017-12-31", "2017-05-20..2017-05-20"]);
+    expect(days("graduated on May 20th, 2017")).toEqual(["2017-05-20..2017-05-20"]);
     expect(days("on 2022-11-03")).toEqual(["2022-11-03..2022-11-03"]);
+  });
+
+  it("keeps standalone years and resolves a qualified weekday just once", () => {
+    expect(days("lived there in 2017")).toEqual(["2017-01-01..2017-12-31"]);
+    expect(days("meet next Monday")).toEqual(["2023-01-16..2023-01-16"]);
+    expect(days("met last Friday")).toEqual(["2023-01-06..2023-01-06"]);
+    expect(days("in May 20th, 2017, after moving there in 2017"))
+      .toEqual(["2017-05-20..2017-05-20", "2017-01-01..2017-12-31"]);
   });
 
   it("states no day without a time expression", () => {
@@ -30,5 +38,13 @@ describe("statement event days", () => {
 
   it("reads a bare numeric pair as month/day: a fallible observation that only routes", () => {
     expect(days("version 3/4 of the plan")).toEqual(["2022-03-04..2022-03-04"]);
+  });
+
+  it("reads a Chinese day before its month, and a qualified weekday before its week", () => {
+    expect(days("上周五")).toEqual(["2023-01-06..2023-01-06"]);
+    expect(days("上星期五")).toEqual(["2023-01-06..2023-01-06"]);
+    expect(days("2023年1月8号")).toEqual(["2023-01-08..2023-01-08"]);
+    expect(days("上周")).toEqual(["2023-01-02..2023-01-08"]);
+    expect(days("2023年1月")).toEqual(["2023-01-01..2023-01-31"]);
   });
 });

@@ -1,77 +1,35 @@
-export { sourceStatementSessionInput, emitSourceStatementSessionSignals, type LocatedSourceStatementMessage,
-  type SourceStatementRoot } from "./garden/ingestion/source-statement-signals.js";
+export { sourceStatementSessionInput, emitSourceStatementSessionSignals, type LocatedSourceStatementMessage } from "./garden/ingestion/source-statement-signals.js";
 export { SOURCE_STATEMENTS_PROMPT, planSourceStatementSession, receiveSourceStatements, extractSourceStatementRequest,
-  extractSourceStatementSession, assertSourceStatementSessionReceipt, type SourceStatementTransport, type SourceStatementSessionEvent
+  extractSourceStatementSession, assertSourceStatementSessionReceipt
 } from "./garden/ingestion/source-statements.js";
 export { selectObservedTemporalProjection } from "./garden/extraction/temporal/observed-projection.js";
 export {
   catalogEligibilityOfAssertionCount,
-  catalogEligibilityOfRequest,
   classifyOfficialApiRequestResult,
-  createOfficialApiGardenCompileReceipt,
-  officialApiRequestCoverageLayers,
-  receiveOfficialApiRequestSignals,
-  OFFICIAL_API_GARDEN_COMPILE_CONTRACT_VERSION,
-  OFFICIAL_API_GARDEN_COMPILE_PRODUCER,
   OFFICIAL_API_SEMANTIC_PRESERVATION_CLAIM,
-  type OfficialApiCatalogEligibility,
-  type OfficialApiGardenCompilePendingBatch,
-  type OfficialApiGardenCompileReceipt,
-  type OfficialApiRequestEntryRejection,
-  type OfficialApiRequestReceiveReceipt
+  type OfficialApiCatalogEligibility
 } from "./garden/ingestion/official-api/request-result.js";
 export {
   classifyOfficialApiExtractionResult,
-  classifyOfficialApiInterpretationResult,
   receiveOfficialApiSourceInterpretations,
   OfficialApiInterpretationAdmissionError,
   OfficialApiInterpretationEntryRejectionSchema,
-  OFFICIAL_API_INTERPRETATION_RECEIVE_CONTRACT_VERSION,
-  OFFICIAL_API_INTERPRETATION_RECEIVE_PRODUCER,
   type OfficialApiInterpretationEntryRejection,
   type OfficialApiInterpretationReceiveReceipt
 } from "./garden/ingestion/official-api/source-interpretation-receive.js";
 export {
-  DEFAULT_SOUL_GRAPH_DEPTH,
-  DEFAULT_SOUL_GRAPH_LIMIT,
-  MAX_SOUL_GRAPH_DEPTH,
-  MAX_SOUL_GRAPH_LIMIT,
-  MIN_SOUL_GRAPH_DEPTH,
-  parseSoulGraphDepth,
-  parseSoulGraphLimit
-} from "@do-soul/alaya-protocol";
-export {
-  SoulWorkerSafetyAdapter,
-  type SoulWorkerSafetyAdapterDependencies
-} from "./kernel/workers/worker-safety-adapter.js";
-export {
-  SoulWorkerSafetyReader,
-  type SoulClaimRegistryReader,
-  type SoulHazardProjectionReader,
-  type SoulPolicyProjectionReader,
-  type SoulWorkerSafetyReaderDependencies
-} from "./kernel/workers/worker-safety-reader.js";
-export {
-  SoulToolGovernanceAdapter,
-  type SoulStructureRegistryReader
+  SoulToolGovernanceAdapter
 } from "./kernel/tools/tool-governance-adapter.js";
 export {
-  AUDITOR_CONSTANTS,
   Auditor,
   BootstrappingService,
   ComputeRoutingService,
-  DEGRADATION_CONSTANTS,
-  DegradationPipeline,
   GardenProviderKind,
   GardenProviderError,
   OfficialApiGardenCompileIncompleteError,
   OFFICIAL_API_GARDEN_MODEL,
   GardenScheduler,
-  MAX_PENDING_BACKLOG_WARNING_TRANSITIONS,
-  evaluateBacklogPressure,
-  JANITOR_CONSTANTS,
   Janitor,
-  LIBRARIAN_CONSTANTS,
   Librarian,
   InMemoryHandoffGapHandler,
   looksLikeGapSignal,
@@ -81,23 +39,11 @@ export {
   buildEvidenceInput,
   GARDEN_FACT_FRAME_PRODUCER_OPERATOR_ID,
   buildFactFrameFormationProposal,
-  GARDEN_OPEN_SEMANTIC_FACTOR_PRODUCER_OPERATOR_ID,
-  buildOpenSemanticFactorFormationProposal,
-  classifyOpenSemanticFactorFormationEligibility,
-  buildSchemaGroundedRawPayload,
   normalizeSchemaGroundedSignal,
-  readSchemaGroundedContent,
-  validateSchemaGroundingForSignal,
   PathGraphSnapshotter,
-  PATH_PLASTICITY_TASK_DEFAULTS,
-  parsePathPlasticityRevisionCursor,
-  resolvePathPlasticitySinceRevision,
-  resolvePathPlasticityUntilRevision,
   TopologyService,
   reviewPathGraphSnapshotHistory,
   OfficialApiGardenProvider,
-  WallClockTimeoutError,
-  withWallClockTimeout,
   SignalExtractorError,
   createPiMonoExtractor,
   type SignalExtractor,
@@ -114,42 +60,29 @@ export {
   OPEN_SEMANTIC_FACTOR_QUERY_OPERATOR_ID,
   OPEN_SEMANTIC_FACTOR_QUERY_REQUEST_TEMPLATE,
   OPEN_SEMANTIC_FACTOR_QUERY_SYSTEM_PROMPT,
-  buildOpenSemanticFactorQueryUserPrompt,
-  createOpenSemanticFactorQueryCompiler,
-  parseOpenSemanticFactorQueryResponse,
-  SELECTED_SOURCE_BOUND_F3_CAPABILITY,
   SOURCE_BOUND_F3_EVIDENCE_PROMPT_SHA256,
   SOURCE_BOUND_F3_EVIDENCE_REQUEST_TEMPLATE_SHA256,
   SOURCE_BOUND_F3_QUERY_PROMPT_SHA256,
   SOURCE_BOUND_F3_QUERY_REQUEST_TEMPLATE_SHA256,
   sourceBoundF3Seal,
-  traceSourceBoundF3Proposal,
   parseOfficialApiSemanticFactorGraphProjectionAudit,
-  inspectOfficialApiSemanticFactorGraphProjection,
   projectOfficialApiSemanticFactorGraph,
   parseOfficialApiSignals,
-  parseOfficialApiRequestSignals,
   parseOfficialApiExtractionRequest,
-  planOfficialApiExtractionWindow,
   buildOfficialApiExtractionRequest,
   buildOfficialApiExtractionRequests,
-  buildOfficialApiSourceRequest,
   collectOfficialApiExtractionCoverage,
   stringifyOfficialApiExtractionRequest,
   officialApiSemanticWorksetFromUnits,
   planOfficialApiSemanticWorkset,
-  officialApiSemanticWorksetFromSourceCorpus,
   planOfficialApiTransport,
-  materializeOfficialApiTransportResponse,
   transportPackIdentity,
   OFFICIAL_API_SEMANTIC_WORKSET_CONTRACT_VERSION,
-  salvageRawSignalElements,
   buildGardenTurnEvidenceArtifactRef,
   buildGardenTurnEvidenceFallback,
   buildGardenTurnEvidenceSearchProjections,
   isGardenTurnEvidenceFallback,
   resolveVerifiedGardenTurnEvidenceProjection,
-  buildSourceVerificationText,
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
   renderOfficialApiSourceCorpus,
@@ -160,123 +93,46 @@ export {
   rebindOfficialApiSourceLocatorQuote,
   resolveOfficialApiSourceLocatorQuote,
   verifyOfficialApiSourceLocatorBinding,
-  resolveSourceAssertion,
   filterSourceAssertionEntities,
-  groundPreferenceProfileFromSource,
   preferenceProfileGroundingRemovalReason,
   resolvePreferenceAwareSourceGrounding,
-  resolveGardenRawPayloadGrounding,
-  resolveGardenSignalGrounding,
-  toModelRef,
   DISTILLED_FACT_MAX_CHARS,
   SIGNAL_REF_SEED_SPECS,
-  type AuditorBootstrappingPort,
   type AuditorDependencies,
-  type AuditorEvidenceCheckPort,
-  type AuditorEventLogPort,
-  type AuditorGreenMaintenancePort,
   type AuditorHealthIssueGroupPort,
-  type AuditorOrphanDetectionPort,
-  type AuditorPointerHealPort,
-  type AuditorPointerHealthPort,
-  type AuditorSchedulerPort,
-  type BootstrappingDependencies,
-  type BrokenPointerRecord,
-  type ColdStartAssessment,
   type ComputeRoutingCandidate,
-  type ComputeRoutingDependencies,
-  type DegradationAssessParams,
-  type DegradationStepKind,
-  type DraftCandidate,
-  type ExpiredControlPlaneObject,
-  type BacklogPressureThresholds,
-  type BacklogPressureTransition,
-  type ExpiringGreenStatus,
   type GapOrHandoffRecord,
   type GardenCompileContext,
   type GardenComputeProvider,
-  type VerifiedGardenTurnEvidenceProjection,
-  type OfficialApiVerifiedUserAssertionSource,
-  type OfficialApiSignalAuditDisposition,
-  type OfficialApiSignalAuditStage,
-  type OfficialApiSignalFormationAuditEntry,
-  type OfficialApiSignalFormationAuditInput,
-  type OfficialApiSignalFormationAuditResult,
-  type OfficialApiSemanticFactorGraphFields,
   type OfficialApiSemanticFactorGraphProjectionAudit,
-  type OfficialApiSemanticFactorGraphProjectionReason,
   type OfficialApiSignalDraft,
-  type OfficialApiExtractionCoverage,
   type OfficialApiExtractionRequest,
-  type OfficialApiExtractionWindowPlan,
-  type SourceAssertionCatalogCursor,
-  type SourceAssertionCatalogPage,
-  type OfficialApiSemanticWorkset,
   type OfficialApiSemanticWorkUnit,
-  type OfficialApiTransportBatchSize,
   type TransportPack,
-  type TransportPackPlan,
-  type OpenSemanticFactorQueryCompiler,
-  type GardenSignalGrounding,
-  type GardenBacklogWarningTransitionSignal,
-  type GardenSchedulerConfig,
   type GardenSchedulerEventLogPort,
-  type HealablePointerRecord,
-  type HighFrequencyPattern,
   type HandoffGapCreatedObject,
   type HandoffGapHandler,
-  type HotDemotionCandidate,
-  type OrphanedMemoryRecord,
   type DispositionSweepOutcome,
   type DormantDispositionCandidate,
   type JanitorControlPlaneCleanupPort,
-  type JanitorDependencies,
   type JanitorDispositionSweepPort,
-  type JanitorHotDemotionCriteria,
-  type JanitorMemoryTieringPort,
-  type JanitorStrongRefProtectionPort,
   type JanitorSchedulerPort,
   type JanitorTombstoneGcPort,
   type TombstonedMemoryRecord,
-  type LibrarianDependencies,
-  type LibrarianNeighborDetectionPort,
   type LibrarianSchedulerPort,
-  type LibrarianSynthesisThrottlePort,
-  type PathGraphSnapshotHistoryReview,
-  type PathGraphSnapshotterDependencies,
-  type PathPlasticityComputePort,
-  type PathPlasticityComputeResult,
-  type TopologyServiceDependencies,
-  type MaterializationResult,
   type MaterializationRouterDeps,
-  type MaterializationTarget,
   type PathRelationProposalPayload,
-  type PathRelationProposalPort,
   type SourceObservationPublicationPort,
-  type SourceObservationPublicationResult,
   type TemporalRelationAssertionPort,
-  type PathCandidateSinkPort,
   type PathCandidateMintOutcome,
   type RouteTarget,
   type GraphEdgeCreationPort,
-  type SignalRefSeedSpec,
-  type SchemaGroundedRawPayloadInput,
-  type OpenSemanticFactorFormationEligibility,
-  type SchemaGroundingValidationResult,
-  type SchemaGroundingValidationStatus,
-  type NeighborGroup,
-  type StaleMemoryEntry
+  type SignalRefSeedSpec
 } from "./garden/index.js";
 export {
   SoulSignalHandler,
-  materializeCandidateSignal,
-  type SoulSignalHandlerDependencies,
-  type ToolResultBlock
+  materializeCandidateSignal
 } from "./kernel/signals/signal-handler.js";
-export {
-  buildBootstrappingPathId,
-  buildBootstrappingRecordId
-} from "./garden/scheduling/bootstrapping-ids.js";
 
 export { OfficialApiSemanticArtifactCodec } from "./garden/ingestion/official-api/semantic-artifact.js";
 export {
@@ -291,26 +147,17 @@ export {
   type ExtractionCapabilityContract
 } from "./garden/ingestion/official-api/extraction-capability.js";
 export {
-  SOURCE_ENRICHMENT_CONTRACT,
-  canonicalizeSemanticExtractionProfile,
-  computeSemanticArtifactKey,
-  defaultSourceEnrichmentProfile,
-  semanticExtractionProfilesEqual
+  defaultSourceEnrichmentProfile
 } from "./garden/ingestion/official-api/semantic-artifact-identity.js";
 export { officialApiExtractionResponseSchema, officialApiExtractionResponseSchemaPreimage
 } from "./garden/ingestion/official-api/response-schema.js";
 
-export { buildOfficialApiSourcePacketRequest, parseOfficialApiSourcePacketRequest, sourcePacketRequestIdentity,
-  OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, type OfficialApiSourcePacketRequest } from "./garden/ingestion/official-api/source-packet-request.js";
+export { buildOfficialApiSourcePacketRequest, parseOfficialApiSourcePacketRequest, OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, type OfficialApiSourcePacketRequest } from "./garden/ingestion/official-api/source-packet-request.js";
 export { receiveOfficialApiSourcePacket, completeEmptyOfficialApiSourcePacket, MAX_OFFICIAL_API_SOURCE_PACKET_RESPONSE_BYTES } from "./garden/ingestion/official-api/source-packet-receive.js";
 export { collectSourceSemanticUnitPacks, indexSourceSemanticUnits, sourceSemanticTransportUnits, SourceSemanticSourceRoleSchema } from "./garden/ingestion/official-api/source-semantic-units.js";
 export {
-  SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT,
-  sourceSemanticCorrespondenceSystemPrompt,
-  SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT,
+  SOURCE_SEMANTIC_SYSTEM_PROMPT, sourceSemanticCorrespondenceSystemPrompt,
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, SourceSemanticGenerationViewContractSchema, type SourceSemanticGenerationViewContract,
   sourceSemanticSystemPrompt, sourceSemanticGenerationSystemPrompt, buildSourceSemanticRequest, prepareSourceSemanticRequest, SourceSemanticUnsupportedSourceSchema,
   buildSourceSemanticQueryRequest, sourceSemanticQueryPresentation,
@@ -318,7 +165,7 @@ export {
   sourceSemanticRequestCatalog, sourceSemanticResponseJsonSchema,
   sourceSemanticCorrespondenceResponseJsonSchema,
   type SourceSemanticRequest, type SourceSemanticProposalInput, type SourceSemanticHostPreparation, type SourceSemanticQueryProposalInput,
-  type SourceSemanticCorrespondenceProposalInput, type SourceInterpretationDescriptor, type SourceSemanticQueryRequest,
+  type SourceSemanticCorrespondenceProposalInput, type SourceSemanticQueryRequest,
   type SourceSemanticCorrespondenceRequest
 } from "./garden/ingestion/official-api/source-semantic-request.js";
 export {
@@ -331,18 +178,13 @@ export {
   type SourceSemanticRevision
 } from "./garden/ingestion/official-api/source-semantic-revision.js";
 export {
-  SourceSemanticProposalRevisionSchema, prepareSourceSemanticProposalRevision,
-  type SourceSemanticProposalRevision
+  SourceSemanticProposalRevisionSchema, prepareSourceSemanticProposalRevision
 } from "./garden/ingestion/official-api/source-semantic-proposal-revision.js";
 export {
   receiveSourceSemantics, completeEmptySourceSemantics, proposeSourceSemantics,
   proposeQuerySemantics, proposeCorrespondenceSemantics,
-  MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, type SourceSemanticProposalResult,
-  type SourceSemanticQueryProposalResult, type SourceSemanticCorrespondenceProposalResult
+  MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, type SourceSemanticProposalResult
 } from "./garden/ingestion/official-api/source-semantic-receive.js";
 export {
-  prepareSourceSemanticLibrary, sourceSemanticLibraryCorrespondenceCacheKey,
-  type SourceSemanticLibraryPrepareInput, type SourceSemanticLibraryPrepareResult,
-  type SourceSemanticLibraryProduceResult, type SourceSemanticLibraryProduceTask, type SourceSemanticLibraryPrepareOutcome,
-  type SourceSemanticLibraryPrepareCacheEntry, type SourceSemanticLibraryPrepareStatus
+  prepareSourceSemanticLibrary, sourceSemanticLibraryCorrespondenceCacheKey
 } from "./garden/ingestion/official-api/source-semantic-library-prepare.js";

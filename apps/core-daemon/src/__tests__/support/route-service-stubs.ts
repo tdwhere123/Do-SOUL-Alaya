@@ -260,6 +260,7 @@ export function proposalRouteServices(
     readonly workspaceService?: LooseStub<WorkspaceService>;
     readonly memoryService?: LooseStub<Pick<MemoryService, "findByIdScoped">>;
     readonly proposalService?: LooseStub<ProposalService>;
+    readonly proposalRepo?: LooseStub<ProposalRouteServices["proposalRepo"]>;
     readonly mcpMemoryToolHandler?: LooseStub<McpMemoryToolHandler>;
   } = {}
 ): ProposalRouteServices {
@@ -267,6 +268,7 @@ export function proposalRouteServices(
     workspaceService: workspaceServiceStub(overrides.workspaceService),
     memoryService: implementPort<Pick<MemoryService, "findByIdScoped">>(overrides.memoryService ?? {}),
     proposalService: implementPort<ProposalService>(overrides.proposalService ?? {}),
+    proposalRepo: implementPort<ProposalRouteServices["proposalRepo"]>(overrides.proposalRepo ?? {}),
     mcpMemoryToolHandler: implementPort<McpMemoryToolHandler>(overrides.mcpMemoryToolHandler ?? {})
   };
 }

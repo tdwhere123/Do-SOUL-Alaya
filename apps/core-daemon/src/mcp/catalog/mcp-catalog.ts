@@ -12,7 +12,7 @@ import {
   type McpToolDiscoveryService,
   type ToolSpecService
 } from "@do-soul/alaya-core";
-import { registerConversationToolSpecs, type ExternalConversationToolExecutor } from "../tool-runtime/tool-runtime.js";
+import { registerConversationToolSpecs } from "./conversation-tool-registration.js";
 import { getBuiltinConversationToolSpecs } from "../server/builtin-conversation-tool-specs.js";
 import type { DaemonMcpRuntimeHealth, DaemonMcpRuntimeRegistry } from "./mcp-runtime-registry.js";
 import {
@@ -25,14 +25,12 @@ import {
 } from "./mcp-catalog-parsing.js";
 import {
   buildDaemonMcpCatalogState,
-  createDaemonConversationToolRuntimeCatalog,
   createStringLookup,
   executeExternalMcpTool,
   freezeToolSpecs,
   hasStringLookup,
   readCatalogToolLastError,
-  readDaemonMcpCatalogHealth,
-  type DaemonConversationToolRuntimeCatalog
+  readDaemonMcpCatalogHealth
 } from "./mcp-catalog-runtime.js";
 
 export { parseDaemonMcpServerRuntimeConfigs } from "./mcp-catalog-parsing.js";
@@ -48,9 +46,7 @@ export interface DaemonMcpCatalog {
   executeTool(input: {
     readonly toolId: string;
     readonly rawInput: unknown;
-    readonly writableRoots: readonly string[];
-    readonly abortSignal?: AbortSignal;
-  }): Promise< unknown>;
+  }): Promise<unknown>;
 }
 
 export function createConversationToolCatalog(
@@ -241,13 +237,11 @@ export function createDaemonMcpCatalogFromEnv(input: {
     hasTool(toolId) {
       return state.toolAvailability.get(toolId)?.() ?? false;
     },
-    async executeTool({ toolId, rawInput, writableRoots, abortSignal }) {
+    async executeTool({ toolId, rawInput }) {
       return await executeExternalMcpTool({
         toolId,
         rawInput,
         toolAvailability: state.toolAvailability,
-        writableRoots,
-        abortSignal,
         toolExecutors: state.toolExecutors,
         readLastError: (id) => readCatalogToolLastError(input.runtimeRegistry, state.toolServerNames.get(id))
       });
@@ -261,15 +255,12 @@ export async function bootstrapDaemonConversationTooling(input: {
   readonly extensionRegistry: Pick<ExtensionRegistryService, "listProviders" | "registerProvider">;
   readonly mcpToolDiscoveryService: Pick<McpToolDiscoveryService, "discoverAndRegister">;
   readonly now: () => string;
-  readonly nowMs?: () => number;
-  readonly refreshTtlMs?: number;
   readonly runtimeRegistry: DaemonMcpRuntimeRegistry;
   readonly toolSpecService: Pick<ToolSpecService, "findById" | "register" | "update">;
   readonly warn?: WarnLogger;
 }): Promise<Readonly<{
   readonly conversationToolCatalog: ConversationToolCatalog;
   readonly daemonMcpCatalog: DaemonMcpCatalog;
-  readonly externalConversationToolExecutor: ExternalConversationToolExecutor;
 }>> {
   const builtinConversationToolSpecs =
     input.builtinConversationToolSpecs ?? getBuiltinConversationToolSpecs();
@@ -303,65 +294,6 @@ export async function bootstrapDaemonConversationTooling(input: {
 
   return Object.freeze({
     conversationToolCatalog,
-    daemonMcpCatalog,
-    externalConversationToolExecutor: createExternalConversationToolExecutor({
-      catalog: createDaemonConversationToolRuntimeCatalog({
-        conversationToolCatalog,
-        daemonMcpCatalog
-      }),
-      now: input.nowMs,
-      refreshTools: refreshDiscoveredMcpTools,
-      refreshTtlMs: input.refreshTtlMs,
-      warn: input.warn
-    })
+    daemonMcpCatalog
   });
-}
-
-export function createExternalConversationToolExecutor(
-  input: {
-    readonly catalog: DaemonConversationToolRuntimeCatalog;
-    readonly now?: () => number;
-    readonly refreshTtlMs?: number;
-    readonly refreshTools: () => Promise<void>;
-    readonly warn?: WarnLogger;
-  }
-): ExternalConversationToolExecutor {
-  const now = input.now ?? (() => Date.now());
-  const refreshTtlMs = input.refreshTtlMs ?? 1_000;
-  const warn = input.warn ?? defaultWarn;
-  let lastSuccessfulRefreshAt = Number.NEGATIVE_INFINITY;
-  let refreshInFlight: Promise<void> | null = null;
-
-  const scheduleRefresh = (): Promise<void> => {
-    if (refreshInFlight !== null) {
-      return refreshInFlight;
-    }
-
-    const currentTime = now();
-    if (currentTime - lastSuccessfulRefreshAt < refreshTtlMs) {
-      return Promise.resolve();
-    }
-
-    refreshInFlight = input.refreshTools()
-      .then(() => {
-        lastSuccessfulRefreshAt = currentTime;
-      })
-      .catch((error) => {
-        warn("failed to refresh daemon MCP tool discovery", { error });
-        throw error;
-      })
-      .finally(() => {
-        refreshInFlight = null;
-      });
-
-    return refreshInFlight;
-  };
-
-  return {
-    hasTool: (toolId) => input.catalog.hasTool(toolId),
-    refreshTools: async () => {
-      await scheduleRefresh();
-    },
-    executeTool: async (executionInput) => await input.catalog.executeTool(executionInput)
-  };
 }

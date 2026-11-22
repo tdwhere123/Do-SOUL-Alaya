@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  SOURCE_ENRICHMENT_CONTRACT,
   canonicalizeSemanticExtractionProfile,
   semanticExtractionProfilesEqual,
   type SemanticExtractionProfile
@@ -13,7 +12,6 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "./system-prompt.js";
 import { OFFICIAL_API_EXTRACTION_RESPONSE_SCHEMA_PREIMAGE } from "./response-schema.js";
 
 export {
-  SOURCE_ENRICHMENT_CONTRACT,
   canonicalizeSemanticExtractionProfile,
   semanticExtractionProfilesEqual
 };

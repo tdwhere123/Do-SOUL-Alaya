@@ -3,20 +3,10 @@ export { isRetiredProposalDossier, isSynthesisCreateProposalDossier } from "./ty
 export type {
   AcceptedMemoryUpdateInput,
   AcceptedPathRelationGovernanceInput,
-  AcceptedSynthesisCreateInput,
   CreateProposalWithEventsIfAbsentResult,
-  CreateProposalWithEventsOptions,
-  FindPendingSummariesOptions,
   PathRelationProposalPayload,
   PendingProposalDedupeKey,
-  PendingProposalSummary,
   ProposalCreateInput,
-  ProposalCreationEventInput,
   ProposalRepo,
-  ProposalResolutionEventInput,
-  ProposalReviewerAssignment,
-  ProposalReviewerAssignmentInput,
-  ScopedProposal,
-  TransactionBoundProposalMutation,
-  UpdatePendingResolutionOptions
+  ProposalResolutionEventInput
 } from "./types.js";

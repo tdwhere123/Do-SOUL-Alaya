@@ -6,28 +6,28 @@ export type BooleanHyperedge =
   | OrBooleanHyperedge
   | IdentityBooleanEdge;
 
-export interface UnaryBooleanEdge {
+interface UnaryBooleanEdge {
   readonly kind: "unary";
   readonly from: string;
   readonly to: string;
   readonly strength: number;
 }
 
-export interface AndBooleanHyperedge {
+interface AndBooleanHyperedge {
   readonly kind: "and";
   readonly from: readonly string[];
   readonly to: string;
   readonly strength: number;
 }
 
-export interface OrBooleanHyperedge {
+interface OrBooleanHyperedge {
   readonly kind: "or";
   readonly from: readonly string[];
   readonly to: string;
   readonly strength: number;
 }
 
-export interface IdentityBooleanEdge {
+interface IdentityBooleanEdge {
   readonly kind: "identity";
   readonly from: string;
   readonly to: string;

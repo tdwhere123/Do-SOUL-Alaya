@@ -67,7 +67,6 @@ describe("parseFlags", () => {
       "--question-manifest=/tmp/questions.json",
       "--extraction-cache-root=/tmp/cache",
       "--experiment",
-      "--backfill-missing-fact-frame-formations",
       "--expansion-spend-approval=/tmp/expansion-spend-approval.json",
       "--concurrency=4",
       "--expected-reconciliation-basis=rule_only",
@@ -89,7 +88,6 @@ describe("parseFlags", () => {
     expect(parsed.questionManifest).toBe("/tmp/questions.json");
     expect(parsed.extractionCacheRoot).toBe("/tmp/cache");
     expect(parsed.experiment).toBe(true);
-    expect(parsed.backfillMissingFactFrameFormations).toBe(true);
     expect(parsed.expansionSpendApproval).toBe("/tmp/expansion-spend-approval.json");
     expect(parsed.concurrency).toBe(4);
     expect(parsed.expectedReconciliationBasis).toBe("rule_only");

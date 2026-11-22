@@ -2,22 +2,16 @@ import { join } from "node:path";
 import { processEnvLookup } from "../../runtime/config/daemon-config-environment.js";
 import {
   ALAYA_OPERATOR_INSTRUCTIONS,
-  ALAYA_SLASH_ALIAS,
   PROFILE_MUTATION_CONFIRM_PROMPT,
   SUPPORTED_PROFILE_TARGETS
 } from "./profile-mutation-constants.js";
 import { createNodeProfileMutationFs } from "./profile-mutation-fs.js";
-import { resolveAlayaSlashCommand } from "./profile-mutation-launcher.js";
 import {
-  detectActivePath,
   readSingleLine,
   removeMcpEntry,
-  removeSlashAlias,
   requireHome,
   restoreOperationBefore,
-  uniqueNonEmptyPaths,
-  upsertMcpEntry,
-  upsertSlashAlias
+  upsertMcpEntry
 } from "./profile-mutation-operations.js";
 import {
   ProfileMutationError,
@@ -43,7 +37,6 @@ export type {
   ProfileMutationAuditWriter,
   ProfileMutationBuildOptions,
   ProfileMutationConfirmIo,
-  ProfileMutationConflict,
   ProfileMutationDirection,
   ProfileMutationFs,
   ProfileMutationOperation,
@@ -54,20 +47,15 @@ export type {
 } from "./profile-mutation-types.js";
 export { ProfileMutationError } from "./profile-mutation-types.js";
 export {
-  ALAYA_LEGACY_SLASH_COMMAND,
   ALAYA_MCP_ARGS,
   ALAYA_MCP_COMMAND,
   ALAYA_OPERATOR_INSTRUCTIONS,
-  ALAYA_SLASH_ALIAS,
-  ALAYA_SLASH_ARGS,
   PROFILE_MUTATION_CONFIRM_PROMPT,
   PUBLIC_SOUL_TOOL_NAMES,
   SUPPORTED_PROFILE_TARGETS
 } from "./profile-mutation-constants.js";
 export { createNodeProfileMutationFs } from "./profile-mutation-fs.js";
-export { resolveAlayaMcpLauncher, resolveAlayaSlashCommand } from "./profile-mutation-launcher.js";
-
-export const ALAYA_SLASH_COMMAND = resolveAlayaSlashCommand();
+export { resolveAlayaMcpLauncher } from "./profile-mutation-launcher.js";
 
 export type ProfileInstructionsDriftStatus =
   | "absent"
@@ -213,11 +201,9 @@ export async function buildAttachProfileMutationPlan(
 ): Promise<ProfileMutationPlan> {
   const env = options.env ?? processEnvLookup();
   const fs = options.fs ?? createNodeProfileMutationFs();
-  const paths = await resolveProfilePaths(target, { env, fs });
+  const paths = await resolveProfilePaths(target, { env });
   const mcpBefore = await fs.readText(paths.mcpConfigPath);
-  const slashBefore = await fs.readText(paths.slashCommandsPath);
   const mcpAfter = upsertMcpEntry(target, mcpBefore, env);
-  const slashResult = upsertSlashAlias(target, slashBefore, env);
 
   return {
     target,
@@ -233,16 +219,6 @@ export async function buildAttachProfileMutationPlan(
         after: mcpAfter,
         changed: normalizeFileText(mcpBefore) !== normalizeFileText(mcpAfter),
         alreadyAbsent: false
-      },
-      {
-        recordKind: "slash_alias",
-        label: `${target} ${ALAYA_SLASH_ALIAS} slash alias`,
-        path: paths.slashCommandsPath,
-        before: slashBefore,
-        after: slashResult.content,
-        changed: normalizeFileText(slashBefore) !== normalizeFileText(slashResult.content),
-        alreadyAbsent: false,
-        conflict: slashResult.conflict
       }
     ]
   };
@@ -254,11 +230,9 @@ export async function buildDetachProfileMutationPlan(
 ): Promise<ProfileMutationPlan> {
   const env = options.env ?? processEnvLookup();
   const fs = options.fs ?? createNodeProfileMutationFs();
-  const paths = await resolveProfilePaths(target, { env, fs });
+  const paths = await resolveProfilePaths(target, { env });
   const mcpBefore = await fs.readText(paths.mcpConfigPath);
-  const slashBefore = await fs.readText(paths.slashCommandsPath);
   const mcpRemoval = removeMcpEntry(target, mcpBefore);
-  const slashRemoval = removeSlashAlias(target, slashBefore, env);
 
   return {
     target,
@@ -274,16 +248,6 @@ export async function buildDetachProfileMutationPlan(
         after: mcpRemoval.content,
         changed: mcpRemoval.changed,
         alreadyAbsent: !mcpRemoval.changed
-      },
-      {
-        recordKind: "slash_alias",
-        label: `${target} ${ALAYA_SLASH_ALIAS} slash alias`,
-        path: paths.slashCommandsPath,
-        before: slashBefore,
-        after: slashRemoval.content,
-        changed: slashRemoval.changed,
-        alreadyAbsent: !slashRemoval.changed,
-        conflict: slashRemoval.conflict
       }
     ]
   };
@@ -294,36 +258,17 @@ export async function resolveProfilePaths(
   options: ResolveProfilePathsOptions = {}
 ): Promise<ProfilePaths> {
   const env = options.env ?? processEnvLookup();
-  const fs = options.fs ?? createNodeProfileMutationFs();
   const home = requireHome(env);
 
   if (target === "codex") {
     const codexHome = env.CODEX_HOME ?? join(home, ".codex");
-    const mcpConfigPath = env.ALAYA_CODEX_CONFIG_PATH ?? join(codexHome, "config.toml");
-    const slashPathCandidates = uniqueNonEmptyPaths([
-      env.ALAYA_CODEX_SLASH_COMMANDS_PATH,
-      join(codexHome, "slash-commands.toml"),
-      join(codexHome, "commands", "slash-commands.toml")
-    ]);
     return {
-      mcpConfigPath,
-      slashCommandsPath: await detectActivePath(fs, slashPathCandidates),
-      slashPathCandidates
+      mcpConfigPath: env.ALAYA_CODEX_CONFIG_PATH ?? join(codexHome, "config.toml")
     };
   }
 
-  const mcpConfigPath = env.ALAYA_CLAUDE_CONFIG_PATH ?? env.CLAUDE_CONFIG_PATH ?? join(home, ".claude.json");
-  const slashPathCandidates = uniqueNonEmptyPaths([
-    env.ALAYA_CLAUDE_SLASH_COMMANDS_PATH,
-    env.CLAUDE_SLASH_COMMANDS_PATH,
-    join(home, ".claude", "slash-commands.json"),
-    join(home, ".claude", "commands", "slash-commands.json"),
-    join(home, ".claude", "commands.json")
-  ]);
   return {
-    mcpConfigPath,
-    slashCommandsPath: await detectActivePath(fs, slashPathCandidates),
-    slashPathCandidates
+    mcpConfigPath: env.ALAYA_CLAUDE_CONFIG_PATH ?? env.CLAUDE_CONFIG_PATH ?? join(home, ".claude.json")
   };
 }
 
@@ -333,10 +278,6 @@ export function renderProfileMutationPreview(plan: ProfileMutationPlan): string 
   for (const operation of plan.operations) {
     lines.push(`--- ${operation.label}`);
     lines.push(`path: ${operation.path}`);
-
-    if (operation.conflict !== undefined) {
-      lines.push(`conflict: ${operation.conflict.message}`);
-    }
 
     if (!operation.changed) {
       lines.push(operation.alreadyAbsent ? "already absent" : "no change");
@@ -369,7 +310,6 @@ export async function applyProfileMutationPlan(
   options: ProfileMutationApplyOptions = {}
 ): Promise<ProfileMutationApplyResult> {
   const fs = options.fs ?? createNodeProfileMutationFs();
-  assertProfileMutationConflictsAllowed(plan, options.allowConflicts ?? false);
   const changedOperations = plan.operations.filter((operation) => operation.changed);
   if (changedOperations.length === 0) {
     return { changed: false, auditRow: undefined };
@@ -415,13 +355,6 @@ function buildProfileMutationAuditRow(
     })),
     created_at: nowIso()
   };
-}
-
-function assertProfileMutationConflictsAllowed(plan: ProfileMutationPlan, allowConflicts: boolean): void {
-  const conflicts = plan.operations.filter((operation) => operation.conflict !== undefined);
-  if (!allowConflicts && conflicts.length > 0) {
-    throw new ProfileMutationError(conflicts.map((operation) => operation.conflict!.message).join("; "), 77);
-  }
 }
 
 async function writeProfileMutationAuditBeforeApply(

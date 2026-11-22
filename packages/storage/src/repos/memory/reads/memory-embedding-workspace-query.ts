@@ -11,7 +11,7 @@ export interface MemoryEmbeddingWorkspaceQuery {
 }
 
 // invariant: unfiltered listByWorkspace without a positive limit must not hydrate all blobs.
-export function usesDefaultWorkspaceEmbeddingQuery(
+function usesDefaultWorkspaceEmbeddingQuery(
   options: MemoryEmbeddingListByWorkspaceOptions | undefined
 ): boolean {
   return (

@@ -145,7 +145,7 @@ export const EMPTY_TOKEN: FactFrameSourceToken = Object.freeze({
 export const POSSESSIVE_DETERMINERS: ReadonlySet<string> = new Set([
   "my", "your", "his", "her", "its", "our", "their"
 ]);
-export const SUBJECT_DETERMINERS: ReadonlySet<string> = new Set(["a", "an", "the"]);
+const SUBJECT_DETERMINERS: ReadonlySet<string> = new Set(["a", "an", "the"]);
 export const OBJECT_PRONOUNS: ReadonlySet<string> = new Set([
   "me", "him", "her", "us", "them"
 ]);

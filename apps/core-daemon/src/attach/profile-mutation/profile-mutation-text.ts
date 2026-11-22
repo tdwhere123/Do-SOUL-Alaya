@@ -70,34 +70,6 @@ export function extractTomlBlock(content: string, header: string): string | unde
   return block.length === 0 ? undefined : block.join("\n");
 }
 
-export function extractCodexSlashCommand(content: string): string | undefined {
-  const block = extractTomlBlock(content, "[slash_commands.alaya-inspect]");
-  if (block === undefined) {
-    return undefined;
-  }
-  for (const line of block.split(/\r?\n/gu)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("command")) {
-      continue;
-    }
-    const equalsIndex = trimmed.indexOf("=");
-    if (equalsIndex < 0) {
-      continue;
-    }
-    const rawValue = trimmed.slice(equalsIndex + 1).trim();
-    if (!rawValue.startsWith("\"")) {
-      continue;
-    }
-    try {
-      const parsed: unknown = JSON.parse(rawValue);
-      return typeof parsed === "string" ? parsed : undefined;
-    } catch {
-      continue;
-    }
-  }
-  return undefined;
-}
-
 export function normalizeFileText(content: string | undefined): string {
   return (content ?? "").replace(/\r\n/gu, "\n").trimEnd();
 }

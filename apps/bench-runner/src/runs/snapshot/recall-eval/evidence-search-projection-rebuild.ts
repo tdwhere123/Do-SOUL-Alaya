@@ -25,21 +25,9 @@ import {
 } from "@do-soul/alaya-storage";
 import { sha256File } from "../integrity.js";
 import {
-  applyFactFrameRetrofit,
-  readFactFrameRetrofitLedger
-} from "./fact-frame-retrofit.js";
-import { replayStoredEvidenceFactFrameFormation } from
-  "./fact-frame-formation-replay.js";
-import {
   readEvidenceProjectionOwners,
   type EvidenceProjectionOwnerRow
 } from "./evidence-projection-owner-read.js";
-import {
-  emptyFactFrameFormationSummary,
-  summarizeFactFrameFormations
-} from "./fact-frame-formation-summary.js";
-import { backfillMissingFactFrameFormations } from
-  "./fact-frame-formation/backfill.js";
 import {
   EVIDENCE_PROJECTION_REBUILD_REPORT_SCHEMA_VERSION,
   type EvidenceSearchProjectionKindCount,
@@ -94,19 +82,10 @@ export class EvidenceSearchProjectionRebuildError extends Error {
 
 export async function rebuildEvidenceSearchProjectionsOnWorkingCopy(input: {
   readonly workingDbPath: string;
-  readonly factFrameRetrofitLedgerPath?: string;
-  readonly backfillMissingFactFrameFormations?: boolean;
   readonly sourceExtractionSystemPromptSha256?: string;
 }): Promise<EvidenceSearchProjectionRebuildReport> {
   const inputDbSha256 = await sha256File(input.workingDbPath);
-  if (input.factFrameRetrofitLedgerPath !== undefined &&
-      input.backfillMissingFactFrameFormations === true) {
-    throw new Error("default fact-frame backfill cannot be combined with retrofit ledger");
-  }
   const sourceSchemaVersion = assertEligibleWorkingSchema(input.workingDbPath);
-  const retrofitLedger = input.factFrameRetrofitLedgerPath === undefined
-    ? null
-    : readFactFrameRetrofitLedger(input.factFrameRetrofitLedgerPath);
   const db = initDatabase({
     filename: input.workingDbPath,
     temporalMode: "candidate"
@@ -114,25 +93,9 @@ export async function rebuildEvidenceSearchProjectionsOnWorkingCopy(input: {
   let report: EvidenceSearchProjectionRebuildReportBody;
   try {
     const workingSchemaVersion = assertCurrentProjectionSchema(db);
-    report = db.connection.transaction(() => {
-      const backfill = input.backfillMissingFactFrameFormations === true
-        ? backfillMissingFactFrameFormations(db)
-        : null;
-      const rebuilt = rebuildAllVerifiedOwners(
-        db,
-        sourceSchemaVersion,
-        workingSchemaVersion
-      );
-      const withBackfill = backfill === null ? rebuilt : Object.freeze({
-        ...rebuilt,
-        fact_frame_formation_backfill: backfill
-      });
-      if (retrofitLedger === null) return withBackfill;
-      return Object.freeze({
-        ...withBackfill,
-        fact_frame_retrofit: applyFactFrameRetrofit(db, retrofitLedger)
-      });
-    }).immediate();
+    report = db.connection.transaction(() =>
+      rebuildAllVerifiedOwners(db, sourceSchemaVersion, workingSchemaVersion)
+    ).immediate();
   } finally {
     db.close();
   }
@@ -176,7 +139,7 @@ function rebuildAllVerifiedOwners(
       rejected.push(reject(owner.owner, "runtime qualification failed"));
       return [];
     }
-    const result = planResolvedOwner(db, owner);
+    const result = planResolvedOwner(owner);
     if ("reason" in result) {
       rejected.push(result);
       return [];
@@ -197,7 +160,6 @@ function rebuildAllVerifiedOwners(
   }
   replacePlannedOwners(db, planned);
   return buildReport(
-    db,
     sourceSchemaVersion,
     workingSchemaVersion,
     eligibleOwnerCount,
@@ -250,27 +212,8 @@ function readRuntimeQualifiedOwnerIds(
   return qualified;
 }
 
-function planResolvedOwner(
-  db: StorageDatabase,
-  resolved: ResolvedV2Owner
-): PlannedOwner | RejectedOwner {
-  let factKeys: readonly Readonly<EvidenceSearchProjection>[];
-  try {
-    factKeys = replayStoredEvidenceFactFrameFormation(db, {
-      objectId: resolved.owner.object_id,
-      workspaceId: resolved.owner.workspace_id,
-      sourceHash: resolved.owner.source_hash,
-      sourceAssertion: resolved.owner.excerpt
-    });
-  } catch (error) {
-    return reject(resolved.owner, `fact-frame formation replay failed: ${
-      error instanceof Error ? error.message : "unknown error"
-    }`);
-  }
-  const projections = [
-    ...buildGardenTurnEvidenceSearchProjections(resolved.signal),
-    ...factKeys
-  ]
+function planResolvedOwner(resolved: ResolvedV2Owner): PlannedOwner | RejectedOwner {
+  const projections = buildGardenTurnEvidenceSearchProjections(resolved.signal)
     .map((projection) => EvidenceSearchProjectionSchema.parse(projection))
     .sort(compareProjections);
   if (new Set(projections.map(projectionIdentity)).size !==
@@ -356,7 +299,6 @@ function replacePlannedOwners(
 }
 
 function buildReport(
-  db: StorageDatabase,
   sourceSchemaVersion: number,
   workingSchemaVersion: number,
   eligibleOwnerCount: number,
@@ -378,11 +320,7 @@ function buildReport(
     nonzero_child_owner_count: planned.length - zeroChildOwnerCount,
     child_count: rows.length,
     projection_kind_counts: countProjectionKinds(rows),
-    projection_content_sha256: digestRows(rows),
-    fact_frame_formation: summarizeFactFrameFormations(
-      db,
-      planned.map(({ owner }) => owner.object_id)
-    )
+    projection_content_sha256: digestRows(rows)
   });
 }
 
@@ -404,8 +342,7 @@ function emptyReport(
     nonzero_child_owner_count: 0,
     child_count: 0,
     projection_kind_counts: Object.freeze([]),
-    projection_content_sha256: digestRows([]),
-    fact_frame_formation: emptyFactFrameFormationSummary()
+    projection_content_sha256: digestRows([])
   });
 }
 

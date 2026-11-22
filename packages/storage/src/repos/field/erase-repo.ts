@@ -29,6 +29,7 @@ import type {
 import { scrubDerivedPrivacyClosure } from "./writes/erase/derived-closure.js";
 import type { EraseAuditRedactor } from "./writes/erase/governance-closure.js";
 import { repairSourceClosureBatch } from "./writes/erase/repair-progress.js";
+import { discoverEraseGenerationSubjects, invalidateErasedProjections } from "./writes/erase/projection-invalidation.js";
 
 type EraseSubject = Readonly<{
   subject_kind: ProjectionEraseSubjectKind;
@@ -86,7 +87,9 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
       this.insertDescendantBarriers(stored, closure.subjects);
       this.scrubEvidence(stored, closure.evidenceIds, closure.subjects);
       this.scrubSubjects(stored, closure.subjects);
-      this.invalidateGenerations(stored.workspace_id, closure.subjects);
+      const generationIds = closure.subjects.filter(subject => subject.subject_kind === "generation")
+        .map(subject => subject.subject_id);
+      invalidateErasedProjections(this.database, stored, generationIds);
       return stored;
     }, "erase barrier");
   }
@@ -149,7 +152,7 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
     return {
       subjects: row.subject_kind === "generation" || !includeCurrentGenerations
         ? subjects
-        : [...subjects, ...this.discoverGenerations(row.workspace_id)],
+        : [...subjects, ...discoverEraseGenerationSubjects(this.database, row.workspace_id)],
       evidenceIds: row.subject_kind === "source_record"
         ? [...new Set(subjects.filter(subject => subject.subject_kind === "source_record")
           .flatMap(subject => this.discoverEvidenceIds(row.workspace_id, subject.subject_id)))].sort()
@@ -216,15 +219,6 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
     });
   }
 
-  private discoverGenerations(workspaceId: string): readonly EraseSubject[] {
-    return parseRows(this.database.connection.prepare(`
-      SELECT 'generation' AS subject_kind, generation_id AS subject_id
-      FROM projection_generations
-      WHERE workspace_id = ?
-      ORDER BY generation_id
-    `).all(workspaceId), eraseSubjectParser, "erase generation descendant");
-  }
-
   private insertDescendantBarriers(
     root: FieldEraseBarrierRow,
     subjects: readonly EraseSubject[]
@@ -251,8 +245,6 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
     const deletes = [
       "DELETE FROM evidence_search_projections WHERE workspace_id = ? AND evidence_object_id = ?",
       "DELETE FROM main.evidence_recall_embeddings WHERE workspace_id = ? AND owner_object_id = ?",
-      "DELETE FROM evidence_fact_frame_formations WHERE workspace_id = ? AND evidence_object_id = ?",
-      "DELETE FROM evidence_semantic_factor_formations WHERE workspace_id = ? AND evidence_object_id = ?"
     ].map((sql) => connection.prepare(sql));
     const scrubCapsule = connection.prepare(`
       UPDATE evidence_capsules
@@ -270,18 +262,7 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
 
   private scrubSubjects(root: FieldEraseBarrierRow, subjects: readonly EraseSubject[]): void {
     const connection = this.database.connection;
-    const deletes = {
-      incidence: connection.prepare(
-        "DELETE FROM factor_incidences WHERE workspace_id = ? AND incidence_id = ?"
-      ),
-      source_span: connection.prepare(
-        "DELETE FROM source_spans WHERE workspace_id = ? AND span_id = ?"
-      )
-    };
-    const clearFactor = connection.prepare(`
-      UPDATE factor_descriptors SET canonical_payload = NULL
-      WHERE workspace_id = ? AND factor_id = ?
-    `);
+    const deleteSpan = connection.prepare("DELETE FROM source_spans WHERE workspace_id = ? AND span_id = ?");
     const clearRecord = connection.prepare(`
       UPDATE source_records SET source_body = NULL
       WHERE workspace_id = ? AND record_id = ?
@@ -311,12 +292,8 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
           ) AS member WHERE json_extract(member.value, '$.root_id') = ?)
     `);
     for (const subject of subjects) {
-      if (subject.subject_kind === "incidence") {
-        deletes.incidence.run(root.workspace_id, subject.subject_id);
-      } else if (subject.subject_kind === "source_span") {
-        deletes.source_span.run(root.workspace_id, subject.subject_id);
-      } else if (subject.subject_kind === "factor") {
-        clearFactor.run(root.workspace_id, subject.subject_id);
+      if (subject.subject_kind === "source_span") {
+        deleteSpan.run(root.workspace_id, subject.subject_id);
       } else if (subject.subject_kind === "source_record") {
         scrubTask.run(root.erased_at, root.workspace_id, subject.subject_id);
         failSessionTask.run(root.erased_at, root.workspace_id, subject.subject_id);
@@ -324,32 +301,6 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
         connection.prepare("DELETE FROM source_host_inventories WHERE workspace_id = ? AND record_id = ?")
           .run(root.workspace_id, subject.subject_id);
       }
-    }
-  }
-
-  private invalidateGenerations(workspaceId: string, subjects: readonly EraseSubject[]): void {
-    const connection = this.database.connection;
-    const deletePointer = connection.prepare(`
-      DELETE FROM projection_generation_pointer
-      WHERE workspace_id = ? AND active_generation_id = ?
-    `);
-    const retire = connection.prepare(`
-      UPDATE projection_generations SET status = 'retired'
-      WHERE workspace_id = ? AND generation_id = ? AND status = 'active'
-    `);
-    const deletePins = connection.prepare(
-      "DELETE FROM projection_pins WHERE workspace_id = ? AND generation_id = ?"
-    );
-    const deleteArtifacts = connection.prepare(`
-      DELETE FROM projection_generation_artifacts
-      WHERE workspace_id = ? AND generation_id = ?
-    `);
-    for (const subject of subjects) {
-      if (subject.subject_kind !== "generation") continue;
-      deletePointer.run(workspaceId, subject.subject_id);
-      retire.run(workspaceId, subject.subject_id);
-      deletePins.run(workspaceId, subject.subject_id);
-      deleteArtifacts.run(workspaceId, subject.subject_id);
     }
   }
 }
@@ -404,7 +355,6 @@ function prepareEraseStatements(database: StorageDatabase) {
   };
 }
 
-/** Source/span erase always drops that source's incidences. A shared factor is a descendant only when no incidence remains outside the erase closure. */
 function descendantSql(kind: ProjectionEraseSubjectKind): string | null {
   if (kind === "source_record") return `
     WITH RECURSIVE records_to_erase(record_id) AS (
@@ -425,46 +375,6 @@ function descendantSql(kind: ProjectionEraseSubjectKind): string | null {
     UNION SELECT 'source_span', span.span_id FROM source_spans AS span
       JOIN records_to_erase AS record ON record.record_id = span.record_id
       WHERE span.workspace_id = @workspaceId
-    UNION SELECT 'incidence', incidence.incidence_id
-      FROM factor_incidences AS incidence
-      JOIN source_spans AS span
-        ON span.workspace_id = incidence.workspace_id AND span.span_id = incidence.span_id
-      JOIN records_to_erase AS record ON record.record_id = span.record_id
-      WHERE span.workspace_id = @workspaceId
-    UNION SELECT 'factor', incidence.factor_id
-      FROM factor_incidences AS incidence
-      JOIN source_spans AS span
-        ON span.workspace_id = incidence.workspace_id AND span.span_id = incidence.span_id
-      JOIN records_to_erase AS record ON record.record_id = span.record_id
-      WHERE span.workspace_id = @workspaceId
-        AND NOT EXISTS (
-          SELECT 1
-          FROM factor_incidences AS remaining
-          JOIN source_spans AS remaining_span
-            ON remaining_span.workspace_id = remaining.workspace_id
-           AND remaining_span.span_id = remaining.span_id
-          WHERE remaining.workspace_id = @workspaceId
-            AND remaining.factor_id = incidence.factor_id
-            AND remaining_span.record_id NOT IN (SELECT record_id FROM records_to_erase)
-        )
-    ORDER BY subject_kind, subject_id
-  `;
-  if (kind === "source_span") return `
-    SELECT 'incidence' AS subject_kind, incidence_id AS subject_id FROM factor_incidences
-      WHERE workspace_id = @workspaceId AND span_id = @subjectId
-    UNION SELECT 'factor', associated.factor_id FROM factor_incidences AS associated
-      WHERE associated.workspace_id = @workspaceId AND associated.span_id = @subjectId
-        AND NOT EXISTS (
-          SELECT 1 FROM factor_incidences AS remaining
-          WHERE remaining.workspace_id = @workspaceId
-            AND remaining.factor_id = associated.factor_id
-            AND remaining.span_id <> @subjectId
-        )
-    ORDER BY subject_kind, subject_id
-  `;
-  if (kind === "factor") return `
-    SELECT 'incidence' AS subject_kind, incidence_id AS subject_id FROM factor_incidences
-      WHERE workspace_id = @workspaceId AND factor_id = @subjectId
     ORDER BY subject_kind, subject_id
   `;
   return null;

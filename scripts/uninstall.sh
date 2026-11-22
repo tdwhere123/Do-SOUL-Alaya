@@ -72,6 +72,33 @@ else
   info "alaya not on PATH — skipping detach (manually edit ~/.claude.json or ~/.codex/config.toml if needed)"
 fi
 
+is_managed_bin_symlink() {
+  local link_path="$1"
+  local home_path="$2"
+  [ -L "$link_path" ] || return 1
+  node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const linkPath = process.argv[1];
+    const homePath = process.argv[2];
+    const rawTarget = fs.readlinkSync(linkPath);
+    const resolvedTarget = path.resolve(path.dirname(linkPath), rawTarget);
+    const canonicalHome = (() => { try { return fs.realpathSync(homePath); } catch { return path.resolve(homePath); } })();
+    const canonicalTarget = (() => {
+      try { return fs.realpathSync(resolvedTarget); } catch {
+        try { return path.join(fs.realpathSync(path.dirname(resolvedTarget)), path.basename(resolvedTarget)); } catch { return resolvedTarget; }
+      }
+    })();
+    const matches = (target, home) => target === home || target.startsWith(home + path.sep);
+    process.exit(matches(resolvedTarget, path.resolve(homePath)) || matches(canonicalTarget, canonicalHome) ? 0 : 1);
+  ' "$link_path" "$home_path"
+}
+
+remove_bin_symlink=0
+if is_managed_bin_symlink "${ALAYA_BIN_DIR}/alaya" "$ALAYA_HOME"; then
+  remove_bin_symlink=1
+fi
+
 # --- remove install dir; keep .bak as the binary rollback point -----------
 if [ -d "$ALAYA_HOME" ]; then
   rm -rf "$ALAYA_HOME"
@@ -87,9 +114,11 @@ if [ -d "${ALAYA_HOME}.bak" ]; then
 fi
 
 # --- remove bin symlink ---------------------------------------------------
-if [ -L "${ALAYA_BIN_DIR}/alaya" ] || [ -e "${ALAYA_BIN_DIR}/alaya" ]; then
+if [ "$remove_bin_symlink" -eq 1 ]; then
   rm -f "${ALAYA_BIN_DIR}/alaya"
   ok "removed ${ALAYA_BIN_DIR}/alaya"
+elif [ -L "${ALAYA_BIN_DIR}/alaya" ] || [ -e "${ALAYA_BIN_DIR}/alaya" ]; then
+  warn "kept ${ALAYA_BIN_DIR}/alaya (not a symlink into ${ALAYA_HOME})"
 fi
 
 # --- config / data dir ----------------------------------------------------

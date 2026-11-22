@@ -9,9 +9,9 @@ import type { SourceConversationRole } from "../source-role/marker.js";
 export const ASSERTION_SEMANTIC_IDENTITY_CONTRACT_ID =
   "alaya.assertion_semantic_identity.v2";
 export const ASSERTION_SEMANTIC_IDENTITY_CONTRACT_VERSION = 2;
-export const ASSERTION_ANTECEDENT_WINDOW_CODE_UNITS = 512;
+const ASSERTION_ANTECEDENT_WINDOW_CODE_UNITS = 512;
 
-export type AssertionTrustedRole = SourceConversationRole;
+type AssertionTrustedRole = SourceConversationRole;
 
 export interface AssertionSemanticIdentityInput {
   readonly formationContractVersion: number;

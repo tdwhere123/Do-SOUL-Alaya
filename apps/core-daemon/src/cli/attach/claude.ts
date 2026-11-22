@@ -20,7 +20,7 @@ export interface AttachClaudeCommandSpec {
 export function createAttachClaudeCommandSpec(deps: AttachClaudeCommandDeps = {}): AttachClaudeCommandSpec {
   return {
     target: "claude-code",
-    description: "Attach Alaya MCP + /alaya-inspect to Claude Code profile files.",
+    description: "Attach Alaya MCP to Claude Code profile files.",
     execute: async (ctx) => await executeAttachClaude(ctx, deps)
   };
 }

@@ -12,7 +12,6 @@
     { "path": "../../packages/engine-gateway" },
     { "path": "../../packages/protocol" },
     { "path": "../../packages/soul" },
-    { "path": "../../packages/storage" },
-    { "path": "../inspector" }
+    { "path": "../../packages/storage" }
   ]
 }

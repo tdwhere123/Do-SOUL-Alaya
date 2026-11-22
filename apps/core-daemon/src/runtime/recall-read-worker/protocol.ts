@@ -21,41 +21,8 @@ import {
 
 import { SourceSemanticObservationRequestSchema, type SourceSemanticObservation } from "./source-semantic-observation.js";
 
-// Target recall uses "conditionalField.recall" only. The memory/evidence/
-// synthesis/path/plasticity operations remain for leftover RecallService
-// ports and are not a second selector.
 export const RECALL_READ_WORKER_OPERATIONS = [
   "ready",
-  "memory.findByWorkspaceId",
-  "memory.findRecallTierWindow",
-  "memory.findByEventTimeWindow",
-  "memory.findByDimension",
-  "memory.findByScopeClass",
-  "memory.searchByKeyword",
-  "memory.searchByKeywordField",
-  "memory.searchByKeywordWithinObjectIds",
-  "memory.searchByKeywordWithinTier",
-  "memory.searchManyByKeywordWithinObjectIds",
-  "memory.searchByAnchorWithinObjectIds",
-  "memory.searchByAnchorWithinTier",
-  "memory.searchByAnchorField",
-  "memory.findByEvidenceRefs",
-  "memory.findBoundEvidenceRefs",
-  "memory.findByIds",
-  "evidence.searchByKeyword",
-  "evidence.searchByKeywordField",
-  "evidence.searchManyByKeywordField",
-  "evidence.findByIds",
-  "evidence.findRecallQualifiedByIds",
-  "evidence.findRecallQualifiedFactKeysByIds",
-  "evidence.findSourceAnchorsByIds",
-  "synthesis.searchByKeyword",
-  "synthesis.searchByKeywordField",
-  "synthesis.searchManyByKeywordField",
-  "synthesis.findByIds",
-  "path.findByAnchors",
-  "path.findByTimeConcernWindowDigests",
-  "pathPlasticity.getStrengthByMemoryId",
   "constraints.findActive",
   "constraints.readBounded",
   "snapshot.beginDeferred",

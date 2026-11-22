@@ -21,9 +21,9 @@ import { parseSurfaceUri } from "../shared/surface-uri.js";
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 
 import {
-  SurfaceBindingDriftCoordinator,
-  type SurfaceBindingDriftGovernancePort
-} from "./surface-binding-drift-coordinator.js";
+  SurfaceDriftCoordinator,
+  type SurfaceDriftGovernancePort
+} from "./surface-drift-coordinator.js";
 
 const BINDING_STATE_TRANSITIONS: Readonly<Record<BindingStateType, readonly BindingStateType[]>> = {
   [BindingState.ACTIVE]: [BindingState.STALE, BindingState.DETACHED],
@@ -56,6 +56,7 @@ export interface SurfaceBindingServiceSurfaceBindingRepoPort {
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<SurfaceBindingRecordView>[]>;
   updateState(
     bindingId: string,
+    workspaceId: string,
     bindingState: BindingStateType,
     updatedAt: string
   ): Readonly<SurfaceBindingRecordView>;
@@ -80,7 +81,7 @@ export interface SurfaceBindingServiceDependencies {
   readonly surfaceBindingRepo: SurfaceBindingServiceSurfaceBindingRepoPort;
   readonly crossCuttingPermissionLookup: SurfaceBindingServiceCrossCuttingLookupPort;
   readonly eventPublisher: SurfaceBindingEventPublisherPort;
-  readonly surfaceDriftService?: SurfaceBindingDriftGovernancePort;
+  readonly surfaceDriftService?: SurfaceDriftGovernancePort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly generateObjectId?: () => string;
   readonly now?: () => string;
@@ -143,13 +144,14 @@ export class SurfaceBindingService {
 
   public readonly warn: (message: string, meta: Record<string, unknown>) => void;
 
-  private readonly driftCoordinator: SurfaceBindingDriftCoordinator;
+  private readonly driftCoordinator: SurfaceDriftCoordinator;
 
   public constructor(public readonly dependencies: SurfaceBindingServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => {});
-    this.driftCoordinator = new SurfaceBindingDriftCoordinator({
+    this.driftCoordinator = new SurfaceDriftCoordinator({
+      entity: "binding",
       surfaceDriftService: dependencies.surfaceDriftService,
       warn: this.warn
     });
@@ -200,15 +202,18 @@ export class SurfaceBindingService {
     return await this.dependencies.surfaceBindingRepo.findByBindingId(parseObjectId(bindingId, "binding_id"));
   }
 
-  public async transitionBindingState(bindingId: string, newState: BindingStateType, reason: string, causedBy: string): Promise<Readonly<SurfaceBindingRecordView>> {
+  public async transitionBindingState(
+    bindingId: string, workspaceId: string, newState: BindingStateType, reason: string, causedBy: string
+  ): Promise<Readonly<SurfaceBindingRecordView>> {
     const parsedBindingId = parseObjectId(bindingId, "binding_id");
+    const parsedWorkspaceId = parseObjectId(workspaceId, "workspace_id");
     const parsedNewState = parseBindingState(newState);
     const parsedReason = parseReason(reason);
     const parsedCausedBy = parseCausedBy(causedBy);
 
     const existing = await this.dependencies.surfaceBindingRepo.findByBindingId(parsedBindingId);
 
-    if (existing === null) {
+    if (existing === null || existing.binding.workspace_id !== parsedWorkspaceId) {
       throw new CoreError("NOT_FOUND", "Surface binding not found");
     }
 
@@ -220,32 +225,8 @@ export class SurfaceBindingService {
     );
 
     try {
-      const occurredAt = this.now();
-      const event: SurfaceBindingEventDraft = {
-        event_type: SurfaceEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
-        entity_type: "surface_binding",
-        entity_id: existing.binding_id,
-        workspace_id: existing.binding.workspace_id,
-        run_id: null,
-        caused_by: parsedCausedBy,
-        payload_json: SoulSurfaceBindingStateChangedPayloadSchema.parse({
-          binding_id: existing.binding_id,
-          object_id: existing.binding.object_id,
-          surface_id: existing.binding.surface_id,
-          from_state: existing.binding.binding_state,
-          to_state: parsedNewState,
-          reason: parsedReason,
-          occurred_at: occurredAt,
-          workspace_id: existing.binding.workspace_id
-        })
-      };
-
-      const updated = await this.requireEventPublisher().appendManyWithMutation([event], () =>
-        this.dependencies.surfaceBindingRepo.updateState(
-          existing.binding_id,
-          parsedNewState,
-          occurredAt
-        )
+      const updated = await this.persistBindingTransition(
+        existing, parsedWorkspaceId, parsedNewState, parsedReason, parsedCausedBy
       );
 
       await this.driftCoordinator.classifyDriftSafely({
@@ -263,6 +244,40 @@ export class SurfaceBindingService {
         releasedBy: parsedCausedBy
       });
     }
+  }
+
+  private persistBindingTransition(
+    existing: Readonly<SurfaceBindingRecordView>, workspaceId: string,
+    state: BindingStateType, reason: string, causedBy: string
+  ): Promise<Readonly<SurfaceBindingRecordView>> {
+    const occurredAt = this.now();
+    const event: SurfaceBindingEventDraft = {
+      event_type: SurfaceEventType.SOUL_SURFACE_BINDING_STATE_CHANGED,
+      entity_type: "surface_binding",
+      entity_id: existing.binding_id,
+      workspace_id: existing.binding.workspace_id,
+      run_id: null,
+      caused_by: causedBy,
+      payload_json: SoulSurfaceBindingStateChangedPayloadSchema.parse({
+        binding_id: existing.binding_id,
+        object_id: existing.binding.object_id,
+        surface_id: existing.binding.surface_id,
+        from_state: existing.binding.binding_state,
+        to_state: state,
+        reason,
+        occurred_at: occurredAt,
+        workspace_id: existing.binding.workspace_id
+      })
+    };
+
+    return this.requireEventPublisher().appendManyWithMutation([event], () =>
+      this.dependencies.surfaceBindingRepo.updateState(
+        existing.binding_id,
+        workspaceId,
+        state,
+        occurredAt
+      )
+    );
   }
 
   public async cascadeDetachBySurfaceId(surfaceId: string, workspaceId: string): Promise<void> {

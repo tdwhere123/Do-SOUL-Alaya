@@ -1,8 +1,5 @@
 import type {
   EvidenceCapsule,
-  EvidenceFactFrameFormationCapture,
-  OpenSemanticFactorFormationCapture,
-  EvidenceOsfSemanticCompletenessReceipt,
   EvidenceHealthState,
   EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
@@ -25,21 +22,15 @@ export interface EvidenceCapsuleRepo {
   create(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
-    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
-    semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>,
     // Create-time role: derived provenance excerpts are not new source bodies.
     sourceProvenance?: boolean
   ): Promise<Readonly<EvidenceCapsule>>;
   createInCurrentTransaction(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
-    factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>,
-    semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
-    semanticCompleteness?: Readonly<EvidenceOsfSemanticCompletenessReceipt>,
     sourceProvenance?: boolean
   ): Readonly<EvidenceCapsule>;
-  deleteById(objectId: string): Promise<void>;
+  deleteById(objectId: string, workspaceId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findRecallQualifiedByIds(
@@ -75,7 +66,6 @@ export interface EvidenceCapsuleRepo {
     page: EvidenceCapsuleListPageOptions
   ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findByHealth(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
-  findByHealthAll?(health: EvidenceHealthState): Promise<readonly Readonly<EvidenceCapsule>[]>;
   updateHealth(
     objectId: string,
     health: EvidenceHealthState,

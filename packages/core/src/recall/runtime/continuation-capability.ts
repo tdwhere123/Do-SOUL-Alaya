@@ -24,7 +24,7 @@ const ISSUED_FIELDS = [
   "supported_result_kinds"
 ] as const;
 
-export function mintContinuationCapability(continuationId: string): string {
+function mintContinuationCapability(continuationId: string): string {
   return createHmac("sha256", SECRET).update(continuationId, "utf8").digest("hex");
 }
 

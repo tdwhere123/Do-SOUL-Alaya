@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
-import { createToolRuntimeIsolatedConfigDir } from "./tool-runtime-wiring-fixture-env.js";
+import {
+  createBenchDaemonConfigDirectoryLease,
+  planBenchDaemonConfigDirectory
+} from "../../../../bench-runner/src/harness/daemon/daemon-config-directory.js";
 
 const TEST_TIMEOUT_MS = 45_000;
 const tempDirs: string[] = [];
@@ -21,6 +24,12 @@ const ENV_KEYS = [
   "ALAYA_SQLITE_WRITE_QUEUE"
 ] as const;
 
+async function createIsolatedConfigDir(): Promise<string> {
+  const configDir = planBenchDaemonConfigDirectory();
+  await createBenchDaemonConfigDirectoryLease(configDir).prepare();
+  return configDir;
+}
+
 describe("daemon tool-runtime bootstrap with real storage", () => {
   afterEach(async () => {
     for (const key of ENV_KEYS) {
@@ -36,7 +45,7 @@ describe("daemon tool-runtime bootstrap with real storage", () => {
 
   it("completes startup steps against a real initDatabase", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "alaya-tool-runtime-authentic-"));
-    const configDir = await createToolRuntimeIsolatedConfigDir();
+    const configDir = await createIsolatedConfigDir();
     tempDirs.push(dataDir, configDir);
     for (const key of ENV_KEYS) {
       originalEnv[key] = process.env[key];

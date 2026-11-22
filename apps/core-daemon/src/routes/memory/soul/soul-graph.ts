@@ -5,6 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { Hono } from "hono";
 import { CoreError } from "@do-soul/alaya-core";
+import { parseRequiredString } from "../../shared/shared.js";
 
 export interface SoulGraphRouteServices {
   readonly workspaceService: {
@@ -32,19 +33,6 @@ export function registerSoulGraphRoutes(app: Hono, services: SoulGraphRouteServi
 
     return context.json({ success: true, data: graph }, 200);
   });
-}
-
-function parseRequiredString(value: string | undefined, message: string): string {
-  if (value === undefined) {
-    throw new CoreError("VALIDATION", message);
-  }
-
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    throw new CoreError("VALIDATION", message);
-  }
-
-  return trimmed;
 }
 
 function parseValidatedSoulGraphParam(parse: () => number): number {

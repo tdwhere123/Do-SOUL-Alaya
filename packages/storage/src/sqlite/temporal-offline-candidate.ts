@@ -18,6 +18,8 @@ import { StorageError } from "../shared/errors.js";
 import { acquireTemporalMaintenanceLease, type TemporalMaintenanceLease } from "./temporal-maintenance-lease.js";
 import { publishNewTemporalFile, syncTemporalDirectory, TemporalFilePublicationError } from "./temporal-file-publication.js";
 import {
+  assertEmptySqliteWal,
+  readSealedSqliteDatabaseDigest,
   readSqliteDatabaseFileWitnessSet,
   type SqliteDatabaseFileWitness
 } from "./sqlite-database-file-witness.js";
@@ -71,86 +73,161 @@ export async function prepareTemporalCandidate(input: {
   }
 }
 
+interface SourcePreparationContext {
+  readonly sourceBefore: readonly TemporalCandidateFileDigest[];
+  readonly sourceSchemaVersions: readonly number[];
+  readonly sourceQuarantines: readonly LegacyPathRelationQuarantine[];
+  readonly sourceSummary: LegacyPathRelationQuarantineSummary;
+}
+
+interface SealedCandidateArtifact {
+  readonly knownMaxVersion: number;
+  readonly candidateSchemaVersions: readonly number[];
+}
+
 async function prepareCandidateWithinLease(paths: NormalizedPaths): Promise<TemporalCandidatePreparation> {
   assertCandidateOutputsAreNew(paths);
-
-  const sourceBefore = readFileSet(paths.sourceFilename);
-  const sourceSchemaVersions = readSchemaMigrationLedger(paths.sourceFilename);
-  assertLegacySourceSchema(sourceSchemaVersions);
-  const sourceQuarantines = readSourceQuarantines(paths.sourceFilename);
-  const sourceSummary = summarizeLegacyPathRelationQuarantines(sourceQuarantines);
+  const sourceContext = readSourcePreparationContext(paths.sourceFilename);
   const copyStagingFilename = stagingFilename(paths.candidateFilename, "copy");
   const sealedStagingFilename = stagingFilename(paths.candidateFilename, "sealed");
   let candidatePublished = false;
 
   try {
-    await copyDatabaseSnapshot(paths.sourceFilename, copyStagingFilename);
-    assertUnchangedSource(paths.sourceFilename, sourceBefore);
-
-    const candidate = initDatabase({ filename: copyStagingFilename, temporalMode: "candidate" });
-    candidate.close();
-    await copyDatabaseSnapshot(copyStagingFilename, sealedStagingFilename);
-
-    const knownMaxVersion = currentKnownMigrationVersion();
-    assertTemporalCandidateDatabaseReady(sealedStagingFilename, knownMaxVersion);
-    const candidateSchemaVersions = readSchemaMigrationLedger(sealedStagingFilename);
-    assertCandidateSchema(sourceSchemaVersions, candidateSchemaVersions);
-    const candidateQuarantines = readCandidateQuarantines(sealedStagingFilename);
-    assertQuarantineReconciliation(sourceQuarantines, sourceSummary, candidateQuarantines);
-    assertUnchangedSource(paths.sourceFilename, sourceBefore);
-
-    publishNewTemporalFile(sealedStagingFilename, paths.candidateFilename);
-    candidatePublished = true;
-    assertTemporalCandidateDatabaseReady(paths.candidateFilename, knownMaxVersion);
-
-    const result: TemporalCandidatePreparation = Object.freeze({
-      selected: false,
-      receiptFilename: paths.receiptFilename,
-      source: Object.freeze({
-        filename: paths.sourceFilename,
-        schemaVersions: sourceSchemaVersions,
-        fileSet: sourceBefore
-      }),
-      candidate: Object.freeze({
-        filename: paths.candidateFilename,
-        schemaVersions: candidateSchemaVersions,
-        sha256: fileSha256(paths.candidateFilename)
-      }),
-      quarantine: Object.freeze({
-        convertedCount: 0,
-        quarantinedCount: sourceSummary.count,
-        digest: sourceSummary.digest
-      })
+    const sealed = await stageAndSealCandidate(
+      paths,
+      sourceContext,
+      copyStagingFilename,
+      sealedStagingFilename
+    );
+    return publishCandidateAndReceipt(paths, sourceContext, sealedStagingFilename, sealed, () => {
+      candidatePublished = true;
     });
-    writeReceiptAtomically(paths.receiptFilename, preparedReceipt(result));
-    return result;
   } catch (error) {
-    if (error instanceof TemporalFilePublicationError && error.publishedFilename === paths.receiptFilename) {
-      try {
-        // Retire the visible success witness durably before its database. If
-        // retirement is uncertain, keep the complete candidate for recovery.
-        fs.unlinkSync(paths.receiptFilename);
-        syncTemporalDirectory(path.dirname(paths.receiptFilename));
-      } catch (compensationError) {
-        throw new StorageError("CONFLICT", "Temporal receipt publication failed; candidate retained for recovery.",
-          new AggregateError([error, compensationError]));
-      }
-    }
-    if (candidatePublished || error instanceof TemporalFilePublicationError && error.publishedFilename === paths.candidateFilename) {
-      removeDatabaseFileSet(paths.candidateFilename);
-    }
-    writeFailureReceiptIfPossible(paths.receiptFilename, failureReceipt({
-      sourceFilename: paths.sourceFilename,
-      sourceSchemaVersions,
-      sourceFileSet: sourceBefore,
-      sourceSummary,
-      error
-    }));
+    rollbackFailedCandidatePreparation(paths, sourceContext, candidatePublished, error);
     throw error;
   } finally {
     removeDatabaseFileSet(copyStagingFilename);
     removeDatabaseFileSet(sealedStagingFilename);
   }
+}
+
+function readSourcePreparationContext(sourceFilename: string): SourcePreparationContext {
+  const sourceBefore = readFileSet(sourceFilename);
+  const sourceSchemaVersions = readSchemaMigrationLedger(sourceFilename);
+  assertLegacySourceSchema(sourceSchemaVersions);
+  const sourceQuarantines = readSourceQuarantines(sourceFilename);
+  return {
+    sourceBefore,
+    sourceSchemaVersions,
+    sourceQuarantines,
+    sourceSummary: summarizeLegacyPathRelationQuarantines(sourceQuarantines)
+  };
+}
+
+async function stageAndSealCandidate(
+  paths: NormalizedPaths,
+  context: SourcePreparationContext,
+  copyStagingFilename: string,
+  sealedStagingFilename: string
+): Promise<SealedCandidateArtifact> {
+  await copyDatabaseSnapshot(paths.sourceFilename, copyStagingFilename);
+  assertUnchangedSource(paths.sourceFilename, context.sourceBefore);
+
+  const candidate = initDatabase({ filename: copyStagingFilename, temporalMode: "candidate" });
+  try {
+    candidate.optimize();
+    // A busy checkpoint reports failure as a row instead of throwing.
+    const [checkpoint] = candidate.connection.pragma("wal_checkpoint(TRUNCATE)") as readonly [{ busy: number }];
+    if (checkpoint.busy !== 0) {
+      throw new StorageError("CONFLICT", "Temporal candidate WAL could not be truncated.");
+    }
+    assertEmptySqliteWal(copyStagingFilename);
+  } finally {
+    candidate.close({ optimize: false });
+  }
+  await copyDatabaseSnapshot(copyStagingFilename, sealedStagingFilename);
+
+  const knownMaxVersion = currentKnownMigrationVersion();
+  assertTemporalCandidateDatabaseReady(sealedStagingFilename, knownMaxVersion);
+  const candidateSchemaVersions = readSchemaMigrationLedger(sealedStagingFilename);
+  assertCandidateSchema(context.sourceSchemaVersions, candidateSchemaVersions);
+  assertQuarantineReconciliation(
+    context.sourceQuarantines,
+    context.sourceSummary,
+    readCandidateQuarantines(sealedStagingFilename)
+  );
+  assertUnchangedSource(paths.sourceFilename, context.sourceBefore);
+
+  return { knownMaxVersion, candidateSchemaVersions };
+}
+
+function publishCandidateAndReceipt(
+  paths: NormalizedPaths,
+  context: SourcePreparationContext,
+  sealedStagingFilename: string,
+  sealed: SealedCandidateArtifact,
+  markPublished: () => void
+): TemporalCandidatePreparation {
+  publishNewTemporalFile(sealedStagingFilename, paths.candidateFilename);
+  markPublished();
+  assertTemporalCandidateDatabaseReady(paths.candidateFilename, sealed.knownMaxVersion);
+
+  const result: TemporalCandidatePreparation = Object.freeze({
+    selected: false,
+    receiptFilename: paths.receiptFilename,
+    source: Object.freeze({
+      filename: paths.sourceFilename,
+      schemaVersions: context.sourceSchemaVersions,
+      fileSet: context.sourceBefore
+    }),
+    candidate: Object.freeze({
+      filename: paths.candidateFilename,
+      schemaVersions: sealed.candidateSchemaVersions,
+      sha256: readSealedSqliteDatabaseDigest(paths.candidateFilename)
+    }),
+    quarantine: Object.freeze({
+      convertedCount: 0,
+      quarantinedCount: context.sourceSummary.count,
+      digest: context.sourceSummary.digest
+    })
+  });
+  writeReceiptAtomically(paths.receiptFilename, preparedReceipt(result));
+  return result;
+}
+
+function rollbackFailedCandidatePreparation(
+  paths: NormalizedPaths,
+  context: SourcePreparationContext,
+  candidatePublished: boolean,
+  error: unknown
+): void {
+  if (error instanceof TemporalFilePublicationError && error.publishedFilename === paths.receiptFilename) {
+    try {
+      // Retire the visible success witness durably before its database. If
+      // retirement is uncertain, keep the complete candidate for recovery.
+      fs.unlinkSync(paths.receiptFilename);
+      syncTemporalDirectory(path.dirname(paths.receiptFilename));
+    } catch (compensationError) {
+      throw new StorageError(
+        "CONFLICT",
+        "Temporal receipt publication failed; candidate retained for recovery.",
+        new AggregateError([error, compensationError])
+      );
+    }
+  }
+  if (
+    candidatePublished ||
+    (error instanceof TemporalFilePublicationError && error.publishedFilename === paths.candidateFilename)
+  ) {
+    removeDatabaseFileSet(paths.candidateFilename);
+  }
+  writeFailureReceiptIfPossible(paths.receiptFilename, failureReceipt({
+    sourceFilename: paths.sourceFilename,
+    sourceSchemaVersions: context.sourceSchemaVersions,
+    sourceFileSet: context.sourceBefore,
+    sourceSummary: context.sourceSummary,
+    error
+  }));
 }
 
 function normalizePaths(input: {
@@ -406,14 +483,6 @@ function writeReceiptAtomically(filename: string, receipt: Record<string, unknow
   }
 }
 
-function fileSha256(filename: string): string {
-  return fileBytesSha256(fs.readFileSync(filename));
-}
-
 function fileTextSha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function fileBytesSha256(value: Uint8Array): string {
-  return createHash("sha256").update(value).digest("hex");
 }

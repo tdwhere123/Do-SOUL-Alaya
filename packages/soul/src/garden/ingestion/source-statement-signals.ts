@@ -19,7 +19,7 @@ export function sourceStatementSessionInput(messages: readonly ConversationMessa
 }
 
 /** An admitted source root holding session messages. A root seen as another target's context needs its version. */
-export type SourceStatementRoot = Readonly<{
+type SourceStatementRoot = Readonly<{
   root_id: string; source_id: string; content_digest: string; source_version?: string;
 }>;
 /** A session message at its exact host occurrence inside its own admitted root. */

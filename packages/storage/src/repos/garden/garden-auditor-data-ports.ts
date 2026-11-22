@@ -127,12 +127,14 @@ export function createGreenMaintenancePort(
   return {
     findExpiringGreenStatuses: async (workspaceId, lookaheadMs) =>
       findExpiringGreenStatuses(statements, context, workspaceId, lookaheadMs),
-    renewGreenPassiveStable: (greenStatusId) => {
+    renewGreenPassiveStable: (status, workspaceId) => {
       const nowIso = context.now();
-      statements.renewPassiveStableStatement.run(nowIso, nowIso, nowIso, greenStatusId);
+      return statements.renewPassiveStableStatement.run(
+        nowIso, nowIso, nowIso, ...expiringGreenBaseline(status, workspaceId)
+      ).changes === 1;
     },
-    requestActiveVerification: (greenStatusId) =>
-      requestActiveVerification(statements, context, greenStatusId),
+    requestActiveVerification: (status, workspaceId) =>
+      requestActiveVerification(statements, context, status, workspaceId),
     revokeGreen: (memoryEntryId, reason, _taskId, workspaceId) =>
       revokeGreen(statements, context, memoryEntryId, workspaceId, reason),
     revokeGreenOnEvidenceRewrite: (query) =>
@@ -156,18 +158,23 @@ function findExpiringGreenStatuses(
 function requestActiveVerification(
   statements: GreenMaintenanceStatements,
   context: GardenDataPortFactoryContext,
-  greenStatusId: string
-): void {
+  status: ExpiringGreenStatus,
+  workspaceId: string
+): boolean {
   const nowIso = context.now();
   const graceUntil = addMilliseconds(nowIso, ACTIVE_VERIFICATION_GRACE_MS);
-  statements.requestActiveVerificationStatement.run(
+  return statements.requestActiveVerificationStatement.run(
     nowIso,
     nowIso,
     graceUntil,
     nowIso,
     nowIso,
-    greenStatusId
-  );
+    ...expiringGreenBaseline(status, workspaceId)
+  ).changes === 1;
+}
+
+function expiringGreenBaseline(status: ExpiringGreenStatus, workspaceId: string) {
+  return [status.green_status_id, workspaceId, status.green_state, status.valid_until, status.last_transition_at] as const;
 }
 
 function revokeGreen(

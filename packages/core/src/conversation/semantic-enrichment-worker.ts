@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { SemanticArtifactCodec, SemanticArtifactRepositoryPort, SemanticArtifactWork,
   SemanticEnrichmentTask, SemanticSourceSnapshot, SemanticTransportAttempt } from "@do-soul/alaya-protocol";
 
-export type SemanticTransportSpendCapability = "unsupported";
-export type SemanticTransportCompletionTokenCapability = "unsupported" | "enforced";
+type SemanticTransportSpendCapability = "unsupported";
+type SemanticTransportCompletionTokenCapability = "unsupported" | "enforced";
 
-export type SemanticTransportCapabilities = Readonly<{
+type SemanticTransportCapabilities = Readonly<{
   readonly configured: boolean;
   readonly requestBytes: "accounted";
   readonly completionTokens: SemanticTransportCompletionTokenCapability;

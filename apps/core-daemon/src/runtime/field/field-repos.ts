@@ -4,7 +4,6 @@ import {
   SqliteFieldCausalUsageRepo,
   SqliteFieldDerivationJobRepo,
   SqliteFieldEraseBarrierRepo,
-  SqliteFieldFactorRepo,
   SqliteFieldProjectionGenerationRepo,
   SqliteFieldProofEffectRepo,
   SqliteFieldSourceRecordRepo,
@@ -15,7 +14,6 @@ import {
 export type DaemonFieldRepos = Readonly<{
   readonly records: SqliteFieldSourceRecordRepo;
   readonly spans: SqliteFieldSourceSpanRepo;
-  readonly factors: SqliteFieldFactorRepo;
   readonly jobs: SqliteFieldDerivationJobRepo;
   readonly generations: SqliteFieldProjectionGenerationRepo;
   readonly erase: SqliteFieldEraseBarrierRepo;
@@ -33,7 +31,6 @@ export function createDaemonFieldRepos(input: Readonly<{
   return Object.freeze({
     records: new SqliteFieldSourceRecordRepo(input.database, sha256),
     spans: new SqliteFieldSourceSpanRepo(input.database, sha256),
-    factors: new SqliteFieldFactorRepo(input.database, sha256),
     jobs: new SqliteFieldDerivationJobRepo(input.database, sha256),
     generations: new SqliteFieldProjectionGenerationRepo(input.database, sha256),
     erase,

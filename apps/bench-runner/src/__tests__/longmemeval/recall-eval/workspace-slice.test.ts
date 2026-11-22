@@ -1,9 +1,10 @@
-import { copyFileSync, existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   closeCachedDatabase,
+  detachEmbeddingOverlay,
   EMBEDDING_OVERLAY_BIND_FILENAME,
   initDatabase,
   SqliteClaimElectionLeaseRepo,
@@ -589,17 +590,52 @@ describe("workspace slice install and daemon reopen", () => {
     }
   });
 
-  it("restores foreign_keys after a failed slice attach", () => {
+  it.each([0, 1])("restores SQLite state after rollback with foreign_keys=%i", (foreignKeys) => {
     const dataDir = join(root, "fk-restore");
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
-    const live = initDatabase({ filename: join(dataDir, "alaya.db") });
+    const filename = workingAlayaDbPath(dataDir);
+    writeRealMemoryOverlayBeside(filename, MEMORY_A, WORKSPACE_A);
+    const live = initDatabase({ filename });
     try {
+      live.connection.pragma(foreignKeys === 1 ? "foreign_keys = ON" : "foreign_keys = OFF");
+      const original = live.connection.prepare("SELECT workspace_id FROM workspaces ORDER BY workspace_id").all();
+      expect(original.length).toBeGreaterThan(0);
       const triggerCountBefore = countTriggers(live);
       expect(triggerCountBefore).toBeGreaterThan(0);
-      expect(() => loadSliceIntoOpenDatabase(live, join(dataDir, "missing-slice.db"))).toThrow();
-      const fk = live.connection.pragma("foreign_keys") as ReadonlyArray<{ foreign_keys: number }>;
-      expect(fk[0]?.foreign_keys).toBe(1);
+      expect(() => loadSliceIntoOpenDatabase(live, join(dataDir, "missing-slice.db"))).toThrow(/no such table/u);
+      expect(live.connection.inTransaction).toBe(false);
+      expect(live.connection.prepare("SELECT workspace_id FROM workspaces ORDER BY workspace_id").all()).toEqual(original);
+      expect(live.connection.pragma("database_list")).not.toContainEqual(expect.objectContaining({ name: "slice_src" }));
+      expect(live.connection.pragma("foreign_keys", { simple: true })).toBe(foreignKeys);
       expect(countTriggers(live)).toBe(triggerCountBefore);
+      expect(countTable(live, "memory_embeddings")).toBe(1);
+      expect(countTable(live, "main.memory_embeddings")).toBe(0);
+    } finally {
+      live.close();
+    }
+  });
+
+  it("preserves the primary slice load error when overlay rebinding also fails during cleanup", () => {
+    const dataDir = join(root, "primary-error-preserve");
+    installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
+    const filename = workingAlayaDbPath(dataDir);
+    const overlayPath = writeRealMemoryOverlayBeside(filename, MEMORY_A, WORKSPACE_A);
+    const live = initDatabase({ filename });
+    try {
+      live.connection.pragma("foreign_keys = ON");
+      detachEmbeddingOverlay(live.connection);
+      unlinkSync(overlayPath);
+      let caught: unknown;
+      try {
+        loadSliceIntoOpenDatabase(live, join(dataDir, "missing-slice.db"));
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).toMatch(/no such table/u);
+      expect((caught as Error).cause).toMatchObject({ message: "embedding overlay file is missing" });
+      expect(live.connection.pragma("database_list")).not.toContainEqual(expect.objectContaining({ name: "slice_src" }));
+      expect(live.connection.pragma("foreign_keys", { simple: true })).toBe(1);
     } finally {
       live.close();
     }
@@ -628,8 +664,6 @@ function assertSliceMatchesPacked(
   try {
     expect(countTableWhere(slice, "memory_entries", workspaceId))
       .toBe(countTableWhere(packed, "memory_entries", workspaceId));
-    expect(countTableWhere(slice, "factor_incidences", workspaceId))
-      .toBe(countTableWhere(packed, "factor_incidences", workspaceId));
     expect(countFts(slice, "memory_content_fts_porter"))
       .toBe(countTableWhere(packed, "memory_entries", workspaceId));
     expect(countTableWhere(slice, "memory_entries", workspaceId === WORKSPACE_A ? WORKSPACE_B : WORKSPACE_A))

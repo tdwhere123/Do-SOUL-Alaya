@@ -1,4 +1,4 @@
-import { WorkspaceSchema, type Workspace } from "@do-soul/alaya-protocol";
+import { WorkspaceSchema, type Workspace, type WorkspaceListScope } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
@@ -17,8 +17,8 @@ export type WorkspaceCreateInput = Omit<Workspace, "created_at" | "archived_at" 
 export interface WorkspaceRepo {
   create(data: WorkspaceCreateInput): Workspace;
   getById(id: string): Promise<Workspace | null>;
-  list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]>;
-  count(): Promise<number>;
+  list(page?: WorkspaceListPageOptions, scope?: WorkspaceListScope): Promise<readonly Workspace[]>;
+  count(scope?: WorkspaceListScope): Promise<number>;
   delete(id: string): void;
   updateRepoPath(id: string, repoPath: Workspace["repo_path"]): Promise<Workspace>;
   updateDefaultEngineBinding(id: string, bindingId: string | null): Workspace;
@@ -107,9 +107,20 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     }
   }
 
-  public async list(page?: WorkspaceListPageOptions): Promise<readonly Workspace[]> {
+  public async list(
+    page?: WorkspaceListPageOptions,
+    scope: WorkspaceListScope = { kind: "all" }
+  ): Promise<readonly Workspace[]> {
+    if (scope.kind === "allowlist") {
+      if (scope.workspaceIds.length === 0) {
+        return [];
+      }
+      return this.listAllowedWorkspaces(scope.workspaceIds, page);
+    }
+
     try {
-      const rows = parseRows(page === undefined
+      const rows = parseRows(
+        page === undefined
           ? this.active().listStatement.all()
           : this.active().listPagedStatement.all(page.limit, page.offset),
         WorkspaceRowParser,
@@ -121,12 +132,42 @@ export class SqliteWorkspaceRepo implements WorkspaceRepo {
     }
   }
 
-  public async count(): Promise<number> {
+  public async count(scope: WorkspaceListScope = { kind: "all" }): Promise<number> {
+    if (scope.kind === "allowlist") {
+      if (scope.workspaceIds.length === 0) {
+        return 0;
+      }
+      try {
+        const row = this.active().countByIdsStatement.get(JSON.stringify(scope.workspaceIds)) as CountRow | undefined;
+        return row === undefined ? 0 : Number(row.total);
+      } catch (error) {
+        throw new StorageError("QUERY_FAILED", "Failed to count workspaces.", error);
+      }
+    }
+
     try {
       const row = this.active().countStatement.get() as CountRow | undefined;
       return row === undefined ? 0 : Number(row.total);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to count workspaces.", error);
+    }
+  }
+
+  private listAllowedWorkspaces(
+    allowedIds: readonly string[],
+    page?: WorkspaceListPageOptions
+  ): readonly Workspace[] {
+    const allowedIdsJson = JSON.stringify(allowedIds);
+    try {
+      return parseRows(
+        page === undefined
+          ? this.active().listByIdsStatement.all(allowedIdsJson)
+          : this.active().listByIdsPagedStatement.all(allowedIdsJson, page.limit, page.offset),
+        WorkspaceRowParser,
+        "workspace row"
+      );
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to list workspaces.", error);
     }
   }
 

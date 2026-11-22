@@ -16,7 +16,6 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createStatementSessionTaskProcessor } from "../../garden/host-worker/statement-session-task-processor.js";
-import { createPostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
 import { createHostSessionCapture, createHostSessionSourceAudit, MCP_HOST_SESSION_ISSUER } from "../../garden/host-session/host-session-capture.js";
 import { createHostSessionCaptureHandler } from "../../mcp-memory/tool/host-session-handler.js";
 import { createDaemonFieldComposition } from "../../runtime/field/field-composition.js";
@@ -84,7 +83,7 @@ export async function createStatementSessionEnvironment() {
     sourceGroundingDeferTransitions: createSourceGroundingDeferTransitions({ eventLogRepo, signalRepo, queueRepo }),
     postTriageMaterializer: { materialize: async (signal, context) => await router.materializeSignal(signal, context) } });
   const gardenTaskRepo = new SqliteGardenTaskRepo(database.connection, eventPublisher);
-  const signalReceiver = createPostTurnSignalReceiver(signalService);
+  const signalReceiver = signalService;
   const requests: SourceStatementRequest[] = [];
   const warnings: { message: string; meta: Record<string, unknown> }[] = [];
   const warn = (message: string, meta: Record<string, unknown>) => { warnings.push({ message, meta }); };
@@ -112,10 +111,12 @@ export async function createStatementSessionEnvironment() {
         return { rawJson: JSON.stringify({ messages: request.messages.map(message => ({
           message_id: message.message_id, statements: respond(message.text) })) }) };
       } } }),
-    processSession: (provider: OfficialApiGardenProvider, config: RuntimeGardenComputeConfig = OFFICIAL_CONFIG) =>
-      createStatementSessionTaskProcessor({ now, gardenTaskRepo, eventPublisher, signalReceiver, hostSessionCapture,
+    processSession: (provider: OfficialApiGardenProvider, config: RuntimeGardenComputeConfig = OFFICIAL_CONFIG,
+      onStatementSessionSettled?: Parameters<typeof createStatementSessionTaskProcessor>[0]["onStatementSessionSettled"]) =>
+      createStatementSessionTaskProcessor({ now, gardenTaskRepo, eventLogRepo, eventPublisher, signalReceiver, hostSessionCapture,
         configService: { getRuntimeGardenComputeConfig: async () => config },
-        officialApiGardenProvider: provider, warn })(),
+        officialApiGardenProvider: provider,
+        ...(onStatementSessionSettled === undefined ? {} : { onStatementSessionSettled }) })(),
     sessionTasks: () => database.connection.prepare(`SELECT id, status, payload_json, last_error_text FROM garden_tasks
       WHERE kind = 'source_statement_session' ORDER BY json_extract(payload_json, '$.chunk_index')`)
       .all() as { id: string; status: string; payload_json: string; last_error_text: string | null }[],

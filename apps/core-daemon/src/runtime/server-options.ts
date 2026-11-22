@@ -34,13 +34,17 @@ function stripBrackets(host: string): string {
 
 export function isLoopbackHost(host: string): boolean {
   const normalized = stripBrackets(host);
-  if (normalized === "localhost" || normalized === "::1") {
+  if (normalized.toLowerCase() === "localhost" || normalized === "::1") {
     return true;
   }
   if (normalized.startsWith("::ffff:")) {
     return isLoopbackHost(normalized.slice("::ffff:".length));
   }
   return /^127(?:\.\d{1,3}){3}$/.test(normalized);
+}
+
+function normalizeLoopbackTcpHost(host: string): string {
+  return stripBrackets(host).toLowerCase() === "localhost" ? DEFAULT_DAEMON_HOST : host;
 }
 
 /**
@@ -92,37 +96,51 @@ export function resolveUnixSocketPath(envLike: DaemonHostEnvLike): string | unde
   return undefined;
 }
 
-export function resolveDaemonListenPolicy(envLike: DaemonHostEnvLike): DaemonListenPolicy {
-  const socketPath = resolveUnixSocketPath(envLike);
+export interface DaemonListenPolicyOverrides {
+  readonly hostname?: string;
+}
+
+export function resolveDaemonListenPolicy(
+  envLike: DaemonHostEnvLike,
+  overrides?: DaemonListenPolicyOverrides
+): DaemonListenPolicy {
+  const overrideHost = readOptionalEnvValue(overrides?.hostname);
+  const envSocketPath = resolveUnixSocketPath(envLike);
+  const overrideSocketPath =
+    overrideHost !== undefined && isUnixSocketPath(overrideHost)
+      ? normalizeUnixSocketPath(overrideHost)
+      : undefined;
+  const socketPath = overrideSocketPath ?? envSocketPath;
   const configuredHost = readOptionalEnvValue(envLike.DAEMON_HOST);
   const tcpHostCandidate =
-    configuredHost !== undefined && !isUnixSocketPath(configuredHost)
-      ? configuredHost
-      : DEFAULT_DAEMON_HOST;
+    overrideHost !== undefined && !isUnixSocketPath(overrideHost)
+      ? overrideHost
+      : configuredHost !== undefined && !isUnixSocketPath(configuredHost)
+        ? configuredHost
+        : DEFAULT_DAEMON_HOST;
 
   if (socketPath !== undefined) {
     // Unix socket is the supported non-loopback alternative; never also bind wildcard TCP.
-    return { kind: "unix", path: socketPath, tcpHost: DEFAULT_DAEMON_HOST };
+    // Env DAEMON_HOST is superseded by ALAYA_DAEMON_SOCKET, while programmatic hostname
+    // overrides must still be loopback.
+    const unixTcpHost =
+      overrideHost !== undefined && !isUnixSocketPath(overrideHost)
+        ? overrideHost
+        : DEFAULT_DAEMON_HOST;
+    if (!isLoopbackHost(unixTcpHost)) {
+      throw new Error(
+        `Plaintext remote HTTP is unsupported for DAEMON_HOST / listen hostname "${unixTcpHost}". Bind loopback (${DEFAULT_DAEMON_HOST}) or set ALAYA_DAEMON_SOCKET to a unix socket path.`
+      );
+    }
+    return { kind: "unix", path: socketPath, tcpHost: normalizeLoopbackTcpHost(unixTcpHost) };
   }
 
   if (isLoopbackHost(tcpHostCandidate)) {
-    return { kind: "loopback", host: tcpHostCandidate };
-  }
-
-  if (!isRemoteDaemonOptInEnabled(envLike)) {
-    throw new Error(
-      `DAEMON_HOST="${tcpHostCandidate}" is not loopback. Set ALAYA_ALLOW_REMOTE_DAEMON=1 to allow remote daemon listening.`
-    );
-  }
-
-  if (isWildcardHost(tcpHostCandidate) && !isWildcardBindOptInEnabled(envLike)) {
-    throw new Error(
-      `DAEMON_HOST="${tcpHostCandidate}" is a wildcard bind. Set ALAYA_ALLOW_WILDCARD_BIND=1 in addition to ALAYA_ALLOW_REMOTE_DAEMON=1.`
-    );
+    return { kind: "loopback", host: normalizeLoopbackTcpHost(tcpHostCandidate) };
   }
 
   throw new Error(
-    `Plaintext remote HTTP is unsupported for DAEMON_HOST="${tcpHostCandidate}". Bind loopback (127.0.0.1) or set ALAYA_DAEMON_SOCKET to a unix socket path.`
+    `Plaintext remote HTTP is unsupported for DAEMON_HOST / listen hostname "${tcpHostCandidate}". Bind loopback (${DEFAULT_DAEMON_HOST}) or set ALAYA_DAEMON_SOCKET to a unix socket path.`
   );
 }
 
@@ -147,7 +165,10 @@ export function warnIfRemoteDaemonListening(
   );
 }
 
-export function resolveDaemonHostFromEnv(envLike: DaemonHostEnvLike): string {
-  const policy = resolveDaemonListenPolicy(envLike);
+export function resolveDaemonHostFromEnv(
+  envLike: DaemonHostEnvLike,
+  overrides?: DaemonListenPolicyOverrides
+): string {
+  const policy = resolveDaemonListenPolicy(envLike, overrides);
   return policy.kind === "unix" ? policy.tcpHost : policy.host;
 }

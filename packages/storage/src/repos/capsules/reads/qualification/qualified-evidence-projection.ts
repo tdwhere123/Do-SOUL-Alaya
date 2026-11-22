@@ -1,23 +1,17 @@
-import { buildAttributedAssociativeFactKeyProjections, EvidenceSearchProjectionKindSchema, EvidenceSearchProjectionSchema, groundAssociativeFactFrame, isGardenSourceTurnFallbackV2Receipt, projectGardenSourceTurnFallbackV2AssistantObservations, projectGardenSourceTurnFallbackV2UserContent, parseVerifiedUserAssertionSourceHash, type EvidenceCapsule, type EvidenceFactFrameFormationCapture, type EvidenceSearchProjection, type AssociativeFactFrame, type AssociativeFactKeyProjectionForm, type CandidateMemorySignal, type GardenSourceTurnFallbackVerifiedReceipt, type OpenSemanticFactorFormationCapture, KIND_PROJECTION_KIND_VALUE_LIMIT } from "@do-soul/alaya-protocol";
+import { buildAttributedAssociativeFactKeyProjections, EvidenceSearchProjectionKindSchema, EvidenceSearchProjectionSchema, groundAssociativeFactFrame, isGardenSourceTurnFallbackV2Receipt, projectGardenSourceTurnFallbackV2AssistantObservations, projectGardenSourceTurnFallbackV2UserContent, parseVerifiedUserAssertionSourceHash, type EvidenceCapsule, type EvidenceSearchProjection, type AssociativeFactFrame, type AssociativeFactKeyProjectionForm, type CandidateMemorySignal, type GardenSourceTurnFallbackVerifiedReceipt, KIND_PROJECTION_KIND_VALUE_LIMIT } from "@do-soul/alaya-protocol";
 import { factFramePreservesSourceObligations } from "@do-soul/alaya-protocol/node/source-frame";
 import type {
   EvidenceSearchMatch,
   EvidenceSearchProjectionIdentity,
   RecallQualifiedEvidence
 } from "../../evidence-recall-types.js";
-import {
-  readStoredFactFrameFormation,
-  type StoredFactFrameFormationColumns
-} from "./fact-frame-formation-read.js";
-
-export interface StoredProjectionRow extends StoredFactFrameFormationColumns {
+export interface StoredProjectionRow {
   readonly evidence_object_id: string;
   readonly projection_id: number;
   readonly projection_kind: string;
   readonly workspace_id: string;
   readonly source_hash: string;
   readonly content: string;
-  readonly source_text: string | null;
 }
 
 interface BoundProjection {
@@ -25,7 +19,6 @@ interface BoundProjection {
   readonly workspaceId: string;
   readonly sourceHash: string;
   readonly projection: Readonly<EvidenceSearchProjection>;
-  readonly factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>;
 }
 
 interface RederivedFactKeyProjection {
@@ -35,20 +28,6 @@ interface RederivedFactKeyProjection {
 }
 
 export type QualifiedProjectionIndex = ReadonlyMap<string, BoundProjection>;
-
-/** Object-key consumers need current derived facts, independently of source receipt routing. */
-export function readCurrentStoredFactKeyContents(
-  capsule: Readonly<Pick<EvidenceCapsule, "object_id" | "workspace_id" | "source_hash" | "excerpt">>,
-  projections: QualifiedProjectionIndex
-): readonly string[] {
-  return Object.freeze([...projections.values()].flatMap((stored) => {
-    const frame = stored.factFrameFormation;
-    if (stored.evidenceObjectId !== capsule.object_id || stored.projection.projection_kind !== "fact_key" ||
-        frame?.status !== "formed" || frame.fact_frame === null) return [];
-    const matched = matchRederivedFactKey(stored.projection, capsule, stored, frame.fact_frame);
-    return matched === null ? [] : [matched.projection.content];
-  }));
-}
 
 export class EvidenceProjectionIntegrityError extends Error {
   public constructor(evidenceObjectId: string, reason: string) {
@@ -80,20 +59,6 @@ export function readQualifiedProjectionIndex(
 ): QualifiedProjectionIndex {
   const projections = new Map<string, BoundProjection>();
   for (const row of rows) {
-    let factFrameFormation: Readonly<EvidenceFactFrameFormationCapture> | undefined;
-    try {
-      factFrameFormation = readStoredFactFrameFormation(
-        row,
-        row.workspace_id,
-        row.source_hash,
-        row.source_text
-      );
-    } catch (error) {
-      throw new EvidenceProjectionIntegrityError(
-        row.evidence_object_id,
-        error instanceof Error ? error.message : "invalid fact-frame formation capture"
-      );
-    }
     const parsed = EvidenceSearchProjectionSchema.safeParse({
       projection_id: row.projection_id,
       projection_kind: row.projection_kind,
@@ -104,8 +69,7 @@ export function readQualifiedProjectionIndex(
       evidenceObjectId: row.evidence_object_id,
       workspaceId: row.workspace_id,
       sourceHash: row.source_hash,
-      projection: parsed.data,
-      ...(factFrameFormation === undefined ? {} : { factFrameFormation })
+      projection: parsed.data
     });
     projections.set(projectionKey(row.evidence_object_id, parsed.data), bound);
   }
@@ -117,12 +81,9 @@ export function qualifyEvidenceMatch(
   capsule: Readonly<EvidenceCapsule>,
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null,
   projections: QualifiedProjectionIndex,
-  signal?: Readonly<CandidateMemorySignal>,
-  semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
-  factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
+  signal?: Readonly<CandidateMemorySignal>
 ): RecallQualifiedEvidence | null {
   const verifiedUserProjection = hasVerifiedUserProjection(capsule, receipt);
-  const formations = copyStoredFormations(semanticFactorFormation, factFrameFormation);
   if (match.matched_projection?.projection_kind === "assistant_observation") {
     const projection = rederiveAssistantProjection(
       match.matched_projection,
@@ -140,7 +101,6 @@ export function qualifyEvidenceMatch(
       capsule,
       verified_user_projection: verifiedUserProjection,
       matched_projection: projection,
-      ...formations,
       ...kindProjectionDraftsFromSignal(signal)
     });
   }
@@ -154,7 +114,7 @@ export function qualifyEvidenceMatch(
     if (attributed === null) {
       throw new EvidenceProjectionIntegrityError(
         capsule.object_id,
-        "requested fact key does not match its canonical formation"
+        "requested fact key does not match its source assertion"
       );
     }
     return Object.freeze({
@@ -163,7 +123,6 @@ export function qualifyEvidenceMatch(
       matched_projection: attributed.projection,
       matched_fact_key_forms: attributed.forms,
       matched_fact_frame: attributed.frame,
-      ...formations,
       ...kindProjectionDraftsFromSignal(signal)
     });
   }
@@ -171,7 +130,6 @@ export function qualifyEvidenceMatch(
   return Object.freeze({
     capsule,
     verified_user_projection: verifiedUserProjection,
-    ...formations,
     ...kindProjectionDraftsFromSignal(signal)
   });
 }
@@ -261,15 +219,6 @@ function rederiveFactKeyProjection(
 ): Readonly<RederivedFactKeyProjection> | null {
   const stored = projections.get(projectionKey(capsule.object_id, identity));
   if (stored === undefined) return null;
-  const formed = stored.factFrameFormation;
-  if (formed !== undefined) {
-    if (formed.status !== "formed" || formed.fact_frame === null ||
-        formed.source_hash !== capsule.source_hash) return null;
-    return matchRederivedFactKey(identity, capsule, stored, formed.fact_frame);
-  }
-
-  // Historical rows predate formation captures. They remain readable until
-  // offline backfill seals them through the same canonical formation owner.
   if (!matchesFactKeySignalEnvelope(signal, capsule)) return null;
   const assertion = readPayloadText(signal.raw_payload.source_assertion);
   if (assertion === null || assertion !== capsule.excerpt) return null;
@@ -284,7 +233,6 @@ function matchRederivedFactKey(
   stored: BoundProjection,
   frame: Readonly<AssociativeFactFrame>
 ): Readonly<RederivedFactKeyProjection> | null {
-  // Historical signal fallback and stored captures obey the same source contract.
   if (capsule.excerpt === null || !factFramePreservesSourceObligations(capsule.excerpt, frame)) return null;
   const attributed = buildAttributedAssociativeFactKeyProjections(frame).find(
     ({ projection }) => projection.projection_id === identity.projection_id
@@ -319,21 +267,6 @@ function kindProjectionDraftsFromSignal(
 ): Readonly<{ readonly kind_projection_drafts?: RecallQualifiedEvidence["kind_projection_drafts"] }> {
   const draft = readKindProjectionDraft(signal?.raw_payload.kind_projection);
   return draft === undefined ? {} : { kind_projection_drafts: Object.freeze([draft]) };
-}
-
-function copyStoredFormations(
-  semanticFactorFormation?: Readonly<OpenSemanticFactorFormationCapture>,
-  factFrameFormation?: Readonly<EvidenceFactFrameFormationCapture>
-): Readonly<{
-  readonly semantic_factor_formation?: Readonly<OpenSemanticFactorFormationCapture>;
-  readonly fact_frame_formation?: Readonly<EvidenceFactFrameFormationCapture>;
-}> {
-  return {
-    ...(semanticFactorFormation === undefined
-      ? {}
-      : { semantic_factor_formation: semanticFactorFormation }),
-    ...(factFrameFormation === undefined ? {} : { fact_frame_formation: factFrameFormation })
-  };
 }
 
 function readKindProjectionDraft(

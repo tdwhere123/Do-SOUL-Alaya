@@ -2,20 +2,18 @@ import type {
   AssociativeFactFrame,
   AssociativeFactKeyProjectionForm,
   EvidenceCapsule,
-  EvidenceFactFrameFormationCapture,
   EvidenceSearchProjection,
   FtsLaneId,
-  OpenSemanticFactorFormationCapture,
   StorageTier as StorageTierType
 } from "@do-soul/alaya-protocol";
 
-export const LEXICAL_RAW_RANK_RECEIPT_ID = "alaya.recall.x0.lexical-raw-rank.v1";
-export const LEXICAL_BOUND_PRODUCER_ID =
+const LEXICAL_RAW_RANK_RECEIPT_ID = "alaya.recall.x0.lexical-raw-rank.v1";
+const LEXICAL_BOUND_PRODUCER_ID =
   "alaya.storage.mergeKeywordSearchRows.v1";
-export const LEXICAL_LANE_UNIVERSE_PRODUCER_ID =
+const LEXICAL_LANE_UNIVERSE_PRODUCER_ID =
   "alaya.storage.lexicalLaneEvaluatedUniverse.v1";
 
-export const LEXICAL_LANE_INDEX_KIND = Object.freeze({
+const LEXICAL_LANE_INDEX_KIND = Object.freeze({
   exact: "memory_entries",
   porter: "memory_content_fts_porter",
   trigram: "memory_content_fts",
@@ -23,7 +21,7 @@ export const LEXICAL_LANE_INDEX_KIND = Object.freeze({
   object_key_trigram: "memory_object_key_fts_trigram"
 } as const);
 
-export type LexicalLaneIndexKind =
+type LexicalLaneIndexKind =
   typeof LEXICAL_LANE_INDEX_KIND[keyof typeof LEXICAL_LANE_INDEX_KIND];
 
 export interface KeywordSearchResult {
@@ -42,7 +40,7 @@ export interface KeywordSearchBatchQuery {
   readonly refinement_depths?: readonly number[];
 }
 
-export type RecallEvidenceSearchProjectionIdentity = Readonly<
+type RecallEvidenceSearchProjectionIdentity = Readonly<
   Pick<EvidenceSearchProjection, "projection_id" | "projection_kind">
 >;
 
@@ -57,8 +55,6 @@ export type RecallQualifiedEvidence = Readonly<{
   readonly matched_projection?: Readonly<EvidenceSearchProjection>;
   readonly matched_fact_key_forms?: readonly Readonly<AssociativeFactKeyProjectionForm>[];
   readonly matched_fact_frame?: Readonly<AssociativeFactFrame>;
-  readonly fact_frame_formation?: Readonly<EvidenceFactFrameFormationCapture>;
-  readonly semantic_factor_formation?: Readonly<OpenSemanticFactorFormationCapture>;
   readonly kind_projection_drafts?: readonly Readonly<{
     readonly factor_id: string;
     readonly kind_values: readonly string[];
@@ -86,14 +82,14 @@ export interface KeywordSearchLaneReceipt {
   readonly unseen_upper_bound: number | null;
 }
 
-export type KeywordLexicalLaneId =
+type KeywordLexicalLaneId =
   | "exact"
   | "porter"
   | "trigram"
   | "object_key_porter"
   | "object_key_trigram";
 
-export interface KeywordLexicalMergeCapture {
+interface KeywordLexicalMergeCapture {
   readonly query_run_id: string;
   readonly merge_limit: number;
   readonly lanes: readonly Readonly<{
@@ -119,7 +115,7 @@ export interface KeywordSearchFieldResult {
   readonly refinement_levels?: readonly Readonly<KeywordSearchFieldRefinementLevel>[];
 }
 
-export interface KeywordSearchFieldRefinementLevel {
+interface KeywordSearchFieldRefinementLevel {
   readonly requested_depth: number;
   readonly matches: readonly Readonly<KeywordSearchResult>[];
   readonly lanes: readonly Readonly<KeywordSearchLaneReceipt>[];
@@ -130,7 +126,7 @@ export interface KeywordSearchLaneScope {
   readonly tier?: StorageTierType;
 }
 
-export type MemoryKeywordFieldCaptureVariant =
+type MemoryKeywordFieldCaptureVariant =
   | "lexical_relaxed"
   | "lexical_expanded";
 
@@ -138,18 +134,18 @@ export type MemoryKeywordFieldCapture = Readonly<{
   readonly variant: MemoryKeywordFieldCaptureVariant;
 }>;
 
-export type LexicalBoundLaneId = KeywordLexicalLaneId;
-export type LexicalBoundRawKeyKind = "matched_token_count" | "bm25_raw_rank";
-export type LexicalBoundListStatus = "empty" | "complete" | "truncated";
-export type LexicalLaneUniverseApplicability =
+type LexicalBoundLaneId = KeywordLexicalLaneId;
+type LexicalBoundRawKeyKind = "matched_token_count" | "bm25_raw_rank";
+type LexicalBoundListStatus = "empty" | "complete" | "truncated";
+type LexicalLaneUniverseApplicability =
   | Readonly<{ readonly applicable: true }>
   | Readonly<{ readonly applicable: false; readonly reason: "no_tokens_routed" }>;
-export type LexicalLaneUniverseScope = Readonly<{
+type LexicalLaneUniverseScope = Readonly<{
   readonly workspace_id: string;
   readonly object_ids: readonly string[] | null;
   readonly tier: StorageTierType | null;
 }>;
-export type LexicalLaneEvaluatedUniverseWitness = Readonly<{
+type LexicalLaneEvaluatedUniverseWitness = Readonly<{
   readonly producer_id: typeof LEXICAL_LANE_UNIVERSE_PRODUCER_ID;
   readonly lane_id: LexicalBoundLaneId;
   readonly index_kind: LexicalLaneIndexKind;
@@ -160,14 +156,14 @@ export type LexicalLaneEvaluatedUniverseWitness = Readonly<{
   readonly count: number;
   readonly universe_digest: `sha256:${string}`;
 }>;
-export type LexicalUnseenFrontier =
+type LexicalUnseenFrontier =
   | number
   | Readonly<{
     readonly status: "unavailable";
     readonly reason: "producer_order_not_monotone";
   }>;
 
-export interface LexicalBoundLaneRow {
+interface LexicalBoundLaneRow {
   readonly candidate_key: string;
   readonly raw_group_key: number;
   readonly lane_index: number;
@@ -175,7 +171,7 @@ export interface LexicalBoundLaneRow {
   readonly observation_state: "observed";
 }
 
-export interface LexicalBoundLaneCapture {
+interface LexicalBoundLaneCapture {
   readonly lane_id: LexicalBoundLaneId;
   readonly raw_key_kind: LexicalBoundRawKeyKind;
   readonly source_priority: 0 | 1 | 2;
@@ -188,14 +184,14 @@ export interface LexicalBoundLaneCapture {
   readonly evaluated_universe?: LexicalLaneEvaluatedUniverseWitness;
 }
 
-export interface LexicalBoundLaneHit {
+interface LexicalBoundLaneHit {
   readonly lane_id: LexicalBoundLaneId;
   readonly raw_group_key: number;
   readonly grouped_ordinal: number;
   readonly lane_index: number;
 }
 
-export interface LexicalBoundCandidateProvenance {
+interface LexicalBoundCandidateProvenance {
   readonly candidate_key: string;
   readonly lane_hits: readonly LexicalBoundLaneHit[];
   readonly admitted: boolean;
@@ -205,14 +201,14 @@ export interface LexicalBoundCandidateProvenance {
   readonly discarded_lane_ids: readonly LexicalBoundLaneId[];
 }
 
-export interface LexicalBoundPostMergeRow {
+interface LexicalBoundPostMergeRow {
   readonly candidate_key: string;
   readonly normalized_rank: number;
   readonly trigram_rank?: number;
   readonly object_key_rank?: number;
 }
 
-export interface LexicalBoundProducerReceipt {
+interface LexicalBoundProducerReceipt {
   readonly schema_version: 1;
   readonly receipt_id: typeof LEXICAL_RAW_RANK_RECEIPT_ID;
   readonly producer_id: typeof LEXICAL_BOUND_PRODUCER_ID;

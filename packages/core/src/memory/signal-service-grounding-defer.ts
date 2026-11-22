@@ -13,7 +13,8 @@ import {
   buildEventLogRawPayloadSummary,
   buildSignalMaterializationEvent,
   buildSignalWarningMeta,
-  hashAuditText
+  hashAuditText,
+  readSignalRawPayloadDigest
 } from "./signal-service-helpers.js";
 import { stableStringify } from "../shared/stable-stringify.js";
 import {
@@ -37,24 +38,21 @@ const SOURCE_GROUNDING_REDRIVE_LEASE_MS = 5 * 60 * 1000;
 export async function claimSourceGroundingRedrive(input: {
   readonly dependencies: SignalServiceDependencies;
   readonly warn: SignalServiceWarnPort;
-  readonly workspaceId: string;
-  readonly signalId: string;
+  readonly signal: CandidateMemorySignal;
   readonly rawPayload?: CandidateMemorySignal["raw_payload"];
   readonly recoverUnqueued?: true;
 }): Promise<SourceGroundingDeferClaim> {
-  const existing = await input.dependencies.signalRepo.getById(input.signalId);
+  const existing = input.signal;
   const transitions = input.dependencies.sourceGroundingDeferTransitions;
-  if (existing === null || existing.workspace_id !== input.workspaceId) {
-    throw new Error(`Signal ${input.signalId} was not found for grounding re-drive.`);
-  }
   if (input.dependencies.postTriageMaterializer === undefined || transitions === undefined) {
     throw new Error("postTriageMaterializer is required for grounding re-drive.");
   }
   const claimToken = randomUUID();
   const claim = transitions.claimRedrive({
     ...(input.recoverUnqueued ? { recover_unqueued: true as const } : {}),
-    workspace_id: input.workspaceId,
-    signal_id: input.signalId,
+    workspace_id: existing.workspace_id,
+    signal_id: existing.signal_id,
+    expected_raw_payload: existing.raw_payload,
     claim_token: claimToken,
     claim_expires_at: new Date(Date.now() + SOURCE_GROUNDING_REDRIVE_LEASE_MS).toISOString(),
     ...(input.rawPayload === undefined ? {} : {
@@ -62,7 +60,7 @@ export async function claimSourceGroundingRedrive(input: {
       audit_event: buildRedrivePatchAuditEvent(existing, input.rawPayload)
     })
   });
-  if (claim === null) throw redriveClaimConflict(input.signalId);
+  if (claim === null) throw redriveClaimConflict(existing.signal_id);
   await notifyCommittedEventBestEffort(claim.audit_event, input.dependencies, input.warn);
   return claim;
 }
@@ -102,15 +100,6 @@ export async function reconcileStaleSourceGroundingClaim(input: {
   });
   await notifyCommittedEventBestEffort(committed.event, input.dependencies, input.warn);
   return committed.signal;
-}
-
-export function buildSourceGroundingDeferEvent(input: {
-  readonly signal: CandidateMemorySignal;
-  readonly materialization: SignalMaterializationResult;
-}): SourceGroundingDeferEventInput | null {
-  const meta = readSourceGroundingDeferMeta(input.materialization);
-  if (meta === null) return null;
-  return buildDeferredTriageEvent(input.signal, meta);
 }
 
 function buildDeferredTriageEvent(
@@ -170,7 +159,7 @@ function readWritePathDeferMeta(materialization: {
   return { defer_class: SignalDeferClass.WRITE_PATH, deferral: parsed.data };
 }
 
-export function buildRedrivePatchAuditEvent(
+function buildRedrivePatchAuditEvent(
   signal: CandidateMemorySignal,
   rawPayload: CandidateMemorySignal["raw_payload"]
 ): SourceGroundingDeferEventInput {
@@ -188,6 +177,7 @@ export function buildRedrivePatchAuditEvent(
       normalized_fields: {
         source_grounding_redrive_patch: {
           changed_field_count: listChangedRawPayloadKeys(signal.raw_payload, rawPayload).length,
+          previous_raw_payload_sha256: readSignalRawPayloadDigest(buildEventLogRawPayloadSummary(signal.raw_payload)),
           ...buildEventLogRawPayloadSummary(rawPayload)
         }
       }
@@ -205,7 +195,7 @@ function listChangedRawPayloadKeys(
     .sort();
 }
 
-export function buildStaleClaimReconciliationEvent(input: {
+function buildStaleClaimReconciliationEvent(input: {
   readonly signal: CandidateMemorySignal;
   readonly claimTokenFingerprint: string;
   readonly expectedClaimExpiresAt: string;
@@ -386,7 +376,7 @@ function unavailableTransitionError(): CoreError {
   });
 }
 
-function redriveClaimConflict(signalId: string): CoreError {
+export function redriveClaimConflict(signalId: string): CoreError {
   return new CoreError(
     "CONFLICT",
     `Source-grounding defer ${signalId} is not queued, not deferred, or already claimed.`,

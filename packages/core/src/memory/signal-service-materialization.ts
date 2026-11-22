@@ -26,7 +26,9 @@ export async function materializeAcceptedSignal(
   expectedTriageRevision?: number
 ): Promise<SignalServiceReceiveResult> {
   const materializer = dependencies.postTriageMaterializer;
-  if (materializer === undefined) return { signal, triage_result: triageResult, materialization: null };
+  if (materializer === undefined) {
+    return { signal, triage_result: triageResult, materialization: null };
+  }
   if (claimToken === undefined && signal.signal_state !== SignalState.TRIAGED && signal.signal_state !== SignalState.DEFERRED) {
     throw new CoreError("CONFLICT", "Materialization requires an unclaimed triaged or eligible deferred signal.");
   }
@@ -38,18 +40,7 @@ export async function materializeAcceptedSignal(
   });
   if (claimed === null) return await resumeLostClaim(dependencies, warn, signal);
 
-  let result: SignalMaterializationResult;
-  try {
-    result = await materializer.materialize(claimed, context);
-  } catch (error) {
-    result = {
-      signal_id: signal.signal_id, target_kind: "unknown", routing_reason: "materialization_exception",
-      created_objects: [], success: false, error: readErrorMessage(error, "Unknown materialization error")
-    };
-    warn("Signal materialization failed.", buildSignalWarningMeta({
-      phase: "materialization", code: "MATERIALIZER_THROW", detail: result.error
-    }));
-  }
+  const result = await runMaterialization(materializer, claimed, context, warn);
   if (claimToken !== undefined && !result.success) {
     return await recordFailedSourceGroundingRedrive({ dependencies, warn, signal: claimed,
       materialization: result, claimToken });
@@ -69,6 +60,24 @@ export async function materializeAcceptedSignal(
     }));
   }
   return await commitSignalMaterializationOutcome(dependencies, claimed, result);
+}
+
+async function runMaterialization(
+  materializer: NonNullable<SignalServiceDependencies["postTriageMaterializer"]>,
+  signal: CandidateMemorySignal,
+  context: SignalMaterializationContext,
+  warn: SignalServiceWarnPort
+): Promise<SignalMaterializationResult> {
+  try {
+    return await materializer.materialize(signal, context);
+  } catch (error) {
+    const detail = readErrorMessage(error, "Unknown materialization error");
+    warn("Signal materialization failed.", buildSignalWarningMeta({
+      phase: "materialization", code: "MATERIALIZER_THROW", detail
+    }));
+    return { signal_id: signal.signal_id, target_kind: "unknown", routing_reason: "materialization_exception",
+      created_objects: [], success: false, error: detail };
+  }
 }
 
 async function resumeLostClaim(
