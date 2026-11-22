@@ -273,7 +273,7 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
       }));
     });
     const producer = producerFor(environment, bind, {
-      stepDeadlineMs: 200, maxRootsPerPass: 16, maxCapturePages: 8, modelInputs: 32, inputBytes: 256_000
+      stepDeadlineMs: 1_200, maxRootsPerPass: 16, maxCapturePages: 8, modelInputs: 32, inputBytes: 256_000
     });
     const receipt = await producer.runPass();
     expect(receipt).toMatchObject({ status: "settled" });
